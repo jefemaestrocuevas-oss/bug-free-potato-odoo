@@ -1,0 +1,14 @@
+# Ejemplo de entrada para generar_kmz.py (datos ficticios, sólo para probar).
+# Las líneas que empiezan con # se ignoran.
+elemento,tipo,etiqueta,lat,lon,este,norte,zona,color,descripcion
+Terreno ejemplo,poligono,V1,20.593100,-100.392000,,,,rojo,Polígono capturado en lat/lon
+,,V2,20.593100,-100.391000,,,,,
+,,V3,20.592200,-100.391000,,,,,
+,,V4,20.592200,-100.392000,,,,,
+Lote UTM ejemplo,poligono,A,,,354100.00,2277500.00,14Q,amarillo,Polígono capturado en UTM
+,,B,,,354200.00,2277500.00,,,
+,,C,,,354200.00,2277400.00,,,
+,,D,,,354100.00,2277400.00,,,
+Acceso,linea,,20.591800,-100.392500,,,,azul,Camino de acceso
+,,,20.592200,-100.392000,,,,,
+Entrada,punto,,20°35'30.5"N,100°23'32.0"W,,,,verde,Coordenada en grados-minutos-segundos
