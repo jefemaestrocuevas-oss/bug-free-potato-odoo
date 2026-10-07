@@ -1,0 +1,94 @@
+/* Tokens de marca Ópalo (de la presentación "Construyamos Ópalo"). Todo color sale de aquí. */
+:root {
+  --verde: #5c6b3f;
+  --verde-osc: #4a5732;
+  --verde-suave: #e6eadb;
+  --oro: #b08a34;
+  --oro-osc: #8c6a2d;
+  --oro-suave: #f2e8d0;
+  --fondo: #fffdf8;
+  --fondo-alt: #f4f1e8;
+  --superficie: #ffffff;
+  --tinta: #2a2e22;
+  --tinta-2: #5b604f;
+  --tinta-3: #7c816e;
+  --linea: #d8d3c2;
+  --linea-2: #ebe7da;
+  --error: #a5433a;
+  --error-suave: #f4e2dc;
+  --exito: #4f7a3d;
+  --exito-suave: #e3eedb;
+  --alerta: #9a6b12;
+  --alerta-suave: #f6ecd2;
+  --info: #3e6a7c;
+  --info-suave: #dfecf0;
+  --sombra: 0 1px 2px rgba(42, 46, 34, 0.06), 0 8px 24px rgba(42, 46, 34, 0.08);
+  --sombra-fuerte: 0 18px 48px rgba(42, 46, 34, 0.18);
+
+  --display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --cuerpo: 'Nunito Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+
+  --radio: 10px;
+  --radio-sm: 6px;
+  --radio-lg: 18px;
+  --ancho: 1160px;
+  --gutter: 16px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --verde: #a9b98a;
+    --verde-osc: #c3d1a6;
+    --verde-suave: #2f3627;
+    --oro: #d4b46a;
+    --oro-osc: #e2c784;
+    --oro-suave: #3a3222;
+    --fondo: #191b15;
+    --fondo-alt: #22251d;
+    --superficie: #262a20;
+    --tinta: #f1efe6;
+    --tinta-2: #c9c8bb;
+    --tinta-3: #a1a394;
+    --linea: #454a3a;
+    --linea-2: #34382c;
+    --error: #e08a7f;
+    --error-suave: #3d2622;
+    --exito: #9cc483;
+    --exito-suave: #26331f;
+    --alerta: #e0b65a;
+    --alerta-suave: #3a301b;
+    --info: #8fc0d2;
+    --info-suave: #1f3038;
+    --sombra: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+    --sombra-fuerte: 0 18px 48px rgba(0, 0, 0, 0.5);
+    color-scheme: dark;
+  }
+}
+:root[data-theme='dark'] {
+  --verde: #a9b98a;
+  --verde-osc: #c3d1a6;
+  --verde-suave: #2f3627;
+  --oro: #d4b46a;
+  --oro-osc: #e2c784;
+  --oro-suave: #3a3222;
+  --fondo: #191b15;
+  --fondo-alt: #22251d;
+  --superficie: #262a20;
+  --tinta: #f1efe6;
+  --tinta-2: #c9c8bb;
+  --tinta-3: #a1a394;
+  --linea: #454a3a;
+  --linea-2: #34382c;
+  --error: #e08a7f;
+  --error-suave: #3d2622;
+  --exito: #9cc483;
+  --exito-suave: #26331f;
+  --alerta: #e0b65a;
+  --alerta-suave: #3a301b;
+  --info: #8fc0d2;
+  --info-suave: #1f3038;
+  --sombra: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --sombra-fuerte: 0 18px 48px rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
+}

@@ -1,0 +1,117 @@
+{
+  "_nota": "Fuente única de verdad del catálogo de Ópalo. De aquí salen supabase/seed.sql (scripts/generar_seed.mjs) y los datos del modo demostración del sitio. Precio null = 'por confirmar' (no se vende en línea hasta tener precio). duracion_min null = cabe en la sesión estándar de 1 hora. Todo lo marcado como provisional viene de la presentación 'Construyamos Ópalo' y falta confirmarlo con la especialista.",
+  "configuracion": {
+    "nombre_negocio": "Ópalo",
+    "lema": "Todo lo que necesitas para consentirte, en un solo lugar",
+    "telefono_whatsapp": "4421701466",
+    "direccion": "Momentum Centro Sur, Torre 2, Int. 207, Querétaro, Qro.",
+    "zona_horaria": "America/Mexico_City",
+    "duracion_sesion_min": 60,
+    "intervalo_slots_min": 60,
+    "anticipacion_min_horas": 2,
+    "ventana_reserva_dias": 60,
+    "horas_cancelacion": 24,
+    "tolerancia_retraso_min": 15,
+    "edad_minima": 15,
+    "edad_mayoria": 18,
+    "vigencia_creditos_dias": 365
+  },
+  "categorias": [
+    { "slug": "depilacion", "nombre": "Depilación con cera", "descripcion": "Cera premium, técnica cuidadosa y protocolos de higiene en cada sesión.", "orden": 1 },
+    { "slug": "faciales", "nombre": "Faciales", "descripcion": "Limpieza y tratamientos para cada tipo de piel.", "orden": 2 },
+    { "slug": "corporales", "nombre": "Corporales", "descripcion": "Tratamientos corporales por zona.", "orden": 3 },
+    { "slug": "complementos", "nombre": "Complementos", "descripcion": "Se agregan a tu servicio para potenciar el resultado.", "orden": 4 }
+  ],
+  "servicios": [
+    { "slug": "cejas", "categoria": "depilacion", "nombre": "Cejas", "precio": 120, "tipo_consentimiento": "consentimiento_depilacion", "orden": 1 },
+    { "slug": "labio-superior", "categoria": "depilacion", "nombre": "Labio superior (bigote)", "precio": null, "tipo_consentimiento": "consentimiento_depilacion", "orden": 2 },
+    { "slug": "patillas", "categoria": "depilacion", "nombre": "Patillas", "precio": null, "tipo_consentimiento": "consentimiento_depilacion", "orden": 3 },
+    { "slug": "barbilla", "categoria": "depilacion", "nombre": "Barbilla", "precio": null, "tipo_consentimiento": "consentimiento_depilacion", "orden": 4 },
+    { "slug": "pomulos", "categoria": "depilacion", "nombre": "Pómulos", "precio": null, "tipo_consentimiento": "consentimiento_depilacion", "orden": 5 },
+    { "slug": "cara-con-ceja", "categoria": "depilacion", "nombre": "Cara con ceja", "precio": 330, "tipo_consentimiento": "consentimiento_depilacion", "orden": 6 },
+    { "slug": "axilas", "categoria": "depilacion", "nombre": "Axilas", "precio": 120, "tipo_consentimiento": "consentimiento_depilacion", "orden": 7 },
+    { "slug": "brazos-completos", "categoria": "depilacion", "nombre": "Brazos completos", "precio": null, "tipo_consentimiento": "consentimiento_depilacion", "orden": 8 },
+    { "slug": "abdomen", "categoria": "depilacion", "nombre": "Abdomen", "precio": null, "tipo_consentimiento": "consentimiento_depilacion", "orden": 9 },
+    { "slug": "media-espalda", "categoria": "depilacion", "nombre": "Media espalda", "precio": null, "tipo_consentimiento": "consentimiento_depilacion", "orden": 10 },
+    { "slug": "espalda-completa", "categoria": "depilacion", "nombre": "Espalda completa", "precio": null, "tipo_consentimiento": "consentimiento_depilacion", "orden": 11 },
+    { "slug": "cadera", "categoria": "depilacion", "nombre": "Cadera", "precio": 500, "tipo_consentimiento": "consentimiento_depilacion", "orden": 12 },
+    { "slug": "bikini-clasico", "categoria": "depilacion", "nombre": "Bikini clásico", "precio": 220, "tipo_consentimiento": "consentimiento_depilacion", "orden": 13 },
+    { "slug": "bikini-brasileno", "categoria": "depilacion", "nombre": "Bikini brasileño", "precio": 280, "tipo_consentimiento": "consentimiento_depilacion", "orden": 14 },
+    { "slug": "bikini-completo", "categoria": "depilacion", "nombre": "Bikini completo", "precio": 330, "tipo_consentimiento": "consentimiento_depilacion", "orden": 15 },
+    { "slug": "muslos", "categoria": "depilacion", "nombre": "Muslos", "precio": null, "tipo_consentimiento": "consentimiento_depilacion", "orden": 16 },
+    { "slug": "media-pierna", "categoria": "depilacion", "nombre": "Media pierna", "precio": null, "tipo_consentimiento": "consentimiento_depilacion", "orden": 17 },
+    { "slug": "pierna-completa", "categoria": "depilacion", "nombre": "Pierna completa", "precio": 450, "tipo_consentimiento": "consentimiento_depilacion", "orden": 18 },
+
+    { "slug": "limpieza-facial", "categoria": "faciales", "nombre": "Limpieza facial", "precio": null, "tipo_consentimiento": "consentimiento_facial", "orden": 1 },
+    { "slug": "facial-hidratante", "categoria": "faciales", "nombre": "Tratamiento hidratante", "precio": 750, "tipo_consentimiento": "consentimiento_facial", "orden": 2 },
+    { "slug": "facial-despigmentante", "categoria": "faciales", "nombre": "Tratamiento despigmentante", "precio": 750, "tipo_consentimiento": "consentimiento_facial", "orden": 3 },
+    { "slug": "facial-nutritivo", "categoria": "faciales", "nombre": "Tratamiento nutritivo", "precio": 750, "tipo_consentimiento": "consentimiento_facial", "orden": 4 },
+    { "slug": "facial-reafirmante", "categoria": "faciales", "nombre": "Tratamiento reafirmante", "precio": 750, "tipo_consentimiento": "consentimiento_facial", "orden": 5 },
+    { "slug": "facial-anti-acne", "categoria": "faciales", "nombre": "Tratamiento anti acné", "precio": 750, "tipo_consentimiento": "consentimiento_facial", "orden": 6 },
+
+    { "slug": "reductivo-zona", "categoria": "corporales", "nombre": "Reductivo (por zona)", "precio": null, "tipo_consentimiento": "consentimiento_corporal", "orden": 1 },
+
+    { "slug": "shot-hidratante", "categoria": "complementos", "nombre": "Shot hidratante", "descripcion": "Se agrega a tu facial.", "precio": 180, "es_complemento": true, "duracion_min": 0, "tipo_consentimiento": "consentimiento_facial", "orden": 1 },
+    { "slug": "ampolleta-retardadora", "categoria": "complementos", "nombre": "Ampolleta retardadora de vello", "precio": 185, "es_complemento": true, "duracion_min": 0, "tipo_consentimiento": "consentimiento_depilacion", "orden": 2 },
+    { "slug": "ampolleta-despigmentante", "categoria": "complementos", "nombre": "Ampolleta despigmentante", "precio": 235, "es_complemento": true, "duracion_min": 0, "tipo_consentimiento": "consentimiento_facial", "orden": 3 },
+    { "slug": "azuleno", "categoria": "complementos", "nombre": "Azuleno", "precio": 285, "es_complemento": true, "duracion_min": 0, "tipo_consentimiento": "consentimiento_facial", "orden": 4 }
+  ],
+  "paquetes": [
+    { "slug": "express", "nombre": "Paquete Express", "tipo": "combo", "precio": 300, "descripcion": "Ceja, axila y bigote en una sola visita.", "items": [ { "servicio": "cejas", "cantidad": 1 }, { "servicio": "axilas", "cantidad": 1 }, { "servicio": "labio-superior", "cantidad": 1 } ], "orden": 1 },
+    { "slug": "media", "nombre": "Paquete Media", "tipo": "combo", "precio": 520, "descripcion": "Media pierna, axila y bigote. Precio en revisión con la especialista.", "items": [ { "servicio": "media-pierna", "cantidad": 1 }, { "servicio": "axilas", "cantidad": 1 }, { "servicio": "labio-superior", "cantidad": 1 } ], "orden": 2 },
+    { "slug": "rostro", "nombre": "Paquete Rostro", "tipo": "combo", "precio": 420, "descripcion": "Cara con ceja y axila.", "items": [ { "servicio": "cara-con-ceja", "cantidad": 1 }, { "servicio": "axilas", "cantidad": 1 } ], "orden": 3 },
+    { "slug": "total", "nombre": "Paquete Total", "tipo": "combo", "precio": 800, "descripcion": "Pierna completa, bikini brasileño y axila.", "items": [ { "servicio": "pierna-completa", "cantidad": 1 }, { "servicio": "bikini-brasileno", "cantidad": 1 }, { "servicio": "axilas", "cantidad": 1 } ], "orden": 4 }
+  ],
+  "contraindicaciones": [
+    { "clave": "embarazo_lactancia", "pregunta": "¿Estás embarazada o en periodo de lactancia?", "categorias": ["depilacion", "faciales", "corporales", "complementos"], "accion": "revisar", "orden": 1 },
+    { "clave": "isotretinoina", "pregunta": "¿Tomas o tomaste en los últimos 6 meses isotretinoína (Roacután) u otro medicamento para el acné?", "categorias": ["depilacion", "faciales", "complementos"], "accion": "revisar", "orden": 2 },
+    { "clave": "diabetes", "pregunta": "¿Tienes diabetes?", "categorias": ["depilacion", "corporales"], "accion": "revisar", "orden": 3 },
+    { "clave": "varices", "pregunta": "¿Tienes várices en la zona a tratar?", "categorias": ["depilacion", "corporales"], "accion": "revisar", "orden": 4 },
+    { "clave": "piel_asoleada", "pregunta": "¿Te asoleaste o tienes bronceado reciente en la zona (últimos 3 días)?", "categorias": ["depilacion", "faciales"], "accion": "revisar", "orden": 5 },
+    { "clave": "herpes_activo", "pregunta": "¿Tienes herpes activo o alguna herida abierta en la zona?", "categorias": ["depilacion", "faciales", "complementos"], "accion": "revisar", "orden": 6 },
+    { "clave": "anticoagulantes", "pregunta": "¿Tomas anticoagulantes (por ejemplo, para la circulación o el corazón)?", "categorias": ["depilacion", "corporales"], "accion": "revisar", "orden": 7 },
+    { "clave": "laser_reciente", "pregunta": "¿Te hiciste láser o luz pulsada en la zona en las últimas 4 semanas?", "categorias": ["depilacion", "faciales"], "accion": "revisar", "orden": 8 },
+    { "clave": "peeling_botox_reciente", "pregunta": "¿Te hiciste un peeling, botox o rellenos en el rostro en el último mes?", "categorias": ["faciales", "complementos"], "accion": "revisar", "orden": 9 },
+    { "clave": "rosacea_acne_activo", "pregunta": "¿Tienes rosácea o acné inflamado en este momento?", "categorias": ["faciales", "complementos"], "accion": "revisar", "orden": 10 },
+    { "clave": "marcapasos_implantes", "pregunta": "¿Tienes marcapasos, implantes metálicos o prótesis en la zona?", "categorias": ["corporales", "faciales"], "accion": "revisar", "orden": 11 },
+    { "clave": "epilepsia", "pregunta": "¿Tienes epilepsia?", "categorias": ["corporales", "faciales"], "accion": "revisar", "orden": 12 },
+    { "clave": "alergias_productos", "pregunta": "¿Eres alérgica a resinas, miel, colofonia, perfumes o algún cosmético?", "categorias": ["depilacion", "faciales", "corporales", "complementos"], "accion": "precaucion", "orden": 13 }
+  ],
+  "cabinas": [ { "nombre": "Cabina 1" } ],
+  "personal": [
+    { "slug": "especialista", "nombre": "Especialista de Ópalo", "titulo": "Fundadora · Cosmetóloga", "bio": null, "orden": 1,
+      "horarios": [
+        { "dia_semana": 2, "hora_inicio": "10:00", "hora_fin": "19:00" },
+        { "dia_semana": 3, "hora_inicio": "10:00", "hora_fin": "19:00" },
+        { "dia_semana": 4, "hora_inicio": "10:00", "hora_fin": "19:00" },
+        { "dia_semana": 5, "hora_inicio": "10:00", "hora_fin": "19:00" },
+        { "dia_semana": 6, "hora_inicio": "09:00", "hora_fin": "15:00" }
+      ]
+    }
+  ],
+  "categorias_gasto": [
+    { "slug": "renta", "nombre": "Renta del local", "es_fijo": true },
+    { "slug": "mantenimiento-edificio", "nombre": "Cuota de mantenimiento del edificio", "es_fijo": true },
+    { "slug": "luz", "nombre": "Luz (CFE)", "es_fijo": true },
+    { "slug": "agua", "nombre": "Agua", "es_fijo": true },
+    { "slug": "internet", "nombre": "Internet", "es_fijo": true },
+    { "slug": "telefono", "nombre": "Teléfono y WhatsApp", "es_fijo": true },
+    { "slug": "software", "nombre": "Página web, dominio y sistemas", "es_fijo": true },
+    { "slug": "nomina", "nombre": "Pagos al personal", "es_fijo": true },
+    { "slug": "comisiones", "nombre": "Comisiones bancarias y terminal", "es_fijo": false },
+    { "slug": "capacitacion", "nombre": "Cursos y capacitación", "es_fijo": false },
+    { "slug": "publicidad", "nombre": "Publicidad y redes", "es_fijo": false },
+    { "slug": "limpieza", "nombre": "Limpieza y lavandería", "es_fijo": false },
+    { "slug": "reparaciones", "nombre": "Reparaciones y equipo", "es_fijo": false },
+    { "slug": "impuestos", "nombre": "Impuestos y trámites", "es_fijo": false },
+    { "slug": "otros", "nombre": "Otros", "es_fijo": false }
+  ],
+  "gastos_recurrentes": [
+    { "categoria": "renta", "concepto": "Renta mensual del local", "monto_estimado": null, "frecuencia": "mensual", "dia_pago": 1 },
+    { "categoria": "mantenimiento-edificio", "concepto": "Cuota de mantenimiento Momentum", "monto_estimado": null, "frecuencia": "mensual", "dia_pago": 5 },
+    { "categoria": "luz", "concepto": "Recibo de luz CFE", "monto_estimado": null, "frecuencia": "bimestral", "dia_pago": 15 },
+    { "categoria": "agua", "concepto": "Recibo de agua", "monto_estimado": null, "frecuencia": "mensual", "dia_pago": 15 },
+    { "categoria": "internet", "concepto": "Internet", "monto_estimado": null, "frecuencia": "mensual", "dia_pago": 10 },
+    { "categoria": "telefono", "concepto": "Plan del celular de WhatsApp", "monto_estimado": null, "frecuencia": "mensual", "dia_pago": 10 }
+  ]
+}
