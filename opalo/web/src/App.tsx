@@ -1,4 +1,4 @@
-import { BrowserRouter, HashRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, HashRouter, MemoryRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { SesionProvider } from './lib/sesion';
 import { RutaProtegida } from './components/ui/RutaProtegida';
 import { LayoutPublico } from './layouts/LayoutPublico';
@@ -32,8 +32,9 @@ import AdminCatalogo from './pages/admin/Catalogo';
 import AdminEquipo from './pages/admin/EquipoAdmin';
 import AdminPoliticas from './pages/admin/PoliticasAdmin';
 
-// `VITE_ROUTER=hash` (modo demo/vista previa estática) usa rutas con #.
-const Router = import.meta.env.VITE_ROUTER === 'hash' ? HashRouter : BrowserRouter;
+// `VITE_ROUTER=hash` (sitio estático sin reescrituras) usa rutas con #;
+// `VITE_ROUTER=memory` (vista previa incrustada) no toca la URL.
+const Router = import.meta.env.VITE_ROUTER === 'hash' ? HashRouter : import.meta.env.VITE_ROUTER === 'memory' ? MemoryRouter : BrowserRouter;
 
 export function App() {
   return (

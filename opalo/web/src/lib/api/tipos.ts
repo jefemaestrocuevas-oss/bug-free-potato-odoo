@@ -608,7 +608,8 @@ export interface OpaloApi {
 
   // Público
   getConfiguracion(): Promise<Configuracion>;
-  getCatalogo(): Promise<Catalogo>;
+  /** Público: sólo activos. Con incluirInactivos (panel admin) trae todo. */
+  getCatalogo(opciones?: { incluirInactivos?: boolean }): Promise<Catalogo>;
   getEquipo(): Promise<PersonalPublico[]>;
   getPoliticasVigentes(): Promise<Politica[]>;
   getContraindicaciones(): Promise<Contraindicacion[]>;
