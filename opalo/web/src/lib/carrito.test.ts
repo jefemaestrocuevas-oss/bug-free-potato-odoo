@@ -93,7 +93,7 @@ describe('carrito: límite por existencias', () => {
     expect(items).toHaveLength(2);
     expect(items[0].maximo).toBeNull();
     expect(items[1].maximo).toBe(4);
-    expect(items[1].miniatura).toEqual({ categoria: 'vela', color_hex: null, foto_url: null });
+    expect(items[1].miniatura).toEqual({ categoria: 'vela', color_hex: null, foto_url: null, hecho_en_opalo: true });
   });
 
   it('explica en el aviso cuando las existencias no alcanzaron', () => {

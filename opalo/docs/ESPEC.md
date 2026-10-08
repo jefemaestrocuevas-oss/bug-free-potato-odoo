@@ -608,3 +608,17 @@ consentimiento no hay servicio") no cambia.
 `mermas` (−Σ movimientos `merma` × costo + Σ `costo_materiales` de lotes descartados en el
 mes). `utilidad = ingresos − costo_insumos − costo_ventas − mermas − gastos`.
 `flujo` no cambia (las compras de materia prima ya están en `compras`).
+
+### 10.5 Reglas que se fijaron al implementar (ya están en SQL y en el demo)
+- `registrar_lote`: un producto de categoría `jabon` exige fórmula ('Los jabones necesitan una
+  fórmula con sus días de curado; elígela o créala primero.'), para que nunca se libere sin curar.
+- **Existencias**: un pedido en línea no aparta piezas. `crear_pedido` valida existencias al
+  hacerlo y `registrar_pago` las vuelve a validar antes de liquidar (mismos mensajes); si ya no
+  alcanzan, el pago no se registra y el personal avisa a la clienta. (Si Ópalo prefiere apartar
+  piezas al hacer el pedido, hay que redefinir `productos_tienda.stock_disponible`.)
+- §6.1: el GRANT UPDATE de `productos` excluye `stock_actual` e `id`.
+- §9: la firma no se menciona en el discurso de venta ni en la reserva, pero los documentos
+  legales (términos y aviso de privacidad) **sí** dicen que el consentimiento informado se revisa
+  y se firma en el spa: el aviso de privacidad debe declarar que se recaba la firma.
+- Con `firma_en_linea = false`, el nombre de mamá, papá o tutor de una menor que reserva en línea
+  se guarda en las notas de la cita para que el personal lo tenga a la mano en cabina.

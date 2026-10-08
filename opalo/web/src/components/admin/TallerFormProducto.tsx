@@ -413,7 +413,7 @@ export function TallerFormProducto({ producto, productos, onCerrar, onGuardado }
               {fotoVista && fotoFallo !== fotoVista ? (
                 <img src={fotoVista} alt="" onError={() => setFotoFallo(fotoVista)} />
               ) : (
-                <IlustracionProducto categoria={categoria} color={colorOk ? color : null} nombre={nombre} titulo={`Ilustración de ${nombre || 'el producto'}`} />
+                <IlustracionProducto categoria={categoria} color={colorOk ? color : null} nombre={nombre} titulo={`Ilustración de ${nombre || 'el producto'}`} conMarca={hecho} />
               )}
             </div>
             <div className="tal-vista-texto">

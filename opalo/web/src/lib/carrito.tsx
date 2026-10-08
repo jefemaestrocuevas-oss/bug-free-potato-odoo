@@ -9,6 +9,8 @@ export interface MiniaturaProducto {
   categoria: CategoriaProducto;
   color_hex: string | null;
   foto_url: string | null;
+  /** false = producto de otra marca (ilustración sin "ÓPALO"); ausente = de Ópalo */
+  hecho_en_opalo?: boolean;
 }
 
 export interface ItemCarrito {
@@ -110,7 +112,7 @@ function normalizarMiniatura(m: unknown): MiniaturaProducto | null {
   if (typeof o.categoria !== 'string') return null;
   const color = typeof o.color_hex === 'string' && /^#[0-9a-fA-F]{6}$/.test(o.color_hex) ? o.color_hex : null;
   const foto = typeof o.foto_url === 'string' && /^(https?:\/\/|\/(?!\/))/i.test(o.foto_url) ? o.foto_url : null;
-  return { categoria: o.categoria as CategoriaProducto, color_hex: color, foto_url: foto };
+  return { categoria: o.categoria as CategoriaProducto, color_hex: color, foto_url: foto, hecho_en_opalo: o.hecho_en_opalo !== false };
 }
 
 function esProductoConLimite(i: { tipo: TipoItemPedido; maximo?: number | null }): i is { tipo: 'producto'; maximo: number } {

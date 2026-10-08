@@ -380,6 +380,7 @@ function FilaCarrito({ item: i, disponible, producto }: { item: ItemCarrito; dis
               foto={miniatura.foto_url}
               nombre={i.nombre}
               alt=""
+              conMarca={miniatura.hecho_en_opalo !== false}
             />
           </div>
         )}

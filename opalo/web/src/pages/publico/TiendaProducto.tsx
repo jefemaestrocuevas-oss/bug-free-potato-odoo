@@ -79,7 +79,7 @@ function Ficha({ producto: p, productos }: { producto: ProductoTienda; productos
 
         <div className="pf-rejilla">
           <div className="pf-imagen">
-            <ImagenProducto categoria={p.categoria} color={p.color_hex} foto={p.foto_url} nombre={p.nombre} alt={p.nombre} />
+            <ImagenProducto categoria={p.categoria} color={p.color_hex} foto={p.foto_url} nombre={p.nombre} alt={p.nombre} conMarca={p.hecho_en_opalo} />
             {p.hecho_en_opalo && <InsigniaHechoEnOpalo className="pf-insignia" />}
           </div>
 

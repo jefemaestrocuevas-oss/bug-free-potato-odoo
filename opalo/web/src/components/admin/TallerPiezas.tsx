@@ -107,7 +107,7 @@ export function MiniaturaProducto({
   producto,
   className = '',
 }: {
-  producto: Pick<Producto, 'nombre' | 'categoria' | 'foto_url' | 'color_hex'>;
+  producto: Pick<Producto, 'nombre' | 'categoria' | 'foto_url' | 'color_hex'> & { hecho_en_opalo?: boolean };
   className?: string;
 }) {
   const [fallo, setFallo] = useState<string | null>(null);
@@ -117,7 +117,7 @@ export function MiniaturaProducto({
       {foto ? (
         <img src={foto} alt="" loading="lazy" onError={() => setFallo(foto)} />
       ) : (
-        <IlustracionProducto categoria={producto.categoria} color={producto.color_hex} nombre={producto.nombre} />
+        <IlustracionProducto categoria={producto.categoria} color={producto.color_hex} nombre={producto.nombre} conMarca={producto.hecho_en_opalo ?? true} />
       )}
     </span>
   );

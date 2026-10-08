@@ -42,10 +42,13 @@ interface Props {
   className?: string;
   /** Texto alternativo; si se omite, la imagen es decorativa. */
   titulo?: string;
+  /** false: productos de otras marcas, la etiqueta va lisa (sin "ÓPALO"). */
+  conMarca?: boolean;
 }
 
-export function IlustracionProducto({ categoria, color, nombre = '', className = '', titulo }: Props) {
-  const base = valido(color) ? color : COLOR_BASE[categoria] ?? '#e6eadb';
+export function IlustracionProducto({ categoria, color, nombre = '', className = '', titulo, conMarca = true }: Props) {
+  // Sin color: tono de la marca (arena) en lugar de un gris de relleno.
+  const base = valido(color) ? color : COLOR_BASE[categoria] ?? '#d9c193';
   const claro = mezclar(base, '#ffffff', 0.38);
   const oscuro = mezclar(base, '#1d2016', 0.22);
   const tinta = mezclar(base, '#1d2016', 0.55);
@@ -65,10 +68,16 @@ export function IlustracionProducto({ categoria, color, nombre = '', className =
           <ellipse cx="100" cy="58" rx="37" ry="5" fill={claro} />
           {/* etiqueta */}
           <rect x="70" y="84" width="60" height="30" rx="3" fill="#fffdf8" stroke={tinta} strokeOpacity="0.35" />
-          <text x="100" y="98" textAnchor="middle" fontFamily="Cormorant Garamond, Georgia, serif" fontSize="11" fontWeight="600" letterSpacing="2" fill="#5c6b3f">
-            ÓPALO
-          </text>
-          <line x1="80" y1="104" x2="120" y2="104" stroke="#b08a34" strokeWidth="1" />
+          {conMarca ? (
+            <>
+              <text x="100" y="98" textAnchor="middle" fontFamily="Cormorant Garamond, Georgia, serif" fontSize="11" fontWeight="600" letterSpacing="2" fill="#5c6b3f">
+                ÓPALO
+              </text>
+              <line x1="80" y1="104" x2="120" y2="104" stroke="#b08a34" strokeWidth="1" />
+            </>
+          ) : (
+            <line x1="80" y1="99" x2="120" y2="99" stroke={tinta} strokeOpacity="0.4" strokeWidth="1" />
+          )}
           {/* mecha y flama */}
           <line x1="100" y1="58" x2="100" y2="47" stroke="#2a2e22" strokeWidth="2" strokeLinecap="round" />
           <g className="ilustracion-flama">
@@ -95,8 +104,8 @@ export function IlustracionProducto({ categoria, color, nombre = '', className =
           <path d="M34 78 Q34 64 48 62 L152 62 Q166 64 166 78 L166 112 Q166 126 152 126 L48 126 Q34 126 34 112 Z" fill={oscuro} />
           <path d="M34 74 Q34 58 50 56 L150 56 Q166 58 166 74 L166 100 Q166 114 150 114 L50 114 Q34 114 34 100 Z" fill={base} />
           <path d="M44 70 Q44 62 54 62 L146 62 Q156 62 156 70 L156 96 Q156 104 146 104 L54 104 Q44 104 44 96 Z" fill={claro} opacity="0.55" />
-          {/* gema grabada */}
-          <g transform="translate(88 66) scale(0.6)" fill="none" stroke={tinta} strokeOpacity="0.6" strokeWidth="2" strokeLinejoin="round">
+          {/* gema grabada (sólo jabones de Ópalo) */}
+          <g opacity={conMarca ? 1 : 0} transform="translate(88 66) scale(0.6)" fill="none" stroke={tinta} strokeOpacity="0.6" strokeWidth="2" strokeLinejoin="round">
             <path d="M20 2 36 14v20L20 46 4 34V14Z" />
             <path d="M20 2 12 20h16Z" />
             <path d="M12 20 20 46 28 20" />
@@ -112,12 +121,16 @@ export function IlustracionProducto({ categoria, color, nombre = '', className =
       ) : (
         <g>
           {/* frasco genérico */}
-          <rect x="78" y="30" width="44" height="16" rx="4" fill="#8a8f7c" />
+          <rect x="78" y="30" width="44" height="16" rx="4" fill={oscuro} />
           <rect x="66" y="46" width="68" height="90" rx="14" fill={base} />
           <rect x="74" y="78" width="52" height="34" rx="3" fill="#fffdf8" stroke={tinta} strokeOpacity="0.35" />
-          <text x="100" y="99" textAnchor="middle" fontFamily="Cormorant Garamond, Georgia, serif" fontSize="10" fontWeight="600" letterSpacing="2" fill="#5c6b3f">
-            ÓPALO
-          </text>
+          {conMarca ? (
+            <text x="100" y="99" textAnchor="middle" fontFamily="Cormorant Garamond, Georgia, serif" fontSize="10" fontWeight="600" letterSpacing="2" fill="#5c6b3f">
+              ÓPALO
+            </text>
+          ) : (
+            <line x1="84" y1="95" x2="116" y2="95" stroke={tinta} strokeOpacity="0.4" strokeWidth="1" />
+          )}
         </g>
       )}
     </svg>

@@ -31,7 +31,7 @@ export function itemDeProducto(p: ProductoTienda, extra: { cantidad?: number; re
     precio: p.precio_venta,
     detalle: detalleProducto(p) || null,
     maximo: piezasDisponibles(p),
-    miniatura: { categoria: p.categoria, color_hex: colorValido(p.color_hex), foto_url: fotoValida(p.foto_url) },
+    miniatura: { categoria: p.categoria, color_hex: colorValido(p.color_hex), foto_url: fotoValida(p.foto_url), hecho_en_opalo: p.hecho_en_opalo },
     slug: p.slug || p.id,
     ...extra,
   };
@@ -51,6 +51,7 @@ export function ImagenProducto({
   nombre,
   alt,
   className = '',
+  conMarca = true,
 }: {
   categoria: CategoriaProducto;
   color: string | null;
@@ -58,6 +59,8 @@ export function ImagenProducto({
   nombre: string;
   alt: string;
   className?: string;
+  /** false: producto de otra marca (la ilustración va sin "ÓPALO") */
+  conMarca?: boolean;
 }) {
   const [fallo, setFallo] = useState(false);
   const url = fallo ? null : fotoValida(foto);
@@ -69,7 +72,7 @@ export function ImagenProducto({
       {url ? (
         <img src={url} alt={alt} loading="lazy" decoding="async" onError={() => setFallo(true)} />
       ) : (
-        <IlustracionProducto categoria={categoria} color={tono} nombre={nombre} titulo={alt || undefined} />
+        <IlustracionProducto categoria={categoria} color={tono} nombre={nombre} titulo={alt || undefined} conMarca={conMarca} />
       )}
     </div>
   );
@@ -233,7 +236,7 @@ export function TarjetaProducto({ producto: p, nivel = 'h3' }: { producto: Produ
     <article className={`prod-tarjeta ${estado.piezas === 0 ? 'sin-existencias' : ''}`}>
       {/* La imagen también lleva a la ficha; el enlace principal (con foco) es el nombre. */}
       <Link to={ruta} className="prod-tarjeta-imagen" tabIndex={-1}>
-        <ImagenProducto categoria={p.categoria} color={p.color_hex} foto={p.foto_url} nombre={p.nombre} alt={p.nombre} />
+        <ImagenProducto categoria={p.categoria} color={p.color_hex} foto={p.foto_url} nombre={p.nombre} alt={p.nombre} conMarca={p.hecho_en_opalo} />
         {p.hecho_en_opalo && <InsigniaHechoEnOpalo className="prod-tarjeta-insignia" />}
       </Link>
       <div className="prod-tarjeta-cuerpo">
