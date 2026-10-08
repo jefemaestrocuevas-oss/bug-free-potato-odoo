@@ -1,5 +1,5 @@
-// Gráfica de resultados mensuales: barras de ingresos vs egresos (gastos + costo de insumos)
-// y línea de utilidad. SVG propio, colores de tokens (--g-*) definidos en componentes.css.
+// Gráfica de resultados mensuales: barras de ingresos vs egresos (gastos + costo de insumos +
+// costo de ventas + mermas) y línea de utilidad. SVG propio, colores de tokens (--g-*) definidos en componentes.css.
 // La tabla de la página es la vista equivalente en texto (los valores nunca dependen del tooltip).
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ResultadoMensual } from '../../lib/api';
@@ -72,7 +72,7 @@ export function GraficaResultados({ datos, idTabla }: { datos: ResultadoMensual[
     () =>
       [...datos]
         .sort((a, b) => a.mes.localeCompare(b.mes))
-        .map((d) => ({ ...d, egresos: d.gastos + d.costo_insumos })),
+        .map((d) => ({ ...d, egresos: d.gastos + d.costo_insumos + (d.costo_ventas ?? 0) + (d.mermas ?? 0) })),
     [datos],
   );
 
@@ -109,7 +109,7 @@ export function GraficaResultados({ datos, idTabla }: { datos: ResultadoMensual[
           <i className="adm-ley-barra adm-ley-ingresos" /> Ingresos
         </span>
         <span>
-          <i className="adm-ley-barra adm-ley-egresos" /> Egresos (gastos + insumos)
+          <i className="adm-ley-barra adm-ley-egresos" /> Egresos (gastos y costos)
         </span>
         <span>
           <i className="adm-ley-linea" /> Utilidad
@@ -128,7 +128,7 @@ export function GraficaResultados({ datos, idTabla }: { datos: ResultadoMensual[
         >
           <title id={`${id}-t`}>Ingresos, egresos y utilidad por mes</title>
           <desc id={`${id}-d`}>
-            Barras de ingresos y egresos (gastos más costo de insumos) de los últimos {filas.length} meses, con la utilidad como línea.
+            Barras de ingresos y egresos (gastos más costo de insumos, de lo vendido y mermas) de los últimos {filas.length} meses, con la utilidad como línea.
             {idTabla ? ' Los valores exactos están en la tabla de abajo.' : ''}
           </desc>
 

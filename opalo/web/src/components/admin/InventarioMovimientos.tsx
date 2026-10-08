@@ -46,7 +46,7 @@ export function InventarioMovimientos({ productos, version }: { productos: Produ
       {movs.datos &&
         (lista.length === 0 ? (
           <Vacio titulo={movs.datos.length === 0 ? 'Sin movimientos todavía' : 'Ningún movimiento de ese tipo'}>
-            {movs.datos.length === 0 ? 'Aquí verás cada compra, consumo en cita, venta, ajuste y merma.' : 'Prueba con otro tipo o quita el filtro.'}
+            {movs.datos.length === 0 ? 'Aquí verás cada compra, consumo en cita, venta, ajuste, merma y lo que entra y sale con los lotes del taller.' : 'Prueba con otro tipo o quita el filtro.'}
           </Vacio>
         ) : (
           <div className={movs.cargando ? 'inv-recargando' : ''}>

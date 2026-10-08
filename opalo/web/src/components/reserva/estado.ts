@@ -1,7 +1,12 @@
 // Estado del asistente de reserva. Se guarda en sessionStorage para sobrevivir al ir a
-// /entrar y volver (o a una recarga). La ficha de salud, la firma y las notas (texto libre
-// donde puede haber datos de salud) NO se guardan aquí: viven sólo en memoria. Al cerrar
-// sesión se borra todo con borrarEstado().
+// /entrar y volver (o a una recarga). La ficha de salud, la firma (cuando se pide en línea) y las
+// notas (texto libre donde puede haber datos de salud) NO se guardan aquí: viven sólo en memoria.
+// Al cerrar sesión se borra todo con borrarEstado().
+//
+// ESPEC §9: con configuracion.firma_en_linea = false (decisión de Ópalo) el último paso es
+// "Revisa y confirma" y la firma del consentimiento se hace en el spa; con true el último paso
+// vuelve a ser la firma en pantalla. Los dos modos tienen 6 pasos, así que un borrador guardado en
+// un modo se abre sin problema en el otro (el paso 6 es siempre el último).
 import type { CitaDetalle, EstadoCita, FichaSalud, ResultadoReserva, Slot } from '../../lib/api/tipos';
 import type { ItemElegido } from './utilidades';
 
@@ -10,23 +15,30 @@ export const CLAVE_RESERVA = 'opalo-reserva-v1';
 export type Paso = 1 | 2 | 3 | 4 | 5 | 6;
 export const TOTAL_PASOS = 6;
 
-export const NOMBRES_PASOS: Record<Paso, string> = {
+const NOMBRES_BASE: Record<Exclude<Paso, 6>, string> = {
   1: 'Servicios',
   2: 'Día y hora',
   3: 'Tus datos',
   4: 'Ficha de salud',
   5: 'Políticas',
-  6: 'Firma',
 };
 
-export const TITULOS_PASOS: Record<Paso, string> = {
-  1: '¿Qué te vas a hacer?',
-  2: 'Elige día y hora',
-  3: 'Tus datos',
-  4: 'Tu ficha de salud',
-  5: 'Políticas y consentimiento',
-  6: 'Revisa y firma',
-};
+/** Nombres cortos del indicador de pasos. */
+export function nombresPasos(firmaEnLinea: boolean): Record<Paso, string> {
+  return { ...NOMBRES_BASE, 6: firmaEnLinea ? 'Firma' : 'Confirmar' };
+}
+
+/** Títulos de cada paso. */
+export function titulosPasos(firmaEnLinea: boolean): Record<Paso, string> {
+  return {
+    1: '¿Qué te vas a hacer?',
+    2: 'Elige día y hora',
+    3: 'Tus datos',
+    4: 'Tu ficha de salud',
+    5: firmaEnLinea ? 'Políticas y consentimiento' : 'Nuestras políticas',
+    6: firmaEnLinea ? 'Revisa y firma' : 'Revisa y confirma',
+  };
+}
 
 export interface EstadoReserva {
   v: 1;
@@ -44,8 +56,12 @@ export interface EstadoReserva {
   fichaPara: string | null;
   /** ids de las políticas generales pendientes que la clienta marcó. */
   politicasMarcadas: string[];
+  /** Sólo con firma en línea: la clienta marcó que leyó el consentimiento que va a firmar. */
   consentimientoLeido: boolean;
-  /** `${usuario}|${tipos de consentimiento}` con que se completó el paso de políticas. */
+  /**
+   * Con qué se completó el paso de políticas: `${usuario}|${tipos de consentimiento}` con firma en
+   * línea, o `${usuario}|` cuando el consentimiento se firma en el spa (no depende de los servicios).
+   */
   politicasPara: string | null;
   /** Sólo en memoria: no se guarda en sessionStorage. */
   notas: string;
@@ -116,27 +132,46 @@ function esPaso(n: unknown): n is Paso {
   return typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= TOTAL_PASOS;
 }
 
-/** Lee el estado guardado; si no hay o está dañado, uno nuevo. */
+const textoONulo = (v: unknown): string | null => (typeof v === 'string' ? v : null);
+
+function esSlot(s: unknown): s is Slot {
+  if (!s || typeof s !== 'object') return false;
+  const x = s as Record<string, unknown>;
+  return typeof x.inicio === 'string' && typeof x.fin === 'string' && typeof x.personal_id === 'string' && typeof x.personal_nombre === 'string';
+}
+
+/**
+ * Lee el estado guardado; si no hay o está dañado, uno nuevo. Sólo se toman los campos conocidos y con
+ * el tipo correcto: un borrador de otra versión del asistente (p. ej. el que terminaba en el paso de
+ * firma) se abre sin romperse y el asistente regresa al primer paso que falte.
+ */
 export function cargarEstado(): EstadoReserva {
   const base = estadoInicial();
   try {
     const texto = almacen()?.getItem(CLAVE_RESERVA);
     if (!texto) return base;
-    const x = JSON.parse(texto) as Partial<EstadoReserva>;
-    if (!x || x.v !== 1 || !Array.isArray(x.items)) return base;
-    const items = x.items.filter(
+    const x = JSON.parse(texto) as Record<string, unknown> | null;
+    if (!x || typeof x !== 'object' || x.v !== 1 || !Array.isArray(x.items)) return base;
+    const items = (x.items as Partial<ItemElegido>[]).filter(
       (it): it is ItemElegido =>
         !!it && (it.tipo === 'servicio' || it.tipo === 'paquete') && typeof it.id === 'string' && (it.credito_id === null || typeof it.credito_id === 'string'),
     );
     return {
       ...base,
-      ...x,
-      v: 1,
       paso: esPaso(x.paso) ? x.paso : 1,
       items,
-      politicasMarcadas: Array.isArray(x.politicasMarcadas) ? x.politicasMarcadas.filter((i) => typeof i === 'string') : [],
+      fecha: textoONulo(x.fecha),
+      slot: esSlot(x.slot) ? x.slot : null,
+      slotPara: textoONulo(x.slotPara),
+      usuario: textoONulo(x.usuario),
+      datosListos: x.datosListos === true,
+      fichaPara: textoONulo(x.fichaPara),
+      politicasMarcadas: Array.isArray(x.politicasMarcadas) ? x.politicasMarcadas.filter((i): i is string => typeof i === 'string') : [],
+      consentimientoLeido: x.consentimientoLeido === true,
+      politicasPara: textoONulo(x.politicasPara),
       // Las notas no se leen del almacenamiento (versiones anteriores sí las guardaban).
       notas: '',
+      creditoPendiente: textoONulo(x.creditoPendiente),
     };
   } catch {
     return base;

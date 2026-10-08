@@ -1,18 +1,21 @@
-// Piezas compartidas del asistente: indicador de progreso, pie con Atrás/Continuar y resumen vivo.
-import type { ReactNode } from 'react';
+// Piezas compartidas del asistente: indicador de progreso, pie con Atrás/Continuar, resumen vivo,
+// datos finales de la cita y el aviso de error del último paso.
+import { forwardRef, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import type { Slot } from '../../lib/api/tipos';
 import { dinero, duracion, enlaceWhatsApp, fechaLarga, hora } from '../../lib/format';
-import { NOMBRES_PASOS, TOTAL_PASOS, type Paso } from './estado';
+import { useContacto } from '../publico/contacto';
+import { TOTAL_PASOS, type Paso } from './estado';
 import { fechaEnTexto, notaPago, type Total } from './utilidades';
 
-export function Progreso({ paso, maxPaso, onIr }: { paso: Paso; maxPaso: Paso; onIr: (p: Paso) => void }) {
+export function Progreso({ paso, maxPaso, nombres, onIr }: { paso: Paso; maxPaso: Paso; nombres: Record<Paso, string>; onIr: (p: Paso) => void }) {
   const pasos = Array.from({ length: TOTAL_PASOS }, (_, i) => (i + 1) as Paso);
   return (
     <nav className="rv-progreso" aria-label="Pasos de tu reserva">
       <p className="rv-progreso-texto">
         Paso {paso} de {TOTAL_PASOS}
         <span aria-hidden="true"> · </span>
-        <strong>{NOMBRES_PASOS[paso]}</strong>
+        <strong>{nombres[paso]}</strong>
       </p>
       <ol className="rv-progreso-lista">
         {pasos.map((n) => {
@@ -23,7 +26,7 @@ export function Progreso({ paso, maxPaso, onIr }: { paso: Paso; maxPaso: Paso; o
               <span className="rv-progreso-num" aria-hidden="true">
                 {estado === 'hecho' ? '✓' : n}
               </span>
-              <span className="rv-progreso-nombre">{NOMBRES_PASOS[n]}</span>
+              <span className="rv-progreso-nombre">{nombres[n]}</span>
               <span className="sr-only">
                 {estado === 'hecho' ? ', listo' : estado === 'actual' ? ', paso actual' : ', pendiente'}
               </span>
@@ -173,6 +176,83 @@ export function ResumenReserva({
   );
 }
 
+/** Tarjeta "Tu cita" del último paso: servicios, día, hora, quién te atiende, tiempo estimado y total. */
+export function DatosFinales({ lineas, total, duracionMin, slot }: { lineas: LineaResumen[]; total: Total; duracionMin: number | null; slot: Slot }) {
+  return (
+    <section className="tarjeta-plana rv-final" aria-labelledby="rv-final-titulo">
+      <h3 className="rv-subtitulo" id="rv-final-titulo">
+        Tu cita
+      </h3>
+      <dl className="rv-final-datos">
+        <div className="rv-final-servicios">
+          <dt>Servicios</dt>
+          <dd>
+            <ul>
+              {lineas.map((l) => (
+                <li key={l.clave}>
+                  <span>{l.nombre}</span>
+                  <span className="num texto-2">{l.prepagado ? 'Prepagado' : l.precio === null ? 'Por confirmar' : dinero(l.precio)}</span>
+                </li>
+              ))}
+            </ul>
+          </dd>
+        </div>
+        <div>
+          <dt>Día</dt>
+          <dd>{fechaLarga(slot.inicio)}</dd>
+        </div>
+        <div>
+          <dt>Hora</dt>
+          <dd>{hora(slot.inicio)} (hora de Querétaro)</dd>
+        </div>
+        <div>
+          <dt>Te atiende</dt>
+          <dd>{slot.personal_nombre}</dd>
+        </div>
+        <div>
+          <dt>Tiempo estimado</dt>
+          <dd>{duracionMin ? duracion(duracionMin) : 'Calculando…'}</dd>
+        </div>
+        <div className="rv-final-total">
+          <dt>Total estimado</dt>
+          <dd className="num">{total.texto}</dd>
+        </div>
+      </dl>
+      <p className="ayuda">
+        {notaPago(total)}
+        {total.porConfirmar ? ' Los precios por confirmar te los decimos en cabina antes de empezar.' : ''}
+      </p>
+    </section>
+  );
+}
+
+/** Error al confirmar la reserva, con atajos a WhatsApp o a "Mis citas" cuando el mensaje los menciona. */
+export const ErrorReserva = forwardRef<HTMLDivElement, { error: string }>(function ErrorReserva({ error }, ref) {
+  const contacto = useContacto();
+  return (
+    <div className="aviso aviso-error rv-error" role="alert" tabIndex={-1} ref={ref}>
+      <span>
+        {error}
+        {/citas próximas/.test(error) && (
+          <>
+            {' '}
+            <Link to="/cuenta/citas">Ver mis citas</Link>
+          </>
+        )}
+      </span>
+      {/WhatsApp/.test(error) && (
+        <a
+          className="btn btn-secundario btn-sm"
+          href={enlaceWhatsApp(contacto.telefono_whatsapp, 'Hola, Ópalo. Necesito ayuda con mi reserva en línea.')}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Escribir por WhatsApp<span className="sr-only"> (se abre en otra pestaña)</span>
+        </a>
+      )}
+    </div>
+  );
+});
 
 /**
  * Fecha de nacimiento ya registrada: la clienta no la puede cambiar (la corrige el equipo), así que se

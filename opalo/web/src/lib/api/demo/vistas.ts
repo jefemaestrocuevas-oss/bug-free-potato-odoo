@@ -6,10 +6,14 @@ import type {
   Cliente,
   ClienteResumen,
   ConsentimientoFirmado,
+  CostoFormula,
   CostoServicio,
   Credito,
   FichaSalud,
+  Formula,
   GastoPorVencer,
+  Lote,
+  MargenProducto,
   Paquete,
   PedidoDetalle,
   PersonalInterno,
@@ -29,6 +33,8 @@ import type {
   CreditoFila,
   Db,
   FichaFila,
+  FormulaItemFila,
+  LoteFila,
   PaqueteFila,
   PedidoFila,
   PoliticaFila,
@@ -251,21 +257,70 @@ export function productoVista(p: ProductoFila): Producto {
     vendible_en_linea: p.vendible_en_linea,
     activo: p.activo,
     notas: p.notas,
+    slug: p.slug,
+    descripcion: p.descripcion,
+    aroma: p.aroma,
+    ingredientes: p.ingredientes,
+    modo_uso: p.modo_uso,
+    advertencias: p.advertencias,
+    contenido_neto: p.contenido_neto,
+    foto_url: p.foto_url,
+    color_hex: p.color_hex,
+    destacado: p.destacado,
+    hecho_en_opalo: p.hecho_en_opalo,
+    orden: p.orden,
   };
 }
 
+/** Piezas completas disponibles: greatest(floor(stock_actual), 0). */
+export function piezasDisponibles(p: Pick<ProductoFila, 'stock_actual'>): number {
+  return Math.max(Math.floor(redondear(p.stock_actual, 3)), 0);
+}
+
+/**
+ * productos_tienda (ESPEC §10.1): sólo la ficha pública de lo que se vende en línea (nada de costos, mínimo,
+ * proveedor ni notas). proximo_lote_listo = el menor listo_desde de sus lotes en curado.
+ * Orden: destacados primero, categoría, orden y nombre.
+ */
 export function productosTienda(db: Db): ProductoTienda[] {
   return db.productos
     .filter((p) => p.activo && p.vendible_en_linea && p.precio_venta !== null)
-    .sort((a, b) => a.nombre.localeCompare(b.nombre))
-    .map((p) => ({
-      id: p.id,
-      nombre: p.nombre,
-      marca: p.marca,
-      presentacion: p.presentacion,
-      precio_venta: p.precio_venta as number,
-      hay_stock: p.stock_actual > 0,
-    }));
+    .sort(
+      (a, b) =>
+        Number(b.destacado) - Number(a.destacado) ||
+        (a.categoria < b.categoria ? -1 : a.categoria > b.categoria ? 1 : 0) ||
+        a.orden - b.orden ||
+        a.nombre.localeCompare(b.nombre, 'es'),
+    )
+    .map((p) => {
+      const stock = piezasDisponibles(p);
+      const enCurado = db.lotes_produccion
+        .filter((l) => l.producto_id === p.id && l.estado === 'en_curado')
+        .map((l) => l.listo_desde)
+        .sort();
+      return {
+        id: p.id,
+        slug: p.slug,
+        nombre: p.nombre,
+        categoria: p.categoria,
+        marca: p.marca,
+        presentacion: p.presentacion,
+        descripcion: p.descripcion,
+        aroma: p.aroma,
+        ingredientes: p.ingredientes,
+        modo_uso: p.modo_uso,
+        advertencias: p.advertencias,
+        contenido_neto: p.contenido_neto,
+        foto_url: p.foto_url,
+        color_hex: p.color_hex,
+        destacado: p.destacado,
+        hecho_en_opalo: p.hecho_en_opalo,
+        precio_venta: p.precio_venta as number,
+        stock_disponible: stock,
+        hay_stock: stock >= 1,
+        proximo_lote_listo: enCurado[0] ?? null,
+      };
+    });
 }
 
 /**
@@ -393,13 +448,17 @@ export function pagadoPedido(db: Db, pedidoId: string): number {
   );
 }
 
+/** v_pedidos_detalle: sin clienta registrada (venta de mostrador) sale como 'Venta de mostrador'. */
+export const VENTA_DE_MOSTRADOR = 'Venta de mostrador';
+
 export function pedidoDetalle(db: Db, p: PedidoFila): PedidoDetalle {
-  const cliente = db.clientes.find((x) => x.id === p.cliente_id);
+  const cliente = p.cliente_id ? db.clientes.find((x) => x.id === p.cliente_id) : undefined;
+  const items = db.pedido_items.filter((i) => i.pedido_id === p.id);
   return {
     id: p.id,
     folio: p.folio,
     cliente_id: p.cliente_id,
-    cliente_nombre: cliente ? nombreCompleto(cliente) : '',
+    cliente_nombre: cliente ? nombreCompleto(cliente) : VENTA_DE_MOSTRADOR,
     estado: p.estado,
     total: p.total,
     pagado: pagadoPedido(db, p.id),
@@ -407,8 +466,10 @@ export function pedidoDetalle(db: Db, p: PedidoFila): PedidoDetalle {
     notas: p.notas,
     creado_en: p.creado_en,
     pagado_en: p.pagado_en,
-    items: db.pedido_items
-      .filter((i) => i.pedido_id === p.id)
+    origen: p.origen,
+    entregado_en: p.entregado_en,
+    tiene_productos: items.some((i) => i.tipo === 'producto'),
+    items: items
       .map((i) => ({
         tipo: i.tipo,
         descripcion: i.descripcion,
@@ -555,6 +616,10 @@ export function gastosPorVencer(db: Db, hoy: string): GastoPorVencer[] {
 /**
  * v_resultado_mensual de los últimos `meses` meses (incluye el actual), del más antiguo al
  * más reciente; los meses sin actividad aparecen en ceros.
+ *   costo_insumos = −Σ consumo × costo (cabina) · costo_ventas = −Σ venta × costo (productos vendidos)
+ *   mermas = −Σ merma × costo + Σ costo_materiales de los lotes descartados en el mes
+ *   utilidad = ingresos − costo_insumos − costo_ventas − mermas − gastos · flujo = ingresos − compras − gastos
+ * La materia prima de un lote (insumo_produccion) no es gasto del mes: cuenta al venderse o al descartarse.
  */
 export function resultadosMensuales(db: Db, ahora: Date, meses: number): ResultadoMensual[] {
   const n = Math.max(1, Math.min(60, Math.floor(meses) || 1));
@@ -567,6 +632,8 @@ export function resultadosMensuales(db: Db, ahora: Date, meses: number): Resulta
       ingresos: 0,
       propinas: 0,
       costo_insumos: 0,
+      costo_ventas: 0,
+      mermas: 0,
       compras: 0,
       gastos: 0,
       utilidad: 0,
@@ -581,9 +648,18 @@ export function resultadosMensuales(db: Db, ahora: Date, meses: number): Resulta
     f.propinas += p.propina;
   }
   for (const m of db.movimientos_inventario) {
-    if (m.tipo !== 'consumo') continue;
+    if (m.tipo !== 'consumo' && m.tipo !== 'venta' && m.tipo !== 'merma') continue;
     const f = filas.get(mesDeInstante(m.creado_en));
-    if (f) f.costo_insumos += -(m.cantidad * (m.costo_unitario ?? 0));
+    if (!f) continue;
+    const costo = -(m.cantidad * (m.costo_unitario ?? 0));
+    if (m.tipo === 'consumo') f.costo_insumos += costo;
+    else if (m.tipo === 'venta') f.costo_ventas += costo;
+    else f.mermas += costo;
+  }
+  for (const l of db.lotes_produccion) {
+    if (l.estado !== 'descartado' || !l.descartado_en) continue;
+    const f = filas.get(mesDeInstante(l.descartado_en));
+    if (f) f.mermas += l.costo_materiales;
   }
   for (const c of db.compras) {
     const f = filas.get(mesDeFecha(c.fecha));
@@ -598,20 +674,168 @@ export function resultadosMensuales(db: Db, ahora: Date, meses: number): Resulta
     const f = filas.get(mesDeInstante(c.inicio));
     if (f) f.citas_completadas += 1;
   }
-  return [...filas.values()].map((f) => {
-    const ingresos = redondear(f.ingresos, 2);
-    const costo_insumos = redondear(f.costo_insumos, 2);
-    const compras = redondear(f.compras, 2);
-    const gastos = redondear(f.gastos, 2);
-    return {
-      ...f,
-      ingresos,
-      propinas: redondear(f.propinas, 2),
-      costo_insumos,
-      compras,
-      gastos,
-      utilidad: redondear(ingresos - costo_insumos - gastos, 2),
-      flujo: redondear(ingresos - compras - gastos, 2),
-    };
-  });
+  // Como en SQL: cada columna se redondea por separado y utilidad/flujo se calculan con las sumas sin redondear.
+  return [...filas.values()].map((f) => ({
+    ...f,
+    ingresos: redondear(f.ingresos, 2),
+    propinas: redondear(f.propinas, 2),
+    costo_insumos: redondear(f.costo_insumos, 2),
+    costo_ventas: redondear(f.costo_ventas, 2),
+    mermas: redondear(f.mermas, 2),
+    compras: redondear(f.compras, 2),
+    gastos: redondear(f.gastos, 2),
+    utilidad: redondear(f.ingresos - f.costo_insumos - f.costo_ventas - f.mermas - f.gastos, 2),
+    flujo: redondear(f.ingresos - f.compras - f.gastos, 2),
+  }));
+}
+
+// ---------- Taller (ESPEC §10.2) ----------
+
+export function formulasVista(db: Db): Formula[] {
+  return [...db.formulas]
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+    .map((f) => ({
+      id: f.id,
+      producto_id: f.producto_id,
+      nombre: f.nombre,
+      rendimiento_piezas: f.rendimiento_piezas,
+      dias_curado: f.dias_curado,
+      instrucciones: f.instrucciones,
+      activa: f.activa,
+      items: db.formula_items.filter((i) => i.formula_id === f.id).map((i) => ({ insumo_id: i.insumo_id, cantidad: i.cantidad })),
+    }));
+}
+
+/** Costo de un lote completo de la fórmula con los costos ACTUALES de sus insumos (sin redondear). */
+function costoLoteFormula(db: Db, formulaId: string): number | null {
+  const items = db.formula_items.filter((i) => i.formula_id === formulaId);
+  let costo: number | null = null;
+  for (const it of items) {
+    const insumo = db.productos.find((p) => p.id === it.insumo_id);
+    if (insumo) costo = (costo ?? 0) + it.cantidad * costoUnitario(insumo);
+  }
+  return costo;
+}
+
+/** v_costo_formulas: lo que costaría hacer un lote hoy, por pieza y contra el precio de venta. */
+export function costosFormulas(db: Db): CostoFormula[] {
+  const filas: CostoFormula[] = [];
+  for (const f of db.formulas) {
+    const pr = db.productos.find((p) => p.id === f.producto_id);
+    if (!pr) continue;
+    const insumos = db.formula_items
+      .filter((i) => i.formula_id === f.id)
+      .map((i) => ({ i, insumo: db.productos.find((p) => p.id === i.insumo_id) }))
+      .filter((x): x is { i: FormulaItemFila; insumo: ProductoFila } => !!x.insumo)
+      .sort((a, b) => a.insumo.nombre.localeCompare(b.insumo.nombre, 'es') || a.i.insumo_id.localeCompare(b.i.insumo_id))
+      .map(({ i, insumo }) => ({
+        insumo_id: i.insumo_id,
+        nombre: insumo.nombre,
+        unidad_medida: insumo.unidad_medida,
+        cantidad: i.cantidad,
+        costo: redondear(i.cantidad * costoUnitario(insumo), 2),
+      }));
+    const costo = costoLoteFormula(db, f.id) ?? 0;
+    const porPieza = costo / f.rendimiento_piezas;
+    const precio = pr.precio_venta;
+    filas.push({
+      formula_id: f.id,
+      producto_id: f.producto_id,
+      producto_nombre: pr.nombre,
+      nombre: f.nombre,
+      rendimiento_piezas: f.rendimiento_piezas,
+      dias_curado: f.dias_curado,
+      costo_lote: redondear(costo, 2),
+      costo_pieza: redondear(porPieza, 2),
+      precio_venta: precio,
+      margen_pieza: precio === null ? null : redondear(precio - porPieza, 2),
+      margen_pct: precio === null || precio === 0 ? null : redondear(((precio - porPieza) / precio) * 100, 1),
+      insumos,
+    });
+  }
+  return filas.sort((a, b) => a.producto_nombre.localeCompare(b.producto_nombre, 'es') || a.nombre.localeCompare(b.nombre, 'es'));
+}
+
+/** v_lotes. dias_para_listo: días que faltan para terminar el curado (≤ 0 = ya está listo). */
+export function loteVista(db: Db, l: LoteFila, hoy: string): Lote {
+  const pr = db.productos.find((p) => p.id === l.producto_id);
+  return {
+    id: l.id,
+    codigo: l.codigo,
+    producto_id: l.producto_id,
+    producto_nombre: pr?.nombre ?? '',
+    categoria: pr?.categoria ?? 'otro',
+    formula_nombre: l.formula_id ? db.formulas.find((f) => f.id === l.formula_id)?.nombre ?? null : null,
+    elaborado_en: l.elaborado_en,
+    listo_desde: l.listo_desde,
+    dias_para_listo: diasEntre(hoy, l.listo_desde),
+    caduca_en: l.caduca_en,
+    piezas_planeadas: l.piezas_planeadas,
+    piezas_obtenidas: l.piezas_obtenidas,
+    costo_materiales: l.costo_materiales,
+    costo_unitario: l.costo_unitario,
+    estado: l.estado,
+    liberado_en: l.liberado_en,
+    notas: l.notas,
+  };
+}
+
+/** Lotes del más reciente al más antiguo (elaborado_en y código, descendente). */
+export function lotesVista(db: Db, hoy: string, filtro: (l: LoteFila) => boolean = () => true): Lote[] {
+  return db.lotes_produccion
+    .filter(filtro)
+    .sort((a, b) => (a.elaborado_en !== b.elaborado_en ? (a.elaborado_en < b.elaborado_en ? 1 : -1) : a.codigo < b.codigo ? 1 : a.codigo > b.codigo ? -1 : 0))
+    .map((l) => loteVista(db, l, hoy));
+}
+
+/** Lotes en curado que ya cumplieron su fecha (listos para liberar), los más antiguos primero. */
+export function lotesListos(db: Db, hoy: string): Lote[] {
+  return db.lotes_produccion
+    .filter((l) => l.estado === 'en_curado' && l.listo_desde <= hoy)
+    .sort((a, b) => (a.listo_desde !== b.listo_desde ? (a.listo_desde < b.listo_desde ? -1 : 1) : a.codigo < b.codigo ? -1 : a.codigo > b.codigo ? 1 : 0))
+    .map((l) => loteVista(db, l, hoy));
+}
+
+/**
+ * v_margen_productos: lo que se vende (uso venta o ambos), por pieza. costo_unitario: el del producto (último
+ * lote liberado o última compra); si todavía no tiene, el de su fórmula activa más reciente con los costos
+ * actuales de la materia prima. vendidas_30d: piezas vendidas en los últimos 30 días.
+ */
+export function margenesProductos(db: Db, ahora: Date): MargenProducto[] {
+  const desde = ahora.getTime() - 30 * 86_400_000;
+  return db.productos
+    .filter((p) => p.activo && (p.uso === 'venta' || p.uso === 'ambos'))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+    .map((p) => {
+      let costo = costoUnitario(p);
+      if (!costo) {
+        const formula = db.formulas
+          .filter((f) => f.producto_id === p.id && f.activa)
+          .sort((a, b) => (a.actualizado_en !== b.actualizado_en ? (a.actualizado_en < b.actualizado_en ? 1 : -1) : a.id.localeCompare(b.id)))
+          .find((f) => db.formula_items.some((i) => i.formula_id === f.id));
+        const lote = formula ? costoLoteFormula(db, formula.id) : null;
+        costo = formula && lote !== null ? lote / formula.rendimiento_piezas : 0;
+      }
+      const precio = p.precio_venta;
+      return {
+        id: p.id,
+        nombre: p.nombre,
+        categoria: p.categoria,
+        precio_venta: precio,
+        costo_unitario: redondear(costo, 2),
+        margen: precio === null ? null : redondear(precio - costo, 2),
+        margen_pct: precio === null || precio === 0 ? null : redondear(((precio - costo) / precio) * 100, 1),
+        stock_actual: redondear(p.stock_actual, 3),
+        piezas_en_curado: redondear(
+          db.lotes_produccion.filter((l) => l.producto_id === p.id && l.estado === 'en_curado').reduce((s, l) => s + l.piezas_planeadas, 0),
+          2,
+        ),
+        vendidas_30d: redondear(
+          -db.movimientos_inventario
+            .filter((m) => m.producto_id === p.id && m.tipo === 'venta' && ms(m.creado_en) >= desde)
+            .reduce((s, m) => s + m.cantidad, 0),
+          3,
+        ) || 0,
+      };
+    });
 }

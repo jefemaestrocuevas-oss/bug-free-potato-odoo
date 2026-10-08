@@ -88,6 +88,46 @@ export const MSG = {
   soloAjusteMerma: 'Sólo se registran ajustes o mermas.',
   // publicar_politica
   politicaDatos: 'Escribe el título y el contenido de la política.',
+  // Firma en el spa (ESPEC §9)
+  firmaEnSpa: 'La firma se hace en el spa, el día de tu cita.',
+  // Tienda, mostrador y entregas (ESPEC §10.1 y §10.3)
+  noALaVenta: 'Uno de los productos ya no está a la venta.',
+  sinExistencias: (nombre: string) => `Por ahora no tenemos ${nombre}.`,
+  pocasExistencias: (n: number, nombre: string) =>
+    n === 1 ? `Por ahora sólo queda 1 pieza de ${nombre}.` : `Por ahora sólo quedan ${n} piezas de ${nombre}.`,
+  serviciosSinClienta: 'Para vender servicios prepagados elige a la clienta.',
+  pedidoNoPagado: 'Este pedido todavía no está pagado.',
+  pedidoSinProductos: 'Este pedido no tiene productos que entregar.',
+  porPieza: 'Los jabones, velas y sets se manejan por pieza: unidad "pz" y contenido 1.',
+  productoSlug: 'El identificador (slug) del producto debe tener letras o números.',
+  productoSlugUsado: 'Ya existe otro producto con ese identificador (slug).',
+  // Taller: fórmulas y lotes (ESPEC §10.2)
+  insumoNoExiste: (de: 'de la fórmula' | 'del lote') => `Uno de los insumos ${de} no existe.`,
+  insumoPropio: 'Un producto no puede ser insumo de sí mismo: elige la materia prima que lleva.',
+  insumoCantidad: 'La cantidad de cada insumo debe ser mayor a cero.',
+  formulaNombre: 'Escribe el nombre de la fórmula.',
+  formulaNoExiste: 'No encontramos esa fórmula.',
+  formulaProducto: 'Elige el producto que se elabora con esta fórmula.',
+  rendimiento: 'Revisa el rendimiento: cuántas piezas salen de un lote (más de cero).',
+  diasCurado: 'Revisa los días de curado: días enteros, cero o más.',
+  instruccionesLargas: 'Las instrucciones son muy largas; escríbelas en máximo 5000 caracteres.',
+  formulaSinInsumos: 'Agrega al menos un insumo a la fórmula.',
+  formulaOtroProducto: 'Esa fórmula es de otro producto.',
+  loteSinMateriales: 'Elige la fórmula o escribe los insumos que usaste.',
+  jabonSinFormula: 'Los jabones necesitan una fórmula con sus días de curado; elígela o créala primero.',
+  lotePiezasFalta: 'Escribe cuántas piezas salen del lote.',
+  lotePiezas: 'Revisa las piezas: más de cero.',
+  elaboracionFutura: 'La fecha de elaboración no puede ser futura.',
+  caducidad: 'La caducidad debe ser después de la elaboración.',
+  formulaVacia: 'La fórmula no tiene insumos.',
+  noAlcanza: (nombre: string, hay: string, necesita: string, unidad: string) =>
+    `No alcanza el inventario de ${nombre}: hay ${hay} ${unidad} y se necesitan ${necesita} ${unidad}.`,
+  piezasObtenidas: 'Revisa las piezas obtenidas: más de cero.',
+  loteNoExiste: 'No encontramos ese lote.',
+  loteLiberado: 'Este lote ya se liberó.',
+  loteDescartado: 'Este lote se descartó.',
+  loteEnCurado: (fecha: string) => `Este lote sigue en curado hasta el ${fecha}.`,
+  motivoDescarte: 'Escribe por qué se descarta el lote.',
 } as const;
 
 /** Límites del endurecimiento (ESPEC §5.1), iguales a las constantes de SQL. */
@@ -101,6 +141,12 @@ export const LIMITES = {
   campoFicha: 2000,
   jsonFicha: 20_000,
   regaloPara: 120,
+  instrucciones: 5000,
+  /** Piezas de un lote o rendimiento de una fórmula: menos de 100 000 000 (numeric(10,2)). */
+  piezas: 100_000_000,
+  /** Cantidad de un insumo: menos de 1 000 000 000 (numeric(12,3)). */
+  cantidadInsumo: 1_000_000_000,
+  diasCurado: 3650,
 } as const;
 
 /** Mensajes propios de la demo para casos que el contrato no nombra. */

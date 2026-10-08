@@ -349,7 +349,7 @@ export default function Expediente() {
       <Bloque titulo="Consentimientos firmados" id="ex-consentimientos">
         {d.consentimientos.length === 0 ? (
           <Vacio titulo="Aún no ha firmado consentimientos">
-            Se firman al reservar en línea, desde su cuenta o en la tablet de la cabina. Sin consentimiento firmado no hay servicio.
+            Se firman en la tablet de la cabina, antes del servicio (“Firmar en cabina” en la agenda). Sin consentimiento firmado no hay servicio.
           </Vacio>
         ) : (
           <ul className="adm-ex-consentimientos">

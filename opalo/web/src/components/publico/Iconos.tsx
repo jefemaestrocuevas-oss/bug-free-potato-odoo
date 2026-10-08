@@ -200,6 +200,27 @@ export const IconoImprimir = (p: P) => (
   </Svg>
 );
 
+/** Barra de jabón con burbujas. */
+export const IconoJabon = (p: P) => (
+  <Svg {...p}>
+    <rect x="3.5" y="10" width="15" height="9" rx="3" />
+    <path d="M6.5 13.5h6" />
+    <circle cx="15.5" cy="5.5" r="2" />
+    <circle cx="19.5" cy="8" r="1.2" />
+    <circle cx="11" cy="6.5" r="1.1" />
+  </Svg>
+);
+
+/** Vela en vaso con flama. */
+export const IconoVela = (p: P) => (
+  <Svg {...p}>
+    <path d="M6.5 11h11v8.5a1.5 1.5 0 0 1-1.5 1.5H8a1.5 1.5 0 0 1-1.5-1.5Z" />
+    <path d="M12 11V8.5" />
+    <path d="M12 2.5c1.6 1.8 2 3 0 4.6-2-1.6-1.6-2.8 0-4.6Z" />
+    <path d="M6.5 14.5h11" />
+  </Svg>
+);
+
 /** Ícono por categoría del catálogo (por slug; si no se conoce, la gema de brillo). */
 export function IconoCategoria({ slug, tam = 26 }: { slug: string; tam?: number }) {
   if (slug.includes('depil')) return <IconoHoja tam={tam} />;

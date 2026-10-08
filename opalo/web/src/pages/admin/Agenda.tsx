@@ -436,7 +436,7 @@ function VistaSemana({
                         <span className="adm-semana-cita-pills">
                           <PillEstadoCita estado={c.estado} />
                           {c.consentimientos_firmados === 0 && c.estado !== 'cancelada' && c.estado !== 'no_asistio' && c.estado !== 'completada' && (
-                            <span className="pill pill-error">Sin firma</span>
+                            <span className="pill pill-error">Falta firma</span>
                           )}
                         </span>
                       </button>

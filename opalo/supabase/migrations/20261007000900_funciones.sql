@@ -593,16 +593,20 @@ begin
 end;
 $$;
 
--- R4 · la clienta reserva (con firma del consentimiento)
+-- R4 · la clienta reserva
 -- Además de R4: necesita su fecha de nacimiento (decide edad mínima y tutor) y puede tener a lo
 -- más 3 citas próximas activas (pendiente o confirmada) para que una sola cuenta no acapare la
 -- agenda; para más, el personal le agenda por WhatsApp. Antes de configuracion.fecha_apertura no
 -- se reserva en línea (vale para cualquier cuenta; el personal agenda con reservar_cita_staff).
+-- Firma (ESPEC §9): con configuracion.firma_en_linea = false (lo de Ópalo) la firma se hace en el
+-- spa, en la tablet de la cabina: p_nombre_firmante y p_firma_svg se ignoran (no se guardan) y la
+-- cita nace sin consentimientos ("falta firma"; R6 no deja iniciarla hasta que se firme). Con true
+-- la firma es parte de la reserva: se exige, se valida y se crea un consentimiento por tipo.
 create or replace function public.reservar_cita(
   p_items jsonb,
   p_inicio timestamptz,
-  p_nombre_firmante text,
-  p_firma_svg text,
+  p_nombre_firmante text default null,
+  p_firma_svg text default null,
   p_personal_id uuid default null,
   p_notas text default null,
   p_tutor_nombre text default null,
@@ -619,6 +623,7 @@ declare
   v_tz      text := coalesce(v_cfg.zona_horaria, 'America/Mexico_City');
   v_cliente public.clientes;
   v_edad    int;
+  v_firma_en_linea boolean := coalesce(v_cfg.firma_en_linea, false);
   c_max_citas constant int := 3;
 begin
   if auth.uid() is null then
@@ -664,7 +669,9 @@ begin
       errcode = 'P0001';
   end if;
 
-  perform public.validar_firma(p_nombre_firmante, p_firma_svg, p_tutor_nombre);
+  if v_firma_en_linea then
+    perform public.validar_firma(p_nombre_firmante, p_firma_svg, p_tutor_nombre);
+  end if;
 
   if (select count(*) from public.citas c
        where c.cliente_id = v_cliente.id
@@ -676,8 +683,11 @@ begin
       errcode = 'P0001';
   end if;
 
+  -- Sin firma en línea, lo que llegue de firma se descarta: la cita nace sin consentimientos.
   return public.crear_cita_interna(v_cliente.id, p_items, p_inicio, p_personal_id, 'web', p_notas, false,
-                                   p_nombre_firmante, p_firma_svg, p_tutor_nombre, p_user_agent);
+                                   case when v_firma_en_linea then p_nombre_firmante end,
+                                   case when v_firma_en_linea then p_firma_svg end,
+                                   p_tutor_nombre, p_user_agent);
 end;
 $$;
 
@@ -722,9 +732,11 @@ begin
 end;
 $$;
 
--- R6 · firma posterior (portal de la clienta o tablet de la cabina)
--- Desde su portal, la clienta necesita su fecha de nacimiento (decide si firma con tutor). En la
--- tablet de la cabina, el personal verifica la edad en persona.
+-- R6 · firma posterior (tablet de la cabina o portal de la clienta)
+-- En la tablet de la cabina firma la clienta y la sesión es del personal: siempre se puede (canal
+-- 'cabina'); el personal verifica la edad en persona. Desde su portal (sesión de la propia clienta)
+-- sólo se firma si configuracion.firma_en_linea = true (ESPEC §9; si no: 'La firma se hace en el
+-- spa, el día de tu cita.'), y necesita su fecha de nacimiento (decide si firma con tutor).
 create or replace function public.firmar_consentimiento_cita(
   p_cita_id uuid,
   p_nombre_firmante text,
@@ -745,7 +757,7 @@ declare
   v_cliente  public.clientes;
   v_ficha    uuid;
   v_es_menor boolean := false;
-  v_propia   boolean;
+  v_portal   boolean;     -- firma la clienta con su propia sesión (no en la tablet del personal)
 begin
   if auth.uid() is null then
     raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
@@ -755,15 +767,18 @@ begin
     raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
   end if;
   select * into v_cliente from public.clientes c where c.id = v_cita.cliente_id;
-  v_propia := v_cliente.usuario_id is not distinct from auth.uid();
-  if not public.es_personal() and not v_propia then
+  v_portal := not public.es_personal();
+  if v_portal and v_cliente.usuario_id is distinct from auth.uid() then
     raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  if v_portal and not coalesce(v_cfg.firma_en_linea, false) then
+    raise exception using message = 'La firma se hace en el spa, el día de tu cita.', errcode = 'P0001';
   end if;
   if v_cita.estado in ('cancelada', 'no_asistio') then
     raise exception using message = 'Esta cita está cancelada.', errcode = 'P0001';
   end if;
 
-  if v_cliente.fecha_nacimiento is null and v_propia then
+  if v_cliente.fecha_nacimiento is null and v_portal then
     raise exception using message = 'Para firmar necesitamos tu fecha de nacimiento.', errcode = 'P0001';
   end if;
   if v_cliente.fecha_nacimiento is not null then
@@ -790,7 +805,7 @@ begin
   select v_cita.cliente_id, v_cita.id, po.id, v_ficha, btrim(p_nombre_firmante), p_firma_svg,
          v_es_menor, case when v_es_menor then nullif(btrim(p_tutor_nombre), '') end,
          public.ip_solicitud(), left(p_user_agent, 1000),
-         auth.uid(), case when v_propia then 'portal' else 'cabina' end
+         auth.uid(), case when v_portal then 'portal' else 'cabina' end
     from public.politicas po
    where po.activa
      and po.tipo in (
@@ -1016,66 +1031,41 @@ end;
 $$;
 
 -- -----------------------------------------------------------------------------
--- R8 · pedidos (tienda en línea; se paga en el spa o por transferencia)
--- La clienta elige efectivo, tarjeta o transferencia (cortesía y Mercado Pago los registra el
--- personal al cobrar). Cantidades enteras de 1 a 99 por línea y a lo más 5 pedidos por pagar.
+-- Renglones de un pedido (crear_pedido y venta_mostrador)
+-- p_items = [{tipo: servicio|paquete|producto, id, cantidad (entero 1–99; falta = 1), regalo_para}]
+-- Devuelve [{tipo, id, cantidad, descripcion, precio, regalo_para}] con precios del servidor.
+--   En línea (p_mostrador = false): servicio activo, disponible, vendible_en_linea y con precio;
+--     paquete activo con precio; producto activo, vendible_en_linea y con precio_venta.
+--   En mostrador: lo mismo pero sin exigir vendible_en_linea (en el spa se vende también lo que
+--     no está en la tienda en línea).
 -- -----------------------------------------------------------------------------
-create or replace function public.crear_pedido(
-  p_items jsonb,
-  p_metodo_pago public.metodo_pago default 'efectivo',
-  p_notas text default null
-)
+create or replace function public.lineas_pedido_interna(p_items jsonb, p_mostrador boolean)
 returns jsonb
 language plpgsql
-volatile
+stable
 security definer
 set search_path = public, extensions, pg_temp
 as $$
 declare
-  v_cliente   uuid;
   v_item      jsonb;
   v_tipo      text;
   v_id        uuid;
   v_cantidad  int;
+  v_cant_num  numeric;
   v_regalo    text;
   v_desc      text;
   v_precio    numeric(10,2);
-  v_pedido    uuid;
-  v_folio     text;
-  v_total     numeric(10,2) := 0;
   v_lineas    jsonb := '[]'::jsonb;
-  v_cant_num  numeric;
-  c_max_pendientes constant int := 5;
+  v_msg_no    text := case when p_mostrador then 'Uno de los productos ya no está a la venta.'
+                           else 'Uno de los productos ya no está disponible para compra en línea.' end;
 begin
-  if auth.uid() is null then
-    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
-  end if;
-  v_cliente := public.mi_cliente_id();
-  if v_cliente is null then
-    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
-  end if;
   if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
     raise exception using message = 'Tu carrito está vacío.', errcode = 'P0001';
-  end if;
-  if coalesce(p_metodo_pago, 'efectivo') not in ('efectivo', 'tarjeta', 'transferencia') then
-    raise exception using message = 'Elige efectivo, tarjeta o transferencia.', errcode = 'P0001';
-  end if;
-  if length(btrim(p_notas)) > 1000 then
-    raise exception using message = 'Las notas son muy largas; escríbelas en máximo 1000 caracteres.', errcode = 'P0001';
-  end if;
-
-  -- for update: dos pedidos simultáneos de la misma clienta se forman (límite de pendientes).
-  perform 1 from public.clientes c where c.id = v_cliente for update;
-  if (select count(*) from public.pedidos pe
-       where pe.cliente_id = v_cliente and pe.estado = 'pendiente_pago') >= c_max_pendientes then
-    raise exception using
-      message = format('Tienes %s pedidos por pagar; págalos o cancela alguno antes de hacer otro.', c_max_pendientes),
-      errcode = 'P0001';
   end if;
 
   for v_item in select e.value from jsonb_array_elements(p_items) as e(value) loop
     if jsonb_typeof(v_item) <> 'object' then
-      raise exception using message = 'Uno de los productos ya no está disponible para compra en línea.', errcode = 'P0001';
+      raise exception using message = v_msg_no, errcode = 'P0001';
     end if;
     v_tipo := v_item ->> 'tipo';
     begin
@@ -1110,7 +1100,8 @@ begin
     if v_tipo = 'servicio' then
       select s.nombre, s.precio into v_desc, v_precio
         from public.servicios s
-       where s.id = v_id and s.activo and s.etapa = 'disponible' and s.vendible_en_linea and s.precio is not null;
+       where s.id = v_id and s.activo and s.etapa = 'disponible' and s.precio is not null
+         and (p_mostrador or s.vendible_en_linea);
     elsif v_tipo = 'paquete' then
       select p.nombre, p.precio into v_desc, v_precio
         from public.paquetes p
@@ -1118,22 +1109,86 @@ begin
     elsif v_tipo = 'producto' then
       select pr.nombre || coalesce(' · ' || pr.presentacion, ''), pr.precio_venta into v_desc, v_precio
         from public.productos pr
-       where pr.id = v_id and pr.activo and pr.vendible_en_linea and pr.precio_venta is not null;
+       where pr.id = v_id and pr.activo and pr.precio_venta is not null
+         and (p_mostrador or pr.vendible_en_linea);
     end if;
 
     if v_desc is null or v_precio is null then
-      raise exception using message = 'Uno de los productos ya no está disponible para compra en línea.', errcode = 'P0001';
+      raise exception using message = v_msg_no, errcode = 'P0001';
     end if;
 
-    v_total := v_total + v_cantidad * v_precio;
     v_lineas := v_lineas || jsonb_build_array(jsonb_build_object(
       'tipo', v_tipo, 'id', v_id, 'cantidad', v_cantidad, 'descripcion', v_desc,
       'precio', v_precio, 'regalo_para', v_regalo));
   end loop;
+  return v_lineas;
+end;
+$$;
 
-  insert into public.pedidos (cliente_id, total, metodo_pago_preferido, notas)
-  values (v_cliente, v_total, coalesce(p_metodo_pago, 'efectivo'), nullif(btrim(p_notas), ''))
-  returning id, folio into v_pedido, v_folio;
+-- Existencias de los productos de unos renglones (ESPEC §10.3). Se cuentan piezas completas
+-- (floor del stock) y se suman los renglones repetidos del mismo producto.
+-- p_bloquear: toma los productos "for update" (venta_mostrador descuenta en el acto).
+create or replace function public.validar_existencias_interna(p_lineas jsonb, p_bloquear boolean)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  r       record;
+  v_prod  public.productos;
+  v_hay   int;
+begin
+  for r in
+    select (l.value ->> 'id')::uuid as id, sum((l.value ->> 'cantidad')::int) as cantidad
+      from jsonb_array_elements(coalesce(p_lineas, '[]'::jsonb)) as l(value)
+     where l.value ->> 'tipo' = 'producto'
+     group by 1
+     order by 1
+  loop
+    if p_bloquear then
+      select * into v_prod from public.productos pr where pr.id = r.id for update;
+    else
+      select * into v_prod from public.productos pr where pr.id = r.id;
+    end if;
+    v_hay := greatest(floor(v_prod.stock_actual), 0)::int;
+    if r.cantidad > v_hay then
+      raise exception using
+        message = case
+                    when v_hay = 0 then format('Por ahora no tenemos %s.', v_prod.nombre)
+                    when v_hay = 1 then format('Por ahora sólo queda 1 pieza de %s.', v_prod.nombre)
+                    else format('Por ahora sólo quedan %s piezas de %s.', v_hay, v_prod.nombre)
+                  end,
+        errcode = 'P0001';
+    end if;
+  end loop;
+end;
+$$;
+
+-- Guarda pedido + renglones (precios ya validados por lineas_pedido_interna). Devuelve el id.
+create or replace function public.insertar_pedido_interna(
+  p_cliente_id uuid,
+  p_lineas jsonb,
+  p_metodo public.metodo_pago,
+  p_notas text,
+  p_origen text
+)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_pedido uuid;
+begin
+  insert into public.pedidos (cliente_id, total, metodo_pago_preferido, notas, origen)
+  select p_cliente_id,
+         coalesce(sum((l.value ->> 'cantidad')::int * (l.value ->> 'precio')::numeric), 0),
+         p_metodo, nullif(btrim(p_notas), ''), p_origen
+    from jsonb_array_elements(p_lineas) as l(value)
+  returning id into v_pedido;
 
   insert into public.pedido_items (pedido_id, tipo, servicio_id, paquete_id, producto_id, descripcion,
                                    cantidad, precio_unitario, regalo_para)
@@ -1146,9 +1201,163 @@ begin
          (l.value ->> 'cantidad')::int,
          (l.value ->> 'precio')::numeric,
          l.value ->> 'regalo_para'
-    from jsonb_array_elements(v_lineas) as l(value);
+    from jsonb_array_elements(p_lineas) as l(value);
+  return v_pedido;
+end;
+$$;
 
-  return jsonb_build_object('id', v_pedido, 'folio', v_folio, 'total', v_total);
+-- -----------------------------------------------------------------------------
+-- R8 · pedidos (tienda en línea; se paga en el spa o por transferencia)
+-- La clienta elige efectivo, tarjeta o transferencia (cortesía y Mercado Pago los registra el
+-- personal al cobrar). Cantidades enteras de 1 a 99 por línea y a lo más 5 pedidos por pagar.
+-- Los productos deben tener existencias al pedir (ESPEC §10.3); se descuentan al pagarse.
+-- -----------------------------------------------------------------------------
+create or replace function public.crear_pedido(
+  p_items jsonb,
+  p_metodo_pago public.metodo_pago default 'efectivo',
+  p_notas text default null
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_cliente   uuid;
+  v_lineas    jsonb;
+  v_id        uuid;
+  v_pedido    public.pedidos;
+  c_max_pendientes constant int := 5;
+begin
+  if auth.uid() is null then
+    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+  v_cliente := public.mi_cliente_id();
+  if v_cliente is null then
+    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
+    raise exception using message = 'Tu carrito está vacío.', errcode = 'P0001';
+  end if;
+  if coalesce(p_metodo_pago, 'efectivo') not in ('efectivo', 'tarjeta', 'transferencia') then
+    raise exception using message = 'Elige efectivo, tarjeta o transferencia.', errcode = 'P0001';
+  end if;
+  if length(btrim(p_notas)) > 1000 then
+    raise exception using message = 'Las notas son muy largas; escríbelas en máximo 1000 caracteres.', errcode = 'P0001';
+  end if;
+
+  -- for update: dos pedidos simultáneos de la misma clienta se forman (límite de pendientes).
+  perform 1 from public.clientes c where c.id = v_cliente for update;
+  if (select count(*) from public.pedidos pe
+       where pe.cliente_id = v_cliente and pe.estado = 'pendiente_pago') >= c_max_pendientes then
+    raise exception using
+      message = format('Tienes %s pedidos por pagar; págalos o cancela alguno antes de hacer otro.', c_max_pendientes),
+      errcode = 'P0001';
+  end if;
+
+  v_lineas := public.lineas_pedido_interna(p_items, false);
+  perform public.validar_existencias_interna(v_lineas, false);
+
+  v_id := public.insertar_pedido_interna(v_cliente, v_lineas, coalesce(p_metodo_pago, 'efectivo'), p_notas, 'web');
+  select * into v_pedido from public.pedidos pe where pe.id = v_id;
+
+  return jsonb_build_object('id', v_pedido.id, 'folio', v_pedido.folio, 'total', v_pedido.total);
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Venta en mostrador (ESPEC §10.3, personal): la clienta paga y se lleva lo que compró en el acto.
+-- Mismos renglones que crear_pedido; servicios y paquetes (que se vuelven créditos) exigen clienta;
+-- los productos, existencias. Crea el pedido (origen 'mostrador'), registra el pago completo
+-- (también cortesía, que no cuenta como ingreso), lo liquida (créditos y salida de productos con
+-- su costo) y, si lleva productos, lo marca entregado.
+-- -----------------------------------------------------------------------------
+create or replace function public.venta_mostrador(
+  p_items jsonb,
+  p_metodo public.metodo_pago,
+  p_cliente_id uuid default null,
+  p_propina numeric default 0,
+  p_notas text default null
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_lineas  jsonb;
+  v_id      uuid;
+  v_pedido  public.pedidos;
+begin
+  if not public.es_personal() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  if p_metodo is null then
+    raise exception using message = 'Elige el método de pago.', errcode = 'P0001';
+  end if;
+  if coalesce(p_propina, 0) < 0 then
+    raise exception using message = 'La propina no puede ser negativa.', errcode = 'P0001';
+  end if;
+  if length(btrim(p_notas)) > 1000 then
+    raise exception using message = 'Las notas son muy largas; escríbelas en máximo 1000 caracteres.', errcode = 'P0001';
+  end if;
+  if p_cliente_id is not null and not exists (select 1 from public.clientes c where c.id = p_cliente_id) then
+    raise exception using message = 'No encontramos a esa clienta.', errcode = 'P0001';
+  end if;
+
+  v_lineas := public.lineas_pedido_interna(p_items, true);
+  if p_cliente_id is null
+     and exists (select 1 from jsonb_array_elements(v_lineas) as l(value) where l.value ->> 'tipo' <> 'producto') then
+    raise exception using message = 'Para vender servicios prepagados elige a la clienta.', errcode = 'P0001';
+  end if;
+  perform public.validar_existencias_interna(v_lineas, true);
+
+  v_id := public.insertar_pedido_interna(p_cliente_id, v_lineas, p_metodo, p_notas, 'mostrador');
+  select * into v_pedido from public.pedidos pe where pe.id = v_id;
+  if v_pedido.total <= 0 then
+    raise exception using message = 'El monto debe ser mayor a cero.', errcode = 'P0001';
+  end if;
+
+  insert into public.pagos (pedido_id, monto, propina, metodo, recibido_por)
+  values (v_pedido.id, v_pedido.total, round(coalesce(p_propina, 0), 2), p_metodo, auth.uid());
+  perform public.liquidar_pedido_interna(v_pedido.id);
+
+  update public.pedidos pe
+     set entregado_en = now()
+   where pe.id = v_pedido.id
+     and exists (select 1 from public.pedido_items pi where pi.pedido_id = pe.id and pi.tipo = 'producto');
+
+  return jsonb_build_object('id', v_pedido.id, 'folio', v_pedido.folio, 'total', v_pedido.total);
+end;
+$$;
+
+-- Entrega en el spa de un pedido pagado con productos (personal). Marcarlo otra vez no cambia la fecha.
+create or replace function public.marcar_entregado(p_pedido_id uuid)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_pedido public.pedidos;
+begin
+  if not public.es_personal() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  select * into v_pedido from public.pedidos p where p.id = p_pedido_id for update;
+  if not found then
+    raise exception using message = 'No encontramos ese pedido.', errcode = 'P0001';
+  end if;
+  if v_pedido.estado <> 'pagado' then
+    raise exception using message = 'Este pedido todavía no está pagado.', errcode = 'P0001';
+  end if;
+  if not exists (select 1 from public.pedido_items pi where pi.pedido_id = p_pedido_id and pi.tipo = 'producto') then
+    raise exception using message = 'Este pedido no tiene productos que entregar.', errcode = 'P0001';
+  end if;
+  update public.pedidos set entregado_en = coalesce(entregado_en, now()) where id = p_pedido_id;
 end;
 $$;
 
@@ -1166,8 +1375,11 @@ begin
     raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
   end if;
   select * into v_pedido from public.pedidos p where p.id = p_pedido_id for update;
+  -- Un pedido sin clienta (venta de mostrador) sólo lo toca el personal: null no es "distinto" de una
+  -- sesión sin ficha, así que se revisa aparte.
   if not found
-     or (not public.es_personal() and v_pedido.cliente_id is distinct from public.mi_cliente_id()) then
+     or (not public.es_personal()
+         and (v_pedido.cliente_id is null or v_pedido.cliente_id is distinct from public.mi_cliente_id())) then
     raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
   end if;
   if v_pedido.estado <> 'pendiente_pago' then
@@ -1200,6 +1412,13 @@ begin
   if v_pedido.estado <> 'pendiente_pago' then
     return;
   end if;
+  -- Un pedido en línea no aparta piezas: si mientras tanto se vendieron, no se cobra ni se entrega lo que
+  -- ya no hay (el inventario nunca queda en negativo). Mismos mensajes que crear_pedido.
+  perform public.validar_existencias_interna(
+    (select coalesce(jsonb_agg(jsonb_build_object('tipo', 'producto', 'id', pi.producto_id, 'cantidad', pi.cantidad)), '[]'::jsonb)
+       from public.pedido_items pi
+      where pi.pedido_id = p_pedido_id and pi.tipo = 'producto' and pi.producto_id is not null),
+    true);
   update public.pedidos set estado = 'pagado', pagado_en = now() where id = p_pedido_id;
 
   for v_it in
@@ -1865,5 +2084,425 @@ begin
   insert into public.recetas_servicio (servicio_id, producto_id, cantidad, notas)
   select p_servicio_id, e.key::uuid, (e.value ->> 'cantidad')::numeric, e.value ->> 'notas'
     from jsonb_each(v_receta) as e(key, value);
+end;
+$$;
+
+-- =============================================================================
+-- Taller: fórmulas y lotes de producción (ESPEC §10.2, personal)
+-- Los productos terminados (jabon, vela, set) se manejan por pieza; la materia prima, en su
+-- unidad (g, ml, pz). Un lote consume materia prima al registrarse (insumo_produccion, con su
+-- costo), queda en curado y, al liberarse, sus piezas entran al inventario (produccion) con el
+-- costo real por pieza, que pasa a ser el costo del producto.
+-- =============================================================================
+
+-- Insumos [{insumo_id, cantidad}] → {insumo_id: cantidad} (cantidades > 0, repetidos se suman).
+-- p_producto_id: el producto que se elabora (no puede ser su propio insumo).
+create or replace function public.insumos_interna(p_items jsonb, p_producto_id uuid, p_que text)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_item    jsonb;
+  v_insumo  uuid;
+  v_cant    numeric;
+  v_res     jsonb := '{}'::jsonb;
+begin
+  for v_item in select e.value from jsonb_array_elements(p_items) as e(value) loop
+    v_insumo := null;
+    if jsonb_typeof(v_item) = 'object' then
+      begin
+        v_insumo := nullif(btrim(v_item ->> 'insumo_id'), '')::uuid;
+      exception when invalid_text_representation then
+        v_insumo := null;
+      end;
+    end if;
+    if v_insumo is null or not exists (select 1 from public.productos pr where pr.id = v_insumo) then
+      raise exception using message = format('Uno de los insumos %s no existe.', p_que), errcode = 'P0001';
+    end if;
+    if v_insumo = p_producto_id then
+      raise exception using
+        message = 'Un producto no puede ser insumo de sí mismo: elige la materia prima que lleva.',
+        errcode = 'P0001';
+    end if;
+    begin
+      v_cant := round(nullif(btrim(v_item ->> 'cantidad'), '')::numeric, 3);
+    exception when others then
+      v_cant := null;
+    end;
+    if v_cant is null or v_cant <= 0 or v_cant >= 1000000000 then
+      raise exception using message = 'La cantidad de cada insumo debe ser mayor a cero.', errcode = 'P0001';
+    end if;
+    v_res := v_res || jsonb_build_object(v_insumo::text, coalesce((v_res ->> v_insumo::text)::numeric, 0) + v_cant);
+    if (v_res ->> v_insumo::text)::numeric >= 1000000000 then
+      raise exception using message = 'La cantidad de cada insumo debe ser mayor a cero.', errcode = 'P0001';
+    end if;
+  end loop;
+  return v_res;
+end;
+$$;
+
+-- Fórmula (personal): upsert + reemplazo de sus insumos en una transacción.
+--   p_id     null = nueva.
+--   p_datos  {producto_id, nombre, rendimiento_piezas, dias_curado, instrucciones, activa}; al editar,
+--            lo que no venga se queda como está.
+--   p_items  [{insumo_id, cantidad}] (en la unidad del insumo, para un lote completo); al menos uno.
+create or replace function public.guardar_formula(p_id uuid, p_datos jsonb, p_items jsonb)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_f      public.formulas;
+  v_num    numeric;
+  v_items  jsonb;
+begin
+  if not public.es_personal() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  if p_datos is null or jsonb_typeof(p_datos) <> 'object' then
+    raise exception using message = 'Escribe el nombre de la fórmula.', errcode = 'P0001';
+  end if;
+
+  if p_id is not null then
+    select * into v_f from public.formulas f where f.id = p_id for update;
+    if not found then
+      raise exception using message = 'No encontramos esa fórmula.', errcode = 'P0001';
+    end if;
+  else
+    v_f.id := gen_random_uuid();
+    v_f.dias_curado := 0;
+    v_f.activa := true;
+  end if;
+
+  if p_id is null or p_datos ? 'producto_id' then
+    begin
+      v_f.producto_id := nullif(btrim(p_datos ->> 'producto_id'), '')::uuid;
+    exception when invalid_text_representation then
+      v_f.producto_id := null;
+    end;
+    if v_f.producto_id is null then
+      raise exception using message = 'Elige el producto que se elabora con esta fórmula.', errcode = 'P0001';
+    end if;
+    if not exists (select 1 from public.productos pr where pr.id = v_f.producto_id) then
+      raise exception using message = 'No encontramos ese producto.', errcode = 'P0001';
+    end if;
+  end if;
+
+  if p_datos ? 'nombre' then
+    v_f.nombre := nullif(btrim(p_datos ->> 'nombre'), '');
+  end if;
+  if v_f.nombre is null then
+    raise exception using message = 'Escribe el nombre de la fórmula.', errcode = 'P0001';
+  end if;
+  if length(v_f.nombre) > 200 then
+    raise exception using message = 'El nombre es muy largo; escríbelo en máximo 200 caracteres.', errcode = 'P0001';
+  end if;
+
+  if p_id is null or p_datos ? 'rendimiento_piezas' then
+    begin
+      v_num := round(nullif(btrim(p_datos ->> 'rendimiento_piezas'), '')::numeric, 2);
+    exception when others then
+      v_num := null;
+    end;
+    if v_num is null or v_num <= 0 or v_num >= 100000000 then
+      raise exception using message = 'Revisa el rendimiento: cuántas piezas salen de un lote (más de cero).', errcode = 'P0001';
+    end if;
+    v_f.rendimiento_piezas := v_num;
+  end if;
+
+  if p_datos ? 'dias_curado' and jsonb_typeof(p_datos -> 'dias_curado') <> 'null' then
+    begin
+      v_num := (p_datos ->> 'dias_curado')::numeric;
+      if v_num <> trunc(v_num) or v_num < 0 or v_num > 3650 then
+        raise exception 'días inválidos';
+      end if;
+      v_f.dias_curado := v_num::int;
+    exception when others then
+      raise exception using message = 'Revisa los días de curado: días enteros, cero o más.', errcode = 'P0001';
+    end;
+  end if;
+
+  if p_datos ? 'instrucciones' then
+    v_f.instrucciones := nullif(btrim(p_datos ->> 'instrucciones'), '');
+    if length(v_f.instrucciones) > 5000 then
+      raise exception using message = 'Las instrucciones son muy largas; escríbelas en máximo 5000 caracteres.', errcode = 'P0001';
+    end if;
+  end if;
+
+  if p_datos ? 'activa' and jsonb_typeof(p_datos -> 'activa') <> 'null' then
+    begin
+      v_f.activa := (p_datos ->> 'activa')::boolean;
+    exception when others then
+      raise exception using message = 'Revisa los datos de la fórmula.', errcode = 'P0001';
+    end;
+  end if;
+
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
+    raise exception using message = 'Agrega al menos un insumo a la fórmula.', errcode = 'P0001';
+  end if;
+  v_items := public.insumos_interna(p_items, v_f.producto_id, 'de la fórmula');
+
+  if p_id is null then
+    insert into public.formulas (id, producto_id, nombre, rendimiento_piezas, dias_curado, instrucciones, activa)
+    values (v_f.id, v_f.producto_id, v_f.nombre, v_f.rendimiento_piezas, v_f.dias_curado, v_f.instrucciones, v_f.activa);
+  else
+    update public.formulas
+       set producto_id = v_f.producto_id, nombre = v_f.nombre, rendimiento_piezas = v_f.rendimiento_piezas,
+           dias_curado = v_f.dias_curado, instrucciones = v_f.instrucciones, activa = v_f.activa
+     where id = v_f.id;
+  end if;
+
+  delete from public.formula_items fi where fi.formula_id = v_f.id;
+  insert into public.formula_items (formula_id, insumo_id, cantidad)
+  select v_f.id, e.key::uuid, e.value::text::numeric
+    from jsonb_each(v_items) as e(key, value);
+
+  return v_f.id;
+end;
+$$;
+
+-- Libera un lote (sin validar rol ni curado: lo hacen liberar_lote y registrar_lote).
+create or replace function public.liberar_lote_interna(p_lote_id uuid, p_piezas_obtenidas numeric)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_lote    public.lotes_produccion;
+  v_piezas  numeric;
+  v_costo   numeric;
+begin
+  select * into v_lote from public.lotes_produccion l where l.id = p_lote_id for update;
+  v_piezas := round(coalesce(p_piezas_obtenidas, v_lote.piezas_planeadas), 2);
+  if v_piezas is null or v_piezas <= 0 or v_piezas >= 100000000 then
+    raise exception using message = 'Revisa las piezas obtenidas: más de cero.', errcode = 'P0001';
+  end if;
+  v_costo := round(v_lote.costo_materiales / v_piezas, 4);
+
+  update public.lotes_produccion
+     set estado = 'disponible',
+         piezas_obtenidas = v_piezas,
+         costo_unitario = v_costo,
+         liberado_en = now()
+   where id = p_lote_id;
+
+  insert into public.movimientos_inventario (producto_id, tipo, cantidad, costo_unitario, lote_id, nota, creado_por)
+  values (v_lote.producto_id, 'produccion', v_piezas, v_costo, p_lote_id, 'Lote ' || v_lote.codigo, auth.uid());
+
+  -- El costo del producto terminado pasa a ser el real de este lote.
+  update public.productos pr
+     set costo_presentacion = round(v_costo * pr.contenido_presentacion, 2)
+   where pr.id = v_lote.producto_id;
+end;
+$$;
+
+-- Registrar un lote (personal). Materiales: p_items (lo que realmente se usó) o, si no viene, los
+-- de la fórmula escalados a p_piezas / rendimiento_piezas. Sin p_piezas, las que rinde la fórmula.
+-- Valida existencias, descuenta la materia prima con su costo y, si la fórmula no pide curado
+-- (dias_curado = 0, o no hay fórmula), libera el lote en el acto.
+create or replace function public.registrar_lote(
+  p_producto_id uuid,
+  p_formula_id uuid default null,
+  p_piezas numeric default null,
+  p_elaborado_en date default null,
+  p_caduca_en date default null,
+  p_notas text default null,
+  p_items jsonb default null
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_prod       public.productos;
+  v_formula    public.formulas;
+  v_piezas     numeric;
+  v_elaborado  date := coalesce(p_elaborado_en, public.hoy_local());
+  v_items      jsonb;
+  v_insumo     public.productos;
+  v_cant       numeric;
+  v_costo      numeric := 0;
+  v_lote       public.lotes_produccion;
+  r            record;
+begin
+  if not public.es_personal() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  select * into v_prod from public.productos pr where pr.id = p_producto_id;
+  if not found then
+    raise exception using message = 'No encontramos ese producto.', errcode = 'P0001';
+  end if;
+  if p_formula_id is not null then
+    select * into v_formula from public.formulas f where f.id = p_formula_id;
+    if not found then
+      raise exception using message = 'No encontramos esa fórmula.', errcode = 'P0001';
+    end if;
+    if v_formula.producto_id <> p_producto_id then
+      raise exception using message = 'Esa fórmula es de otro producto.', errcode = 'P0001';
+    end if;
+  end if;
+
+  if v_formula.id is null
+     and (p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0) then
+    raise exception using message = 'Elige la fórmula o escribe los insumos que usaste.', errcode = 'P0001';
+  end if;
+  -- Un jabón sin fórmula no tendría días de curado y quedaría a la venta el mismo día.
+  if v_formula.id is null and v_prod.categoria = 'jabon' then
+    raise exception using message = 'Los jabones necesitan una fórmula con sus días de curado; elígela o créala primero.', errcode = 'P0001';
+  end if;
+
+  v_piezas := round(coalesce(p_piezas, v_formula.rendimiento_piezas), 2);
+  if v_piezas is null then
+    raise exception using message = 'Escribe cuántas piezas salen del lote.', errcode = 'P0001';
+  end if;
+  if v_piezas <= 0 or v_piezas >= 100000000 then
+    raise exception using message = 'Revisa las piezas: más de cero.', errcode = 'P0001';
+  end if;
+  if v_elaborado > public.hoy_local() then
+    raise exception using message = 'La fecha de elaboración no puede ser futura.', errcode = 'P0001';
+  end if;
+  if p_caduca_en is not null and p_caduca_en < v_elaborado then
+    raise exception using message = 'La caducidad debe ser después de la elaboración.', errcode = 'P0001';
+  end if;
+  if length(btrim(p_notas)) > 1000 then
+    raise exception using message = 'Las notas son muy largas; escríbelas en máximo 1000 caracteres.', errcode = 'P0001';
+  end if;
+
+  -- Materiales: lo que se usó o la fórmula escalada a las piezas
+  if p_items is not null and jsonb_typeof(p_items) = 'array' and jsonb_array_length(p_items) > 0 then
+    v_items := public.insumos_interna(p_items, p_producto_id, 'del lote');
+  else
+    select coalesce(jsonb_object_agg(fi.insumo_id::text,
+                                     round(fi.cantidad * v_piezas / v_formula.rendimiento_piezas, 3)), '{}'::jsonb)
+      into v_items
+      from public.formula_items fi
+     where fi.formula_id = v_formula.id;
+    if v_items = '{}'::jsonb then
+      raise exception using message = 'La fórmula no tiene insumos.', errcode = 'P0001';
+    end if;
+  end if;
+
+  -- Existencias (for update y en orden: dos lotes simultáneos no se gastan la misma materia prima)
+  for r in select e.key::uuid as insumo_id, e.value::text::numeric as cantidad
+             from jsonb_each(v_items) as e(key, value)
+            order by 1 loop
+    select * into v_insumo from public.productos pr where pr.id = r.insumo_id for update;
+    if v_insumo.stock_actual < r.cantidad then
+      raise exception using
+        message = format('No alcanza el inventario de %s: hay %s %s y se necesitan %s %s.',
+                         v_insumo.nombre, public.cantidad_legible(greatest(v_insumo.stock_actual, 0)), v_insumo.unidad_medida,
+                         public.cantidad_legible(r.cantidad), v_insumo.unidad_medida),
+        errcode = 'P0001';
+    end if;
+    v_costo := v_costo + r.cantidad * v_insumo.costo_unitario;
+  end loop;
+
+  insert into public.lotes_produccion (producto_id, formula_id, elaborado_en, piezas_planeadas, dias_curado, caduca_en,
+                                       costo_materiales, costo_unitario, notas, creado_por)
+  values (p_producto_id, v_formula.id, v_elaborado, v_piezas, coalesce(v_formula.dias_curado, 0), p_caduca_en,
+          round(v_costo, 2), round(round(v_costo, 2) / v_piezas, 4), nullif(btrim(p_notas), ''), auth.uid())
+  returning * into v_lote;
+
+  insert into public.movimientos_inventario (producto_id, tipo, cantidad, costo_unitario, lote_id, nota, creado_por)
+  select pr.id, 'insumo_produccion', -(e.value::text::numeric), pr.costo_unitario, v_lote.id,
+         'Lote ' || v_lote.codigo, auth.uid()
+    from jsonb_each(v_items) as e(key, value)
+    join public.productos pr on pr.id = e.key::uuid;
+
+  if v_lote.dias_curado = 0 then
+    perform public.liberar_lote_interna(v_lote.id, null);
+    select * into v_lote from public.lotes_produccion l where l.id = v_lote.id;
+  end if;
+
+  return jsonb_build_object(
+    'id', v_lote.id,
+    'codigo', v_lote.codigo,
+    'costo_materiales', v_lote.costo_materiales,
+    'costo_unitario', v_lote.costo_unitario,
+    'listo_desde', v_lote.listo_desde,
+    'estado', v_lote.estado);
+end;
+$$;
+
+-- Liberar un lote en curado (personal): sus piezas entran al inventario con el costo real por pieza.
+-- Antes de terminar el curado sólo con p_forzar (p. ej. un lote de velas que ya está bien).
+create or replace function public.liberar_lote(
+  p_lote_id uuid,
+  p_piezas_obtenidas numeric default null,
+  p_forzar boolean default false
+)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_lote public.lotes_produccion;
+begin
+  if not public.es_personal() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  select * into v_lote from public.lotes_produccion l where l.id = p_lote_id for update;
+  if not found then
+    raise exception using message = 'No encontramos ese lote.', errcode = 'P0001';
+  end if;
+  if v_lote.estado = 'disponible' then
+    raise exception using message = 'Este lote ya se liberó.', errcode = 'P0001';
+  end if;
+  if v_lote.estado = 'descartado' then
+    raise exception using message = 'Este lote se descartó.', errcode = 'P0001';
+  end if;
+  if public.hoy_local() < v_lote.listo_desde and not coalesce(p_forzar, false) then
+    raise exception using
+      message = format('Este lote sigue en curado hasta el %s.', public.fecha_legible(v_lote.listo_desde)),
+      errcode = 'P0001';
+  end if;
+  perform public.liberar_lote_interna(p_lote_id, p_piezas_obtenidas);
+end;
+$$;
+
+-- Descartar un lote en curado (personal): no entra al inventario y su costo cuenta como merma del mes.
+create or replace function public.descartar_lote(p_lote_id uuid, p_motivo text)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_lote public.lotes_produccion;
+begin
+  if not public.es_personal() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  select * into v_lote from public.lotes_produccion l where l.id = p_lote_id for update;
+  if not found then
+    raise exception using message = 'No encontramos ese lote.', errcode = 'P0001';
+  end if;
+  if v_lote.estado = 'disponible' then
+    raise exception using message = 'Este lote ya se liberó.', errcode = 'P0001';
+  end if;
+  if v_lote.estado = 'descartado' then
+    raise exception using message = 'Este lote se descartó.', errcode = 'P0001';
+  end if;
+  if nullif(btrim(p_motivo), '') is null then
+    raise exception using message = 'Escribe por qué se descarta el lote.', errcode = 'P0001';
+  end if;
+  if length(btrim(p_motivo)) > 1000 then
+    raise exception using message = 'Las notas son muy largas; escríbelas en máximo 1000 caracteres.', errcode = 'P0001';
+  end if;
+  update public.lotes_produccion
+     set estado = 'descartado', descartado_en = now(), motivo_descarte = btrim(p_motivo)
+   where id = p_lote_id;
 end;
 $$;

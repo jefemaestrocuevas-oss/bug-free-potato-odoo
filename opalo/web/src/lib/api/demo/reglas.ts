@@ -4,6 +4,7 @@ import { diaSemana, edad, fechaLocal, inicioMes, isoDesdeLocal, sumarDias, telef
 import {
   POLITICAS_GENERALES,
   type CapacitacionEditable,
+  type CategoriaProducto,
   type DatosCliente,
   type DatosFirma,
   type EstadoCita,
@@ -14,11 +15,13 @@ import {
   type Horario,
   type ItemPedidoNuevo,
   type ItemReserva,
+  CATEGORIAS_TIENDA,
   type MetodoPago,
   type NuevaCompra,
   type NuevoCliente,
   type NuevoPago,
   type OrigenCita,
+  type OrigenPedido,
   type PaqueteEditable,
   type PersonalEditable,
   type ProductoEditable,
@@ -31,9 +34,11 @@ import {
   type Slot,
   type SolicitudReserva,
   type SolicitudReservaStaff,
+  type TipoItemPedido,
   type TipoMovimiento,
   type TipoPolitica,
   type BloqueoAgenda,
+  type VentaMostrador,
 } from '../tipos';
 import type {
   CabinaFila,
@@ -64,6 +69,7 @@ import {
   MSG_EXTRA,
 } from './permisos';
 import {
+  colorHex,
   emailValido,
   esFecha,
   falla,
@@ -73,7 +79,9 @@ import {
   ms,
   MS_HORA,
   MS_MIN,
+  numeroOpcional,
   redondear,
+  slugDe,
   sumarMeses,
   codigoRegalo,
   sha256,
@@ -651,10 +659,21 @@ function citasProximas(ctx: Ctx, clienteId: string): number {
     .length;
 }
 
-/** reservar_cita (clienta). Mismo orden de validaciones que SQL. */
+/** ¿La firma del consentimiento es parte de la reserva en línea? (configuracion.firma_en_linea, ESPEC §9) */
+export function firmaEnLinea(db: Db): boolean {
+  return db.configuracion.firma_en_linea === true;
+}
+
+/**
+ * reservar_cita (clienta). Mismo orden de validaciones que SQL.
+ * Firma (ESPEC §9): con firma_en_linea = false (lo de Ópalo) la firma que llegue se ignora (no se valida
+ * ni se guarda) y la cita nace sin consentimientos: se firma en la tablet de la cabina. Con true se exige.
+ * El nombre del tutor de una menor se pide igual (viene en `firma.tutor_nombre`, aunque no haya trazo).
+ */
 export function reservarCita(ctx: Ctx, s: SolicitudReserva): ResultadoReserva {
   const { db } = ctx;
   const cliente = miCliente(ctx);
+  const conFirma = firmaEnLinea(db);
   const hoy = hoyDe(ctx);
   const inicio = ms(s.inicio);
   const fechaCita = fechaDeCita(inicio, hoy);
@@ -670,7 +689,7 @@ export function reservarCita(ctx: Ctx, s: SolicitudReserva): ResultadoReserva {
   validarEdadMinima(db, cliente, fechaCita);
   const esMenor = esMenorDeEdad(db, cliente, fechaCita);
   if (esMenor && !(s.firma?.tutor_nombre ?? '').trim()) falla(MSG.tutor);
-  validarFirma(s.firma);
+  if (conFirma) validarFirma(s.firma);
   // Una sola cuenta no acapara la agenda; para más citas, el personal agenda por WhatsApp (sin límite).
   if (citasProximas(ctx, cliente.id) >= LIMITES.citasProximas) falla(MSG.maxCitas(LIMITES.citasProximas, telefonoWhatsApp(db)));
 
@@ -702,7 +721,8 @@ export function reservarCita(ctx: Ctx, s: SolicitudReserva): ResultadoReserva {
     alertas,
     notas_cliente: textoONulo(s.notas),
   });
-  crearConsentimientos(ctx, cita, s.firma, esMenor, 'reserva_web');
+  // Sin firma en línea, lo que llegue de firma se descarta: la cita queda "falta firma".
+  if (conFirma && s.firma) crearConsentimientos(ctx, cita, s.firma, esMenor, 'reserva_web');
   return { id: cita.id, estado: cita.estado, requiere_revision: cita.requiere_revision, alertas: [...cita.alertas] };
 }
 
@@ -754,22 +774,27 @@ function buscarCita(db: Db, id: string): CitaFila {
 }
 
 /**
- * firmar_consentimiento_cita: dueña de la cita (portal) o personal (tablet de cabina).
- * Desde su cuenta, la clienta necesita su fecha de nacimiento; en cabina el personal verifica la edad en persona.
+ * firmar_consentimiento_cita: tablet de la cabina (sesión del personal; siempre se puede, canal 'cabina')
+ * o portal de la propia clienta (sólo con configuracion.firma_en_linea = true; si no, 'La firma se hace en
+ * el spa, el día de tu cita.', ESPEC §9). Desde su cuenta, la clienta necesita su fecha de nacimiento; en
+ * cabina el personal verifica la edad en persona.
  */
 export function firmarConsentimientoCita(ctx: Ctx, citaId: string, firma: DatosFirma): void {
   exigirSesion(ctx);
   const { db } = ctx;
-  const cita = buscarCita(db, citaId);
+  // Como en SQL: una cita que no existe responde lo mismo que una ajena (no se revela si existe).
+  const cita = db.citas.find((x) => x.id === citaId);
+  if (!cita) falla(MSG.permiso);
   const cliente = db.clientes.find((c) => c.id === cita.cliente_id)!;
-  const propia = ctx.usuarioId !== null && cliente.usuario_id === ctx.usuarioId;
-  if (!propia && !esPersonal(ctx)) falla(MSG.permiso);
+  const portal = !esPersonal(ctx);
+  if (portal && (ctx.usuarioId === null || cliente.usuario_id !== ctx.usuarioId)) falla(MSG.permiso);
+  if (portal && !firmaEnLinea(db)) falla(MSG.firmaEnSpa);
   if (cita.estado === 'cancelada' || cita.estado === 'no_asistio') falla(MSG.citaCancelada);
-  if (propia && !cliente.fecha_nacimiento) falla(MSG.nacimientoFirmar);
+  if (portal && !cliente.fecha_nacimiento) falla(MSG.nacimientoFirmar);
   const esMenor = esMenorDeEdad(db, cliente, fechaLocal(new Date(cita.inicio)));
   if (esMenor && !(firma?.tutor_nombre ?? '').trim()) falla(MSG.tutor);
   validarFirma(firma);
-  crearConsentimientos(ctx, cita, firma, esMenor, propia ? 'portal' : 'cabina');
+  crearConsentimientos(ctx, cita, firma, esMenor, portal ? 'portal' : 'cabina');
 }
 
 // ======================================================================
@@ -807,8 +832,8 @@ function tieneConsentimiento(db: Db, citaId: string): boolean {
 
 export function insertarMovimiento(
   ctx: Ctx,
-  m: Omit<MovimientoFila, 'id' | 'creado_en' | 'creado_por' | 'cita_id' | 'compra_id' | 'pedido_id' | 'nota'> &
-    Partial<Pick<MovimientoFila, 'cita_id' | 'compra_id' | 'pedido_id' | 'nota'>>,
+  m: Omit<MovimientoFila, 'id' | 'creado_en' | 'creado_por' | 'cita_id' | 'compra_id' | 'pedido_id' | 'lote_id' | 'nota'> &
+    Partial<Pick<MovimientoFila, 'cita_id' | 'compra_id' | 'pedido_id' | 'lote_id' | 'nota'>>,
 ): MovimientoFila {
   const p = ctx.db.productos.find((x) => x.id === m.producto_id);
   if (!p) falla(MSG_EXTRA.productoNoExiste);
@@ -821,6 +846,7 @@ export function insertarMovimiento(
     cita_id: m.cita_id ?? null,
     compra_id: m.compra_id ?? null,
     pedido_id: m.pedido_id ?? null,
+    lote_id: m.lote_id ?? null,
     nota: m.nota ?? null,
     creado_por: ctx.usuarioId,
     creado_en: ahoraIso(ctx),
@@ -903,6 +929,101 @@ function cantidadDePedido(v: unknown): number {
   return n;
 }
 
+/** Renglón de pedido con precio del servidor (lineas_pedido_interna). */
+interface LineaPedido {
+  tipo: TipoItemPedido;
+  id: string;
+  cantidad: number;
+  descripcion: string;
+  precio: number;
+  regalo_para: string | null;
+}
+
+/**
+ * lineas_pedido_interna: valida los renglones y pone los precios del servidor.
+ * En línea: servicio activo, disponible, vendible_en_linea y con precio; paquete activo con precio; producto
+ * activo, vendible_en_linea y con precio_venta. En mostrador, lo mismo sin exigir vendible_en_linea.
+ */
+function lineasPedido(db: Db, items: ItemPedidoNuevo[], mostrador: boolean): LineaPedido[] {
+  if (!Array.isArray(items) || items.length === 0) falla(MSG_EXTRA.carritoVacio);
+  const noDisponible = mostrador ? MSG.noALaVenta : MSG.noVendible;
+  return items.map((it): LineaPedido => {
+    if (!it || typeof it !== 'object') falla(noDisponible);
+    const cantidad = cantidadDePedido(it.cantidad);
+    const regalo_para = textoONulo(it.regalo_para);
+    if (regalo_para && regalo_para.length > LIMITES.regaloPara) falla(MSG.regaloLargo);
+    let precio: number | null = null;
+    let descripcion = '';
+    if (it.tipo === 'servicio') {
+      const s = db.servicios.find((x) => x.id === it.id);
+      if (!s || !s.activo || s.etapa !== 'disponible' || (!mostrador && !s.vendible_en_linea) || s.precio === null) falla(noDisponible);
+      precio = s.precio;
+      descripcion = s.nombre;
+    } else if (it.tipo === 'paquete') {
+      const p = db.paquetes.find((x) => x.id === it.id);
+      if (!p || !p.activo || p.precio === null) falla(noDisponible);
+      precio = p.precio;
+      descripcion = p.nombre;
+    } else if (it.tipo === 'producto') {
+      const p = db.productos.find((x) => x.id === it.id);
+      if (!p || !p.activo || (!mostrador && !p.vendible_en_linea) || p.precio_venta === null) falla(noDisponible);
+      precio = p.precio_venta;
+      descripcion = p.presentacion ? `${p.nombre} · ${p.presentacion}` : p.nombre;
+    } else falla(noDisponible);
+    return { tipo: it.tipo, id: it.id, cantidad, descripcion, precio: precio as number, regalo_para };
+  });
+}
+
+/**
+ * validar_existencias_interna (ESPEC §10.3): piezas completas (floor del stock) y renglones repetidos del
+ * mismo producto sumados. 'Por ahora no tenemos …' / 'Por ahora sólo quedan N piezas de …'.
+ */
+function validarExistencias(db: Db, lineas: Pick<LineaPedido, 'tipo' | 'id' | 'cantidad'>[]): void {
+  const porProducto = new Map<string, number>();
+  for (const l of lineas) if (l.tipo === 'producto') porProducto.set(l.id, (porProducto.get(l.id) ?? 0) + l.cantidad);
+  for (const id of [...porProducto.keys()].sort()) {
+    const p = db.productos.find((x) => x.id === id)!;
+    const hay = Math.max(Math.floor(redondear(p.stock_actual, 3)), 0);
+    if (porProducto.get(id)! > hay) falla(hay === 0 ? MSG.sinExistencias(p.nombre) : MSG.pocasExistencias(hay, p.nombre));
+  }
+}
+
+/** insertar_pedido_interna: pedido + renglones (folio OP-00001…). */
+function insertarPedido(ctx: Ctx, clienteId: string | null, lineas: LineaPedido[], metodo: MetodoPago, notas: string | null | undefined, origen: OrigenPedido): PedidoFila {
+  const { db } = ctx;
+  db.folio_pedidos += 1;
+  const pedido: PedidoFila = {
+    id: uuid(),
+    folio: `OP-${String(db.folio_pedidos).padStart(5, '0')}`,
+    cliente_id: clienteId,
+    estado: 'pendiente_pago',
+    total: redondear(lineas.reduce((s, l) => s + l.cantidad * l.precio, 0), 2),
+    metodo_pago_preferido: metodo,
+    notas: textoONulo(notas),
+    origen,
+    entregado_en: null,
+    creado_en: ahoraIso(ctx),
+    pagado_en: null,
+    cancelado_en: null,
+  };
+  db.pedidos.push(pedido);
+  for (const l of lineas)
+    db.pedido_items.push({
+      id: uuid(),
+      pedido_id: pedido.id,
+      tipo: l.tipo,
+      servicio_id: l.tipo === 'servicio' ? l.id : null,
+      paquete_id: l.tipo === 'paquete' ? l.id : null,
+      producto_id: l.tipo === 'producto' ? l.id : null,
+      descripcion: l.descripcion,
+      cantidad: l.cantidad,
+      precio_unitario: l.precio,
+      regalo_para: l.regalo_para,
+    });
+  return pedido;
+}
+
+/** R8 crear_pedido (clienta). Los productos deben tener existencias al pedir; se descuentan al pagarse. */
 export function crearPedido(ctx: Ctx, items: ItemPedidoNuevo[], metodo: MetodoPago, notas?: string | null): ResultadoPedido {
   const c = miCliente(ctx);
   const { db } = ctx;
@@ -912,59 +1033,58 @@ export function crearPedido(ctx: Ctx, items: ItemPedidoNuevo[], metodo: MetodoPa
   validarNotas(notas);
   if (db.pedidos.filter((p) => p.cliente_id === c.id && p.estado === 'pendiente_pago').length >= LIMITES.pedidosPorPagar)
     falla(MSG.maxPedidos(LIMITES.pedidosPorPagar));
-  const filas = items.map((it) => {
-    const cantidad = cantidadDePedido(it.cantidad);
-    const regalo_para = textoONulo(it.regalo_para);
-    if (regalo_para && regalo_para.length > LIMITES.regaloPara) falla(MSG.regaloLargo);
-    let precio: number | null = null;
-    let descripcion = '';
-    if (it.tipo === 'servicio') {
-      const s = db.servicios.find((x) => x.id === it.id);
-      if (!s || !s.activo || s.etapa !== 'disponible' || !s.vendible_en_linea || s.precio === null) falla(MSG.noVendible);
-      precio = s.precio;
-      descripcion = s.nombre;
-    } else if (it.tipo === 'paquete') {
-      const p = db.paquetes.find((x) => x.id === it.id);
-      if (!p || !p.activo || p.precio === null) falla(MSG.noVendible);
-      precio = p.precio;
-      descripcion = p.nombre;
-    } else if (it.tipo === 'producto') {
-      const p = db.productos.find((x) => x.id === it.id);
-      if (!p || !p.activo || !p.vendible_en_linea || p.precio_venta === null) falla(MSG.noVendible);
-      precio = p.precio_venta;
-      descripcion = p.presentacion ? `${p.nombre} · ${p.presentacion}` : p.nombre;
-    } else falla(MSG.noVendible);
-    return { it, cantidad, regalo_para, precio: precio as number, descripcion };
-  });
-  db.folio_pedidos += 1;
-  const t = ahoraIso(ctx);
-  const pedido: PedidoFila = {
-    id: uuid(),
-    folio: `OP-${String(db.folio_pedidos).padStart(5, '0')}`,
-    cliente_id: c.id,
-    estado: 'pendiente_pago',
-    total: redondear(filas.reduce((s, f) => s + f.cantidad * f.precio, 0), 2),
-    metodo_pago_preferido: metodoPago,
-    notas: textoONulo(notas),
-    creado_en: t,
-    pagado_en: null,
-    cancelado_en: null,
-  };
-  db.pedidos.push(pedido);
-  for (const f of filas)
-    db.pedido_items.push({
-      id: uuid(),
-      pedido_id: pedido.id,
-      tipo: f.it.tipo,
-      servicio_id: f.it.tipo === 'servicio' ? f.it.id : null,
-      paquete_id: f.it.tipo === 'paquete' ? f.it.id : null,
-      producto_id: f.it.tipo === 'producto' ? f.it.id : null,
-      descripcion: f.descripcion,
-      cantidad: f.cantidad,
-      precio_unitario: f.precio,
-      regalo_para: f.regalo_para,
-    });
+  const lineas = lineasPedido(db, items, false);
+  validarExistencias(db, lineas);
+  const pedido = insertarPedido(ctx, c.id, lineas, metodoPago, notas, 'web');
   return { id: pedido.id, folio: pedido.folio, total: pedido.total };
+}
+
+/**
+ * venta_mostrador (personal, ESPEC §10.3): la clienta paga y se lleva lo que compró en el acto. Mismos
+ * renglones que crear_pedido (sin exigir que se vendan en línea); servicios y paquetes exigen clienta; los
+ * productos, existencias. Crea el pedido (origen 'mostrador'), registra el pago completo (cortesía permitida,
+ * no cuenta como ingreso), lo liquida (créditos y salida de productos) y, si lleva productos, lo entrega.
+ */
+export function ventaMostrador(ctx: Ctx, v: VentaMostrador): ResultadoPedido {
+  const u = exigirPersonal(ctx);
+  const { db } = ctx;
+  if (!v.metodo) falla(MSG.metodoPagoFalta);
+  const propina = v.propina === null || v.propina === undefined ? 0 : Number(v.propina);
+  if (!Number.isFinite(propina) || propina < 0) falla(MSG_EXTRA.propina);
+  validarNotas(v.notas);
+  const clienteId = v.cliente_id || null;
+  if (clienteId && !db.clientes.some((c) => c.id === clienteId)) falla(MSG_EXTRA.clienteNoExiste);
+  const lineas = lineasPedido(db, v.items, true);
+  if (!clienteId && lineas.some((l) => l.tipo !== 'producto')) falla(MSG.serviciosSinClienta);
+  validarExistencias(db, lineas);
+  const pedido = insertarPedido(ctx, clienteId, lineas, v.metodo, v.notas, 'mostrador');
+  if (pedido.total <= 0) falla(MSG_EXTRA.monto);
+  db.pagos.push({
+    id: uuid(),
+    pedido_id: pedido.id,
+    cita_id: null,
+    monto: pedido.total,
+    propina: redondear(propina, 2),
+    metodo: v.metodo,
+    referencia: null,
+    recibido_por: u.id,
+    pagado_en: ahoraIso(ctx),
+    notas: null,
+  });
+  marcarPedidoPagado(ctx, pedido);
+  if (lineas.some((l) => l.tipo === 'producto')) pedido.entregado_en = ahoraIso(ctx);
+  return { id: pedido.id, folio: pedido.folio, total: pedido.total };
+}
+
+/** marcar_entregado (personal): pedido pagado con productos. Marcarlo otra vez no cambia la fecha. */
+export function marcarEntregado(ctx: Ctx, pedidoId: string): void {
+  exigirPersonal(ctx);
+  const { db } = ctx;
+  const p = db.pedidos.find((x) => x.id === pedidoId);
+  if (!p) falla(MSG_EXTRA.pedidoNoExiste);
+  if (p.estado !== 'pagado') falla(MSG.pedidoNoPagado);
+  if (!db.pedido_items.some((i) => i.pedido_id === p.id && i.tipo === 'producto')) falla(MSG.pedidoSinProductos);
+  p.entregado_en ??= ahoraIso(ctx);
 }
 
 /** cancelar_pedido: dueña o personal, sólo si está pendiente de pago. */
@@ -992,6 +1112,14 @@ function marcarPedidoPagado(ctx: Ctx, pedido: PedidoFila): void {
   const { db } = ctx;
   const t = ahoraIso(ctx);
   const hoy = hoyDe(ctx);
+  // Un pedido en línea no aparta piezas: si mientras tanto se vendieron, no se cobra ni se entrega lo que
+  // ya no hay (el inventario nunca queda en negativo). Mismos mensajes que crear_pedido.
+  validarExistencias(
+    db,
+    db.pedido_items
+      .filter((i) => i.pedido_id === pedido.id && i.tipo === 'producto' && i.producto_id)
+      .map((i) => ({ tipo: 'producto' as const, id: i.producto_id!, cantidad: i.cantidad })),
+  );
   pedido.estado = 'pagado';
   pedido.pagado_en = t;
   for (const it of db.pedido_items.filter((i) => i.pedido_id === pedido.id)) {
@@ -1004,10 +1132,13 @@ function marcarPedidoPagado(ctx: Ctx, pedido: PedidoFila): void {
           cantidad: -it.cantidad,
           costo_unitario: costoUnitario(p),
           pedido_id: pedido.id,
-          nota: `Venta ${pedido.folio}`,
+          nota: `Venta del pedido ${pedido.folio}`,
         });
       continue;
     }
+    // Sólo una venta de mostrador puede no tener clienta, y ésa no lleva servicios ni paquetes.
+    const clienteId = pedido.cliente_id;
+    if (!clienteId) continue;
     const paquete = it.paquete_id ? db.paquetes.find((x) => x.id === it.paquete_id) ?? null : null;
     const vence_en = sumarDias(hoy, paquete?.vigencia_dias ?? db.configuracion.vigencia_creditos_dias);
     // Un solo código por regalo (ítem), aunque genere varios créditos (bono de varios servicios).
@@ -1016,7 +1147,7 @@ function marcarPedidoPagado(ctx: Ctx, pedido: PedidoFila): void {
     const nuevo = (servicio_id: string | null, paquete_id: string | null, cantidad: number) => {
       db.creditos.push({
         id: uuid(),
-        cliente_id: pedido.cliente_id,
+        cliente_id: clienteId,
         servicio_id,
         paquete_id,
         cantidad,
@@ -1146,12 +1277,42 @@ export function ajustarInventario(ctx: Ctx, productoId: string, cantidad: number
   insertarMovimiento(ctx, { producto_id: p.id, tipo, cantidad: cant, costo_unitario: costoUnitario(p), nota: textoONulo(nota) });
 }
 
+/**
+ * Slug del producto como el trigger tg_productos_ficha: se normaliza el que escriban ('' → error); si no
+ * escriben uno y el producto se vende en línea o es de la tienda propia, se arma con el nombre (-2, -3… si
+ * ya existe), porque la ficha pública vive en /tienda/:slug; si no, null. Al editar, el mismo slug se queda.
+ */
+function slugProducto(
+  db: Db,
+  e: { slug?: string | null; nombre: string; vendible_en_linea: boolean; categoria: CategoriaProducto },
+  id: string | null,
+  anterior: string | null,
+): string | null {
+  const escrito = textoONulo(e.slug);
+  if (id && escrito !== null && escrito === anterior) return anterior;
+  const usado = (s: string) => db.productos.some((p) => p.slug === s && p.id !== id);
+  if (escrito !== null) {
+    const base = slugDe(escrito);
+    if (!base) falla(MSG.productoSlug);
+    if (usado(base)) falla(MSG.productoSlugUsado);
+    return base;
+  }
+  if (!e.vendible_en_linea && !CATEGORIAS_TIENDA.includes(e.categoria)) return null;
+  const base = slugDe(e.nombre) || 'producto';
+  let slug = base;
+  for (let n = 2; usado(slug); n++) slug = `${base}-${n}`;
+  return slug;
+}
+
+/** Escritura directa en productos (personal; ESPEC §6.1), con la ficha pública de la tienda (§10.1). */
 export function guardarProducto(ctx: Ctx, e: ProductoEditable): ProductoFila {
   exigirPersonal(ctx);
   const { db } = ctx;
   if (!(e.nombre ?? '').trim() || !(Number(e.contenido_presentacion) > 0) || Number(e.costo_presentacion) < 0) falla(MSG_EXTRA.datoFaltante);
+  const anterior = e.id ? db.productos.find((x) => x.id === e.id) : undefined;
+  if (e.id && !anterior) falla(MSG_EXTRA.noExiste);
   const t = ahoraIso(ctx);
-  const datos = {
+  const base = {
     nombre: e.nombre.trim(),
     marca: textoONulo(e.marca),
     categoria: e.categoria,
@@ -1167,11 +1328,26 @@ export function guardarProducto(ctx: Ctx, e: ProductoEditable): ProductoFila {
     activo: e.activo !== false,
     notas: textoONulo(e.notas),
   };
-  if (e.id) {
-    const p = db.productos.find((x) => x.id === e.id);
-    if (!p) falla(MSG_EXTRA.noExiste);
-    Object.assign(p, datos, { actualizado_en: t });
-    return p;
+  // Jabones, velas y sets se manejan por pieza: así costo_unitario es el costo de una pieza (ESPEC §10.2).
+  if (CATEGORIAS_TIENDA.includes(base.categoria) && (base.unidad_medida !== 'pz' || base.contenido_presentacion !== 1)) falla(MSG.porPieza);
+  const datos = {
+    ...base,
+    slug: slugProducto(db, { ...base, slug: e.slug }, e.id ?? null, anterior?.slug ?? null),
+    descripcion: textoONulo(e.descripcion),
+    aroma: textoONulo(e.aroma),
+    ingredientes: textoONulo(e.ingredientes),
+    modo_uso: textoONulo(e.modo_uso),
+    advertencias: textoONulo(e.advertencias),
+    contenido_neto: textoONulo(e.contenido_neto),
+    foto_url: textoONulo(e.foto_url),
+    color_hex: colorHex(e.color_hex),
+    destacado: !!e.destacado,
+    hecho_en_opalo: !!e.hecho_en_opalo,
+    orden: Math.round(Number(e.orden)) || 0,
+  };
+  if (anterior) {
+    Object.assign(anterior, datos, { actualizado_en: t });
+    return anterior;
   }
   const p: ProductoFila = { id: uuid(), ...datos, stock_actual: 0, creado_en: t, actualizado_en: t };
   db.productos.push(p);
@@ -1347,12 +1523,6 @@ export function guardarServicio(ctx: Ctx, s: ServicioEditable): void {
     if (!fila) falla(MSG_EXTRA.noExiste);
     Object.assign(fila, datos);
   } else db.servicios.push({ id: uuid(), ...datos });
-}
-
-/** Número opcional del formulario: null si viene vacío; NaN si no es número. */
-function numeroOpcional(v: unknown): number | null {
-  if (v === null || v === undefined || (typeof v === 'string' && !v.trim())) return null;
-  return typeof v === 'number' ? v : typeof v === 'string' ? Number(v.trim()) : NaN;
 }
 
 /**

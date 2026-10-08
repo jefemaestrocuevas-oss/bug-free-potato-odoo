@@ -84,3 +84,19 @@
   .pol-articulo { border: 0; box-shadow: none; padding: 0; }
   .pol-doc-rejilla { display: block; }
 }
+
+/* Consentimiento que se revisa en el spa (firma_en_linea = false, ESPEC §9) */
+.pol-en-spa {
+  max-width: 640px;
+  margin: 8px auto 0;
+  text-align: center;
+  padding: clamp(28px, 6vw, 48px) clamp(18px, 5vw, 40px);
+  border-radius: var(--radio-lg);
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  box-shadow: var(--sombra);
+}
+.pol-en-spa-gema { color: var(--oro); margin-bottom: 10px; }
+.pol-en-spa h1 { color: var(--verde); font-size: clamp(1.9rem, 5vw, 2.5rem); }
+.pol-en-spa p { color: var(--tinta-2); margin: 0 auto 22px; max-width: 52ch; }
+.pol-en-spa-otras { position: static; max-width: 640px; margin: 28px auto 0; }

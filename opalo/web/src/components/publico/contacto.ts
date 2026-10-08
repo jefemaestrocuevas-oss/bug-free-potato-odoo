@@ -22,6 +22,8 @@ export type DatosContacto = {
    * bienvenida; la regla de reservas usa `configuracion.fecha_apertura` (ver PasoHorario).
    */
   fecha_apertura: string | null;
+  /** false (decisión de Ópalo, ESPEC §9): la firma se hace en el spa y el sitio no la menciona. */
+  firma_en_linea: boolean;
 };
 
 /** Valores del catálogo, mientras llega la configuración de la base. */
@@ -37,6 +39,7 @@ export const CONTACTO_RESPALDO: DatosContacto = {
   duracion_sesion_min: CONFIG_CATALOGO.duracion_sesion_min,
   tolerancia_retraso_min: CONFIG_CATALOGO.tolerancia_retraso_min,
   fecha_apertura: CONFIG_CATALOGO.fecha_apertura ?? null,
+  firma_en_linea: CONFIG_CATALOGO.firma_en_linea === true,
 };
 
 let promesa: Promise<Configuracion> | null = null;
@@ -83,6 +86,7 @@ export function useContacto(): DatosContacto {
     duracion_sesion_min: config.duracion_sesion_min,
     tolerancia_retraso_min: config.tolerancia_retraso_min,
     fecha_apertura: config.fecha_apertura,
+    firma_en_linea: config.firma_en_linea === true,
   };
 }
 

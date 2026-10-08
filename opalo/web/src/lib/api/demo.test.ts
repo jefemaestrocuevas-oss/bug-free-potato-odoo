@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { crearApiDemo, FUENTES_DEMO } from './demo';
 import { CUENTAS_DEMO, PASSWORD_DEMO } from './cuentasDemo';
+import { crearApiDemoCon } from './demo/api';
+import type { FuentesDemo } from './demo/modelo';
 import type { Ctx } from './demo/permisos';
 import * as R from './demo/reglas';
 import { FIRMA_EJEMPLO, sembrar } from './demo/sembrado';
-import { firmaValida, sha256 } from './demo/utilidades';
+import { FICHA_VACIA } from './demo/sembradoTaller';
+import { cantidadLegible, fechaLegible, firmaValida, sha256, slugDe } from './demo/utilidades';
 import { fechaLocal, isoDesdeLocal, sumarDias } from '../format';
 import {
+  CATEGORIAS_TIENDA,
   POLITICAS_GENERALES,
   type DatosFirma,
   type ItemPedidoNuevo,
@@ -59,6 +63,11 @@ const M = {
   cantidad: 'Revisa las cantidades.',
   cantidadMinima: 'La cantidad debe ser al menos 1.',
   regaloLargo: 'El nombre de quien recibe el regalo es muy largo (máximo 120 caracteres).',
+  // ESPEC §9 y §10
+  firmaEnSpa: 'La firma se hace en el spa, el día de tu cita.',
+  noALaVenta: 'Uno de los productos ya no está a la venta.',
+  serviciosSinClienta: 'Para vender servicios prepagados elige a la clienta.',
+  jabonSinFormula: 'Los jabones necesitan una fórmula con sus días de curado; elígela o créala primero.',
 };
 
 const FIRMA: DatosFirma = {
@@ -66,14 +75,26 @@ const FIRMA: DatosFirma = {
   firma_svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 200"><path d="M10 10 L50 60"/></svg>',
 };
 
-function entorno(op: { ahora?: Date; ejemplos?: boolean; almacenamiento?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null } = {}) {
+/** Fuentes del catálogo real con configuracion.firma_en_linea cambiada (el catálogo trae false, ESPEC §9). */
+function fuentesConFirma(firmaEnLinea: boolean): FuentesDemo {
+  return { ...FUENTES_DEMO, catalogo: { ...FUENTES_DEMO.catalogo, configuracion: { ...FUENTES_DEMO.catalogo.configuracion, firma_en_linea: firmaEnLinea } } };
+}
+
+/**
+ * API de demostración para pruebas. Por defecto usa la configuración real del catálogo (firma en cabina);
+ * `firmaEnLinea: true` vuelve al comportamiento anterior (la clienta firma al reservar o desde su portal).
+ */
+function entorno(
+  op: { ahora?: Date; ejemplos?: boolean; firmaEnLinea?: boolean; almacenamiento?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null } = {},
+) {
   let ahora = op.ahora ?? AHORA;
-  const api = crearApiDemo({
+  const opciones = {
     latenciaMs: 0,
     almacenamiento: op.almacenamiento ?? null,
     ahora: () => ahora,
     datosEjemplo: op.ejemplos ?? false,
-  });
+  };
+  const api = op.firmaEnLinea === undefined ? crearApiDemo(opciones) : crearApiDemoCon(fuentesConFirma(op.firmaEnLinea), opciones);
   return {
     api,
     fijarHora(d: Date) {
@@ -135,6 +156,33 @@ async function otraClienta(api: OpaloApi, email = 'otra@ejemplo.mx', fecha_nacim
 }
 
 const a = (fecha: string, hhmm: string) => isoDesdeLocal(fecha, hhmm);
+
+/** Producto de cabina sin ficha pública (para las pruebas de inventario). */
+function productoDe(datos: Partial<ProductoEditable> & Pick<ProductoEditable, 'nombre'>): ProductoEditable {
+  return {
+    ...FICHA_VACIA,
+    marca: null,
+    categoria: 'cera',
+    unidad_medida: 'g',
+    presentacion: null,
+    contenido_presentacion: 1,
+    costo_presentacion: 0,
+    stock_minimo: 0,
+    proveedor_id: null,
+    uso: 'cabina',
+    precio_venta: null,
+    vendible_en_linea: false,
+    activo: true,
+    notas: null,
+    ...datos,
+  };
+}
+
+/** Firma en la tablet de la cabina: entra el personal y firma (ESPEC §9). */
+async function firmarEnCabina(api: OpaloApi, citaId: string, firma: DatosFirma = FIRMA) {
+  await entrar(api, 'personal');
+  await api.firmarConsentimientoCita(citaId, firma);
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -264,8 +312,8 @@ describe('R2 duración y R3 horarios disponibles', () => {
 });
 
 describe('R4 reservar', () => {
-  it('reserva feliz: confirmada, con consentimiento, precio del servidor y el horario se ocupa', async () => {
-    const { api } = entorno();
+  it('reserva feliz (con firma en línea): confirmada, con consentimiento, precio del servidor y el horario se ocupa', async () => {
+    const { api } = entorno({ firmaEnLinea: true });
     await clientaLista(api);
     const cejas = await servicio(api, 'cejas');
     const facial = await servicio(api, 'facial-hidratante');
@@ -287,8 +335,8 @@ describe('R4 reservar', () => {
     expect(slots.some((s) => s.inicio === a(MARTES, '10:00'))).toBe(false);
   });
 
-  it('pide sesión, políticas, ficha y consentimiento para datos de salud', async () => {
-    const { api } = entorno();
+  it('pide sesión, políticas, ficha y consentimiento para datos de salud (y la firma, si es en línea)', async () => {
+    const { api } = entorno({ firmaEnLinea: true });
     const cejas = await servicio(api, 'cejas');
     const pedir = () => api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), firma: FIRMA });
     await expect(pedir()).rejects.toThrow(M.sesion);
@@ -303,8 +351,8 @@ describe('R4 reservar', () => {
     await expect(pedir()).resolves.toMatchObject({ estado: 'confirmada' });
   });
 
-  it('edad mínima y tutor para menores', async () => {
-    const { api } = entorno();
+  it('edad mínima y tutor para menores (firma en línea)', async () => {
+    const { api } = entorno({ firmaEnLinea: true });
     const cejas = await servicio(api, 'cejas');
     const pedir = (firma: DatosFirma) => api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), firma });
     await otraClienta(api, 'catorce@ejemplo.mx', '2012-01-01'); // 14 años
@@ -423,23 +471,11 @@ describe('R6 consentimiento obligatorio y R7 completar', () => {
     const sesionClienta = await entrar(api, 'cliente');
 
     await entrar(api, 'personal');
-    const cera = await api.admin.guardarProducto({
-      nombre: 'Cera de prueba',
-      marca: null,
-      categoria: 'cera',
-      unidad_medida: 'g',
-      presentacion: 'Lata 800 g',
-      contenido_presentacion: 800,
-      costo_presentacion: 400,
-      stock_minimo: 100,
-      proveedor_id: null,
-      uso: 'cabina',
-      precio_venta: null,
-      vendible_en_linea: false,
-      activo: true,
-      notas: null,
-    });
+    const cera = await api.admin.guardarProducto(
+      productoDe({ nombre: 'Cera de prueba', presentacion: 'Lata 800 g', contenido_presentacion: 800, costo_presentacion: 400, stock_minimo: 100 }),
+    );
     expect(cera.costo_unitario).toBe(0.5);
+    expect(cera.slug).toBeNull(); // insumo de cabina: sin ficha en la tienda
     await api.admin.registrarCompra({ items: [{ producto_id: cera.id, presentaciones: 1, costo_presentacion: 480 }], folio: 'X1' });
     let [p] = await api.admin.getProductos();
     expect(p.stock_actual).toBe(800);
@@ -461,9 +497,12 @@ describe('R6 consentimiento obligatorio y R7 completar', () => {
     await expect(api.admin.cambiarEstadoCita(r.id, 'en_curso')).rejects.toThrow(M.sinConsentimiento);
     await expect(api.admin.completarCita(r.id)).rejects.toThrow(M.sinConsentimiento);
 
+    // La firma se hace en la tablet de la cabina (ESPEC §9): desde su cuenta, la clienta no firma.
     await entrar(api, 'cliente');
-    await api.firmarConsentimientoCita(r.id, FIRMA);
-    await entrar(api, 'personal');
+    await expect(api.firmarConsentimientoCita(r.id, FIRMA)).rejects.toThrow(M.firmaEnSpa);
+    // Una cita que no existe responde como en SQL: igual que una ajena.
+    await expect(api.firmarConsentimientoCita('no-existe', FIRMA)).rejects.toThrow(M.permiso);
+    await firmarEnCabina(api, r.id);
     await api.admin.cambiarEstadoCita(r.id, 'en_curso');
     await api.admin.completarCita(r.id);
     await api.admin.completarCita(r.id); // idempotente
@@ -550,25 +589,43 @@ describe('R8–R10 pedidos, pagos y regalos', () => {
   it('productos: sólo vendibles; al pagarse salen del inventario; la dueña cancela si está pendiente', async () => {
     const { api } = entorno();
     await entrar(api, 'personal');
-    const crema = await api.admin.guardarProducto({
-      nombre: 'Crema para casa',
-      marca: null,
-      categoria: 'venta',
-      unidad_medida: 'pz',
-      presentacion: 'Tubo',
-      contenido_presentacion: 1,
-      costo_presentacion: 100,
-      stock_minimo: 1,
-      proveedor_id: null,
-      uso: 'venta',
-      precio_venta: 250,
-      vendible_en_linea: true,
-      activo: true,
-      notas: null,
-    });
+    const crema = await api.admin.guardarProducto(
+      productoDe({
+        nombre: 'Crema para casa',
+        categoria: 'venta',
+        unidad_medida: 'pz',
+        presentacion: 'Tubo',
+        costo_presentacion: 100,
+        stock_minimo: 1,
+        uso: 'venta',
+        precio_venta: 250,
+        vendible_en_linea: true,
+      }),
+    );
     await api.admin.ajustarInventario(crema.id, 5, 'ajuste', 'Inventario inicial');
     expect(await api.getProductosTienda()).toEqual([
-      { id: crema.id, nombre: 'Crema para casa', marca: null, presentacion: 'Tubo', precio_venta: 250, hay_stock: true },
+      {
+        id: crema.id,
+        slug: 'crema-para-casa', // se vende en línea: su ficha vive en /tienda/:slug
+        nombre: 'Crema para casa',
+        categoria: 'venta',
+        marca: null,
+        presentacion: 'Tubo',
+        descripcion: null,
+        aroma: null,
+        ingredientes: null,
+        modo_uso: null,
+        advertencias: null,
+        contenido_neto: null,
+        foto_url: null,
+        color_hex: null,
+        destacado: false,
+        hecho_en_opalo: false,
+        precio_venta: 250,
+        stock_disponible: 5,
+        hay_stock: true,
+        proximo_lote_listo: null,
+      },
     ]);
     await clientaLista(api);
     const p1 = await api.crearPedido([{ tipo: 'producto', id: crema.id, cantidad: 2 }], 'efectivo');
@@ -652,22 +709,7 @@ describe('gastos y resultados', () => {
     const cejas = await servicio(api, 'cejas');
     const cliente = await entrar(api, 'cliente');
     await entrar(api, 'personal');
-    const cera = await api.admin.guardarProducto({
-      nombre: 'Cera',
-      marca: null,
-      categoria: 'cera',
-      unidad_medida: 'g',
-      presentacion: 'Lata',
-      contenido_presentacion: 1000,
-      costo_presentacion: 500,
-      stock_minimo: 0,
-      proveedor_id: null,
-      uso: 'cabina',
-      precio_venta: null,
-      vendible_en_linea: false,
-      activo: true,
-      notas: null,
-    });
+    const cera = await api.admin.guardarProducto(productoDe({ nombre: 'Cera', presentacion: 'Lata', contenido_presentacion: 1000, costo_presentacion: 500 }));
     await api.admin.registrarCompra({ items: [{ producto_id: cera.id, presentaciones: 2, costo_presentacion: 500 }], fecha: LUNES });
     await api.admin.guardarReceta(cejas.id, [{ producto_id: cera.id, cantidad: 20 }]);
     const r = await api.admin.reservarParaCliente({ cliente_id: cliente.cliente!.id, items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), origen: 'mostrador' });
@@ -686,6 +728,8 @@ describe('gastos y resultados', () => {
       ingresos: 120,
       propinas: 20,
       costo_insumos: 10,
+      costo_ventas: 0,
+      mermas: 0,
       compras: 1000,
       gastos: 1000,
       utilidad: -890,
@@ -801,6 +845,8 @@ describe('datos de ejemplo', () => {
     expect(resumen.por_revisar).toBe(1);
     expect(resumen.reposicion.length).toBeGreaterThanOrEqual(3);
     expect(resumen.pedidos_pendientes).toBe(1);
+    expect(resumen.pedidos_por_entregar).toBe(1);
+    expect(resumen.lotes_listos.length).toBeGreaterThanOrEqual(1);
     expect(resumen.gastos_por_vencer.length).toBeGreaterThan(0);
 
     const agenda = await api.admin.getAgenda(sumarDias(MIERCOLES, -80), sumarDias(MIERCOLES, 20));
@@ -816,7 +862,9 @@ describe('datos de ejemplo', () => {
     expect(agenda.filter((c) => c.origen === 'web').every((c) => fechaLocal(new Date(c.inicio)) >= APERTURA)).toBe(true);
     expect((await api.admin.getBloqueos(MIERCOLES, sumarDias(MIERCOLES, 20))).length).toBe(1);
 
-    expect((await api.admin.getPedidos('pagado')).length).toBe(1);
+    const pagados = await api.admin.getPedidos('pagado');
+    expect(pagados.filter((p) => p.origen === 'web')).toHaveLength(3);
+    expect(pagados.filter((p) => p.origen === 'mostrador').length).toBeGreaterThanOrEqual(5);
     expect((await api.admin.getProductos()).every((p) => p.stock_actual >= 0)).toBe(true);
     expect((await api.admin.getCostosServicios()).filter((c) => c.tiene_receta).length).toBeGreaterThanOrEqual(8);
     expect((await api.admin.getProveedores()).every((p) => p.nombre.endsWith('(ejemplo)'))).toBe(true);
@@ -922,8 +970,9 @@ it('fechaLocal y la zona fija de Querétaro', () => {
 });
 
 /** Base sembrada (sin ejemplos) con un Ctx por rol, para preparar estados que la API no expone. */
-function baseDirecta(ahora = AHORA) {
+function baseDirecta(ahora = AHORA, firmaEnLinea = false) {
   const db = sembrar(FUENTES_DEMO, ahora, { ejemplos: false });
+  db.configuracion.firma_en_linea = firmaEnLinea;
   const como = (rol: Rol): Ctx => ({ db, ahora, usuarioId: db.usuarios.find((u) => u.email === emailDe(rol))!.id, userAgent: null });
   return { db, como };
 }
@@ -952,8 +1001,8 @@ describe('paridad con SQL (hallazgos de revisión)', () => {
     const { api } = entorno();
     const cejas = await servicio(api, 'cejas');
     await clientaLista(api);
-    const r = await api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), firma: FIRMA });
-    await entrar(api, 'personal');
+    const r = await api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00') });
+    await firmarEnCabina(api, r.id);
     await api.admin.completarCita(r.id);
     for (const estado of ['confirmada', 'pendiente', 'en_curso', 'no_asistio', 'cancelada'] as const)
       await expect(api.admin.cambiarEstadoCita(r.id, estado)).rejects.toThrow('Esta cita ya se completó.');
@@ -1009,10 +1058,10 @@ describe('paridad con SQL (hallazgos de revisión)', () => {
     expect((await api.getMisCreditos())[0]).toMatchObject({ usados: 1, restantes: 0 });
   });
 
-  it('edad mínima y tutor se miden el día de la cita, no hoy', async () => {
+  it('edad mínima y tutor se miden el día de la cita, no hoy (firma en línea)', async () => {
     // Hoy es lunes 2 de noviembre de 2026; las citas son el martes 3. La fecha de nacimiento no cambia
     // una vez registrada, así que cada caso es una clienta distinta.
-    const { api } = entorno();
+    const { api } = entorno({ firmaEnLinea: true });
     const cejas = await servicio(api, 'cejas');
     const conTutor: DatosFirma = { ...FIRMA, tutor_nombre: 'Rosa López' };
     const pedir = (hhmm: string, firma: DatosFirma) => api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, hhmm), firma });
@@ -1041,8 +1090,8 @@ describe('paridad con SQL (hallazgos de revisión)', () => {
     await expect(staff(catorce.cliente!.id, '14:00')).rejects.toThrow(M.edad);
   });
 
-  it('se puede firmar una cita completada y cada versión nueva de la política se firma aparte', async () => {
-    const { api } = entorno();
+  it('se puede firmar una cita completada y cada versión nueva de la política se firma aparte (firma en línea)', async () => {
+    const { api } = entorno({ firmaEnLinea: true });
     const cejas = await servicio(api, 'cejas');
     await clientaLista(api);
     const r = await api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), firma: FIRMA });
@@ -1172,7 +1221,8 @@ describe('fecha de apertura', () => {
     const proximas = (await api.getMisCitas()).filter((c) => c.estado === 'confirmada');
     expect(proximas).toHaveLength(1);
     expect(proximas.every((c) => fechaLocal(new Date(c.inicio)) >= APERTURA)).toBe(true);
-    expect(proximas.every((c) => c.consentimientos_firmados > 0)).toBe(true);
+    // ESPEC §9: reservó sin firmar; firmará en la tablet de la cabina el día de su cita.
+    expect(proximas.every((c) => c.consentimientos_firmados === 0)).toBe(true);
     // Aun así, la clienta no ve horarios ni reserva antes de la apertura.
     expect(await api.getHorariosDisponibles(VIERNES_PREVIO, 60)).toEqual([]);
     const cejas = await servicio(api, 'cejas');
@@ -1185,11 +1235,15 @@ describe('fecha de apertura', () => {
     const previas = agenda.filter((c) => fechaLocal(new Date(c.inicio)) < APERTURA);
     expect(previas.length).toBeGreaterThan(0);
     expect(previas.every((c) => c.origen !== 'web' && c.pagado === 0)).toBe(true);
-    // Antes de abrir no hay ingresos por citas: los únicos son de la tienda (un pedido pagado por transferencia).
+    // Antes de abrir no hay ingresos por citas: los únicos son de la tienda (pedidos en línea y ventas de
+    // mostrador pagados; las cortesías no son ingreso).
     const pagados = await api.admin.getPedidos('pagado');
-    expect(pagados).toHaveLength(1);
-    const ingresos = (await api.admin.getResultados(4)).reduce((s, r) => s + r.ingresos, 0);
-    expect(ingresos).toBe(pagados[0].total);
+    expect(pagados.length).toBeGreaterThan(1);
+    const resultados = await api.admin.getResultados(4);
+    const ingresos = resultados.reduce((s, r) => s + r.ingresos, 0);
+    const deTienda = pagados.filter((p) => p.metodo_pago_preferido !== 'cortesia').reduce((s, p) => s + p.total, 0);
+    expect(ingresos).toBeCloseTo(deTienda, 2);
+    expect(resultados.reduce((s, r) => s + r.costo_ventas, 0)).toBeGreaterThan(0);
     expect((await api.getHorariosDisponibles(VIERNES_PREVIO, 60)).length).toBeGreaterThan(0);
   });
 });
@@ -1204,22 +1258,7 @@ describe('mensajes iguales a SQL en pagos, compras, ajustes, políticas y regist
     // registrar_pago: primero pide a qué se aplica, aunque el monto también esté mal.
     await expect(api.admin.registrarPago({ monto: 0, metodo: 'efectivo' })).rejects.toThrow('Indica el pedido o la cita que se está pagando.');
 
-    const producto = await api.admin.guardarProducto({
-      nombre: 'Cera de prueba',
-      marca: null,
-      categoria: 'cera',
-      unidad_medida: 'g',
-      presentacion: null,
-      contenido_presentacion: 800,
-      costo_presentacion: 400,
-      stock_minimo: 0,
-      proveedor_id: null,
-      uso: 'cabina',
-      precio_venta: null,
-      vendible_en_linea: false,
-      activo: true,
-      notas: null,
-    });
+    const producto = await api.admin.guardarProducto(productoDe({ nombre: 'Cera de prueba', contenido_presentacion: 800, costo_presentacion: 400 }));
     const compra = (it: { producto_id?: string; presentaciones?: number; costo_presentacion?: number }, proveedor_id: string | null = null) =>
       api.admin.registrarCompra({ items: [{ producto_id: producto.id, presentaciones: 1, costo_presentacion: 100, ...it }], proveedor_id });
     await expect(compra({}, 'no-existe')).rejects.toThrow('No encontramos ese proveedor.');
@@ -1265,8 +1304,8 @@ describe('endurecimiento: reservar (ESPEC §5.1)', () => {
     await expect(pedir('2026-11-06', '10:00')).resolves.toMatchObject({ estado: 'confirmada' });
   });
 
-  it('firma sólo de trazos; nombres de 200 y notas de 1000 caracteres como máximo', async () => {
-    const { api } = entorno();
+  it('firma sólo de trazos; nombres de 200 y notas de 1000 caracteres como máximo (firma en línea)', async () => {
+    const { api } = entorno({ firmaEnLinea: true });
     const cejas = await servicio(api, 'cejas');
     await clientaLista(api);
     const pedir = (firma: DatosFirma, notas?: string) =>
@@ -1320,7 +1359,7 @@ describe('endurecimiento: reservar (ESPEC §5.1)', () => {
   });
 
   it('sin una política activa del consentimiento de algún servicio, la cita no se puede crear', () => {
-    const { db, como } = baseDirecta();
+    const { db, como } = baseDirecta(AHORA, true);
     const clienta = como('cliente');
     clientaListaDirecta(clienta);
     const mariana = db.clientes.find((c) => c.usuario_id === clienta.usuarioId)!;
@@ -1338,8 +1377,8 @@ describe('endurecimiento: reservar (ESPEC §5.1)', () => {
 });
 
 describe('endurecimiento: firma, datos y ficha (ESPEC §5.1)', () => {
-  it('firmar: la clienta necesita su fecha de nacimiento; se guarda quién capturó la firma y por qué canal', () => {
-    const { db, como } = baseDirecta();
+  it('firmar (en línea): la clienta necesita su fecha de nacimiento; se guarda quién capturó la firma y por qué canal', () => {
+    const { db, como } = baseDirecta(AHORA, true);
     const personal = como('personal');
     const clienta = como('cliente');
     clientaListaDirecta(clienta);
@@ -1545,22 +1584,7 @@ describe('endurecimiento: pedidos, regalos y catálogo (ESPEC §5.1)', () => {
     const { api } = entorno();
     const cejas = await servicio(api, 'cejas');
     await entrar(api, 'personal');
-    const cera = await api.admin.guardarProducto({
-      nombre: 'Cera',
-      marca: null,
-      categoria: 'cera',
-      unidad_medida: 'g',
-      presentacion: 'Lata',
-      contenido_presentacion: 800,
-      costo_presentacion: 400,
-      stock_minimo: 0,
-      proveedor_id: null,
-      uso: 'cabina',
-      precio_venta: null,
-      vendible_en_linea: false,
-      activo: true,
-      notas: null,
-    });
+    const cera = await api.admin.guardarProducto(productoDe({ nombre: 'Cera', presentacion: 'Lata', contenido_presentacion: 800, costo_presentacion: 400 }));
     await expect(api.admin.guardarReceta('no-existe', [])).rejects.toThrow('No encontramos ese servicio.');
     await expect(api.admin.guardarReceta(cejas.id, [{ producto_id: 'no-existe', cantidad: 1 }])).rejects.toThrow('Uno de los productos de la receta no existe.');
     await expect(api.admin.guardarReceta(cejas.id, [{ producto_id: cera.id, cantidad: 0 }])).rejects.toThrow('La cantidad de cada producto debe ser mayor a cero.');
@@ -1639,21 +1663,13 @@ describe('clientas del equipo y reposición', () => {
   it('presentaciones sugeridas = floor((mínimo − stock) / contenido) + 1: comprarlas saca al producto de la lista', async () => {
     const { api } = entorno();
     await entrar(api, 'personal');
-    const base: Omit<ProductoEditable, 'nombre' | 'contenido_presentacion' | 'stock_minimo' | 'costo_presentacion'> = {
-      marca: null,
-      categoria: 'cera',
-      unidad_medida: 'g',
-      presentacion: null,
-      proveedor_id: null,
-      uso: 'cabina',
-      precio_venta: null,
-      vendible_en_linea: false,
-      activo: true,
-      notas: null,
-    };
-    const lata = await api.admin.guardarProducto({ ...base, nombre: 'Cera en lata', contenido_presentacion: 800, costo_presentacion: 400, stock_minimo: 800 });
-    const caja = await api.admin.guardarProducto({ ...base, nombre: 'Abatelenguas', unidad_medida: 'pz', contenido_presentacion: 100, costo_presentacion: 85, stock_minimo: 100 });
-    const gotero = await api.admin.guardarProducto({ ...base, nombre: 'Ampolleta', unidad_medida: 'ml', contenido_presentacion: 0.25, costo_presentacion: 30, stock_minimo: 0.75 });
+    const lata = await api.admin.guardarProducto(productoDe({ nombre: 'Cera en lata', contenido_presentacion: 800, costo_presentacion: 400, stock_minimo: 800 }));
+    const caja = await api.admin.guardarProducto(
+      productoDe({ nombre: 'Abatelenguas', unidad_medida: 'pz', contenido_presentacion: 100, costo_presentacion: 85, stock_minimo: 100 }),
+    );
+    const gotero = await api.admin.guardarProducto(
+      productoDe({ nombre: 'Ampolleta', unidad_medida: 'ml', contenido_presentacion: 0.25, costo_presentacion: 30, stock_minimo: 0.75 }),
+    );
     await api.admin.ajustarInventario(caja.id, 100, 'ajuste'); // justo en el mínimo
     await api.admin.ajustarInventario(gotero.id, 0.25, 'ajuste');
     const repo = await api.admin.getReposicion();
@@ -1672,5 +1688,667 @@ describe('clientas del equipo y reposición', () => {
       items: repo.map((r) => ({ producto_id: r.id, presentaciones: r.presentaciones_sugeridas, costo_presentacion: costos.get(r.id)! })),
     });
     expect(await api.admin.getReposicion()).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ESPEC §9 · la firma se hace en el spa (configuracion.firma_en_linea = false)
+// ---------------------------------------------------------------------------
+
+describe('firma en el spa (ESPEC §9)', () => {
+  it('la reserva en línea no pide ni guarda firma; la clienta no firma desde su cuenta; en cabina sí', async () => {
+    const { api } = entorno();
+    expect((await api.getConfiguracion()).firma_en_linea).toBe(false); // viene de catalogo.json
+    const cejas = await servicio(api, 'cejas');
+    await clientaLista(api);
+    const r = await api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00') });
+    expect(r).toMatchObject({ estado: 'confirmada', requiere_revision: false });
+    // Si llega una firma, se ignora: ni se valida ni se guarda.
+    await api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '11:00'), firma: { nombre_firmante: '', firma_svg: '<svg><script/></svg>' } });
+    await api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '12:00'), firma: FIRMA });
+    expect((await api.getMisCitas()).map((c) => c.consentimientos_firmados)).toEqual([0, 0, 0]);
+    expect(await api.getMisConsentimientos()).toEqual([]);
+
+    await expect(api.firmarConsentimientoCita(r.id, FIRMA)).rejects.toThrow(M.firmaEnSpa);
+    await otraClienta(api);
+    await expect(api.firmarConsentimientoCita(r.id, FIRMA)).rejects.toThrow(M.permiso); // primero, de quién es la cita
+
+    // R6 no cambia: sin consentimiento no hay servicio; en la tablet de la cabina se firma y se atiende.
+    await entrar(api, 'personal');
+    await expect(api.admin.cambiarEstadoCita(r.id, 'en_curso')).rejects.toThrow(M.sinConsentimiento);
+    await api.firmarConsentimientoCita(r.id, FIRMA);
+    await api.admin.cambiarEstadoCita(r.id, 'en_curso');
+    const cita = (await api.admin.getAgenda(MARTES, MARTES)).find((c) => c.id === r.id)!;
+    expect(cita).toMatchObject({ estado: 'en_curso', consentimientos_firmados: 1 });
+
+    // Mi cuenta → Documentos: la clienta ve la copia de lo que firmó en el spa.
+    await entrar(api, 'cliente');
+    const docs = await api.getMisConsentimientos();
+    expect(docs).toHaveLength(1);
+    expect(docs[0]).toMatchObject({ cita_id: r.id, politica_tipo: 'consentimiento_depilacion', nombre_firmante: FIRMA.nombre_firmante });
+  });
+
+  it('en cabina se guarda canal "cabina" y quién la capturó; con firma_en_linea = true vuelve la firma del portal', () => {
+    const { db, como } = baseDirecta();
+    const clienta = como('cliente');
+    const personal = como('personal');
+    clientaListaDirecta(clienta);
+    const cejas = db.servicios.find((s) => s.slug === 'cejas')!;
+    const items = [{ servicio_id: cejas.id }];
+    const web = R.reservarCita(clienta, { items, inicio: a(MARTES, '10:00'), firma: FIRMA });
+    expect(db.consentimientos.filter((k) => k.cita_id === web.id)).toHaveLength(0);
+    // Aunque esté cancelada, a la clienta se le dice primero que la firma es en el spa (como en SQL).
+    const otra = R.reservarCita(clienta, { items, inicio: a(MARTES, '11:00') });
+    R.cancelarCita(personal, otra.id);
+    expect(() => R.firmarConsentimientoCita(clienta, otra.id, FIRMA)).toThrow(M.firmaEnSpa);
+    expect(() => R.firmarConsentimientoCita(personal, otra.id, FIRMA)).toThrow('Esta cita está cancelada.');
+
+    R.firmarConsentimientoCita(personal, web.id, FIRMA);
+    expect(db.consentimientos.find((k) => k.cita_id === web.id)).toMatchObject({ canal: 'cabina', capturado_por: personal.usuarioId });
+
+    db.configuracion.firma_en_linea = true;
+    const conFirma = R.reservarCita(clienta, { items, inicio: a(MARTES, '12:00'), firma: FIRMA });
+    expect(db.consentimientos.find((k) => k.cita_id === conFirma.id)).toMatchObject({ canal: 'reserva_web' });
+    expect(() => R.reservarCita(clienta, { items, inicio: a(MARTES, '13:00') })).toThrow(M.firma);
+  });
+
+  it('una menor reserva sin trazo pero con el nombre de quien la acompaña; en cabina firma con su tutor', async () => {
+    const { api } = entorno();
+    const cejas = await servicio(api, 'cejas');
+    const menor = await otraClienta(api, 'menor@ejemplo.mx', '2010-06-01'); // 16 años
+    const pedir = (firma?: DatosFirma) => api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), firma });
+    await expect(pedir()).rejects.toThrow(M.tutor);
+    const r = await pedir({ nombre_firmante: '', firma_svg: '', tutor_nombre: 'Rosa López' });
+    expect(r.estado).toBe('confirmada');
+    await entrar(api, 'personal');
+    await expect(api.firmarConsentimientoCita(r.id, FIRMA)).rejects.toThrow(M.tutor);
+    await api.firmarConsentimientoCita(r.id, { ...FIRMA, tutor_nombre: 'Rosa López' });
+    const exp = await api.admin.getExpediente(menor.cliente!.id);
+    expect(exp.consentimientos).toHaveLength(1);
+    expect(exp.consentimientos[0].tutor_nombre).toBe('Rosa López');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ESPEC §10 · tienda de jabones y velas hechos en Ópalo
+// ---------------------------------------------------------------------------
+
+/** Productos terminados de la tienda propia: por pieza, a la venta en línea. */
+function propio(datos: Partial<ProductoEditable> & Pick<ProductoEditable, 'nombre' | 'categoria'>): ProductoEditable {
+  return productoDe({ unidad_medida: 'pz', uso: 'venta', vendible_en_linea: true, precio_venta: 100, hecho_en_opalo: true, ...datos });
+}
+
+/**
+ * Taller de prueba (sesión de personal): aceite a $0.20/ml, sosa a $0.10/g, etiquetas a $0.50/pz y cera a $0.30/g,
+ * comprados hoy; un jabón ($100) y una vela ($250) por pieza, y la fórmula del jabón
+ * (10 piezas, 28 días de curado; lote = 500 ml + 100 g + 10 etiquetas = $115, $11.50 por pieza).
+ */
+async function tallerDePrueba(api: OpaloApi) {
+  await entrar(api, 'personal');
+  const insumo = (nombre: string, unidad_medida: 'g' | 'ml' | 'pz', contenido_presentacion: number, costo_presentacion: number) =>
+    api.admin.guardarProducto(productoDe({ nombre, categoria: 'materia_prima', unidad_medida, contenido_presentacion, costo_presentacion, uso: 'produccion' }));
+  const aceite = await insumo('Aceite de prueba', 'ml', 1000, 200);
+  const sosa = await insumo('Sosa de prueba', 'g', 1000, 100);
+  const etiqueta = await insumo('Etiqueta de prueba', 'pz', 100, 50);
+  const cera = await insumo('Cera de prueba', 'g', 1000, 300);
+  await api.admin.registrarCompra({
+    items: [
+      { producto_id: aceite.id, presentaciones: 2, costo_presentacion: 200 },
+      { producto_id: sosa.id, presentaciones: 1, costo_presentacion: 100 },
+      { producto_id: etiqueta.id, presentaciones: 1, costo_presentacion: 50 },
+      { producto_id: cera.id, presentaciones: 1, costo_presentacion: 300 },
+    ],
+  });
+  const jabon = await api.admin.guardarProducto(propio({ nombre: 'Jabón de prueba', categoria: 'jabon' }));
+  const vela = await api.admin.guardarProducto(propio({ nombre: 'Vela de prueba', categoria: 'vela', precio_venta: 250 }));
+  const formulaJabon = await api.admin.guardarFormula({
+    producto_id: jabon.id,
+    nombre: 'Jabón de prueba · lote de 10',
+    rendimiento_piezas: 10,
+    dias_curado: 28,
+    instrucciones: null,
+    activa: true,
+    items: [
+      { insumo_id: aceite.id, cantidad: 500 },
+      { insumo_id: sosa.id, cantidad: 100 },
+      { insumo_id: etiqueta.id, cantidad: 10 },
+    ],
+  });
+  return { aceite, sosa, etiqueta, cera, jabon, vela, formulaJabon };
+}
+
+describe('tienda: ficha de productos y existencias (ESPEC §10.1 y §10.3)', () => {
+  it('ficha pública, slug, piezas y orden de la tienda', async () => {
+    const { api } = entorno();
+    await entrar(api, 'personal');
+    const guardar = (d: Partial<ProductoEditable> & Pick<ProductoEditable, 'nombre'>) => api.admin.guardarProducto(propio({ categoria: 'jabon', ...d }));
+    const porPieza = 'Los jabones, velas y sets se manejan por pieza: unidad "pz" y contenido 1.';
+    await expect(guardar({ nombre: 'Jabón X', unidad_medida: 'g' })).rejects.toThrow(porPieza);
+    await expect(guardar({ nombre: 'Jabón X', contenido_presentacion: 100 })).rejects.toThrow(porPieza);
+
+    const avena = await guardar({ nombre: 'Jabón de Avena', color_hex: '#abc', descripcion: '  Suave  ', orden: 2 });
+    expect(avena).toMatchObject({ slug: 'jabon-de-avena', color_hex: '#aabbcc', descripcion: 'Suave', orden: 2, hecho_en_opalo: true, costo_unitario: 0 });
+    const avena2 = await guardar({ nombre: 'Jabón de avena' });
+    expect(avena2.slug).toBe('jabon-de-avena-2'); // el nombre se repite: se numera
+    await expect(guardar({ nombre: 'Otro', slug: 'Jabón de Avena' })).rejects.toThrow('Ya existe otro producto con ese identificador (slug).');
+    await expect(guardar({ nombre: 'Otro', slug: '¡¡!!' })).rejects.toThrow('El identificador (slug) del producto debe tener letras o números.');
+    const vela = await guardar({ nombre: 'Vela Ámbar', categoria: 'vela', slug: ' Vela Ámbar Especial ', destacado: true, color_hex: 'rojo', precio_venta: 300 });
+    expect(vela).toMatchObject({ slug: 'vela-ambar-especial', color_hex: null, destacado: true });
+    const muestra = await guardar({ nombre: 'Jabón de muestra', vendible_en_linea: false });
+    expect(muestra.slug).toBe('jabon-de-muestra'); // de la tienda propia: tiene ficha aunque no se venda en línea
+    const editado = await api.admin.guardarProducto({ ...avena, precio_venta: 125 });
+    expect(editado).toMatchObject({ slug: 'jabon-de-avena', precio_venta: 125 });
+
+    await api.admin.ajustarInventario(avena.id, 3.5, 'ajuste');
+    await api.admin.ajustarInventario(vela.id, 1, 'ajuste');
+    const tienda = await api.getProductosTienda();
+    // Destacados primero; luego categoría, orden y nombre. Lo que no se vende en línea no aparece.
+    expect(tienda.map((p) => p.slug)).toEqual(['vela-ambar-especial', 'jabon-de-avena-2', 'jabon-de-avena']);
+    expect(tienda.find((p) => p.id === avena.id)).toMatchObject({ stock_disponible: 3, hay_stock: true, precio_venta: 125, descripcion: 'Suave', proximo_lote_listo: null });
+    expect(tienda.find((p) => p.id === avena2.id)).toMatchObject({ stock_disponible: 0, hay_stock: false });
+    expect(Object.keys(tienda[0])).not.toContain('stock_minimo'); // nada de costos ni datos internos
+    expect(Object.keys(tienda[0])).not.toContain('costo_unitario');
+  });
+
+  it('al pedir en línea se revisan existencias en piezas completas, sumando renglones repetidos', async () => {
+    const { api } = entorno();
+    await entrar(api, 'personal');
+    const vela = await api.admin.guardarProducto(propio({ nombre: 'Vela de prueba', categoria: 'vela', precio_venta: 300 }));
+    await clientaLista(api);
+    const pedir = (cantidad: number, otra = 0) =>
+      api.crearPedido(
+        [{ tipo: 'producto', id: vela.id, cantidad }, ...(otra ? [{ tipo: 'producto' as const, id: vela.id, cantidad: otra }] : [])],
+        'efectivo',
+      );
+    await expect(pedir(1)).rejects.toThrow('Por ahora no tenemos Vela de prueba.');
+    await entrar(api, 'personal');
+    await api.admin.ajustarInventario(vela.id, 2.5, 'ajuste');
+    await entrar(api, 'cliente');
+    await expect(pedir(3)).rejects.toThrow('Por ahora sólo quedan 2 piezas de Vela de prueba.');
+    await expect(pedir(2, 1)).rejects.toThrow('Por ahora sólo quedan 2 piezas de Vela de prueba.');
+    await entrar(api, 'personal');
+    await api.admin.ajustarInventario(vela.id, 1, 'merma', 'Se cayó');
+    await entrar(api, 'cliente');
+    await expect(pedir(2)).rejects.toThrow('Por ahora sólo queda 1 pieza de Vela de prueba.');
+    await expect(pedir(1)).resolves.toMatchObject({ total: 300 });
+    expect(await api.getMisPedidos()).toHaveLength(1);
+  });
+});
+
+describe('taller: fórmulas y lotes (ESPEC §10.2)', () => {
+  it('fórmulas: validaciones, insumos repetidos sumados y costo con los precios actuales', async () => {
+    const { api } = entorno();
+    const t = await tallerDePrueba(api);
+    const base = {
+      producto_id: t.jabon.id,
+      nombre: 'Jabón · lote nuevo',
+      rendimiento_piezas: 10,
+      dias_curado: 28,
+      instrucciones: null,
+      activa: true,
+      items: [{ insumo_id: t.aceite.id, cantidad: 100 }],
+    };
+    const guardar = (f: Partial<typeof base> & { id?: string }) => api.admin.guardarFormula({ ...base, ...f });
+    await expect(guardar({ id: 'no-existe' })).rejects.toThrow('No encontramos esa fórmula.');
+    await expect(guardar({ producto_id: '' })).rejects.toThrow('Elige el producto que se elabora con esta fórmula.');
+    await expect(guardar({ producto_id: 'no-existe' })).rejects.toThrow('No encontramos ese producto.');
+    await expect(guardar({ nombre: '  ' })).rejects.toThrow('Escribe el nombre de la fórmula.');
+    await expect(guardar({ nombre: 'F'.repeat(201) })).rejects.toThrow(M.nombreLargo);
+    await expect(guardar({ rendimiento_piezas: 0 })).rejects.toThrow('Revisa el rendimiento: cuántas piezas salen de un lote (más de cero).');
+    await expect(guardar({ dias_curado: 2.5 })).rejects.toThrow('Revisa los días de curado: días enteros, cero o más.');
+    await expect(guardar({ dias_curado: -1 })).rejects.toThrow('Revisa los días de curado: días enteros, cero o más.');
+    await expect(guardar({ instrucciones: 'x'.repeat(5001) as unknown as null })).rejects.toThrow(
+      'Las instrucciones son muy largas; escríbelas en máximo 5000 caracteres.',
+    );
+    await expect(guardar({ items: [] })).rejects.toThrow('Agrega al menos un insumo a la fórmula.');
+    await expect(guardar({ items: [{ insumo_id: 'no-existe', cantidad: 1 }] })).rejects.toThrow('Uno de los insumos de la fórmula no existe.');
+    await expect(guardar({ items: [{ insumo_id: t.jabon.id, cantidad: 1 }] })).rejects.toThrow(
+      'Un producto no puede ser insumo de sí mismo: elige la materia prima que lleva.',
+    );
+    await expect(guardar({ items: [{ insumo_id: t.aceite.id, cantidad: 0 }] })).rejects.toThrow('La cantidad de cada insumo debe ser mayor a cero.');
+    expect(await api.admin.getFormulas()).toHaveLength(1); // sólo la del taller de prueba
+
+    let [costo] = await api.admin.getCostosFormulas();
+    expect(costo).toMatchObject({
+      formula_id: t.formulaJabon,
+      producto_nombre: 'Jabón de prueba',
+      rendimiento_piezas: 10,
+      dias_curado: 28,
+      costo_lote: 115,
+      costo_pieza: 11.5,
+      precio_venta: 100,
+      margen_pieza: 88.5,
+      margen_pct: 88.5,
+    });
+    expect(costo.insumos.map((i) => [i.nombre, i.unidad_medida, i.cantidad, i.costo])).toEqual([
+      ['Aceite de prueba', 'ml', 500, 100],
+      ['Etiqueta de prueba', 'pz', 10, 5],
+      ['Sosa de prueba', 'g', 100, 10],
+    ]);
+    // Con los precios actuales: si el aceite sube a $0.30/ml, el lote cuesta $165.
+    await api.admin.registrarCompra({ items: [{ producto_id: t.aceite.id, presentaciones: 1, costo_presentacion: 300 }] });
+    [costo] = await api.admin.getCostosFormulas();
+    expect(costo).toMatchObject({ costo_lote: 165, costo_pieza: 16.5, margen_pieza: 83.5 });
+
+    // Editar reemplaza los insumos; los repetidos se suman.
+    await guardar({ id: t.formulaJabon, dias_curado: 30, items: [{ insumo_id: t.aceite.id, cantidad: 60 }, { insumo_id: t.aceite.id, cantidad: 40.0004 }] });
+    const [f] = await api.admin.getFormulas();
+    expect(f).toMatchObject({ id: t.formulaJabon, nombre: 'Jabón · lote nuevo', dias_curado: 30, items: [{ insumo_id: t.aceite.id, cantidad: 100 }] });
+
+    await entrar(api, 'cliente');
+    await expect(api.admin.getFormulas()).rejects.toThrow(M.permiso);
+    await expect(api.admin.guardarFormula({ ...base })).rejects.toThrow(M.permiso);
+  });
+
+  it('registrar lote: fórmula escalada, existencias, consumos con su costo y código por tipo y día', async () => {
+    const { api } = entorno();
+    const t = await tallerDePrueba(api);
+    const registrar = (l: Partial<Parameters<OpaloApi['admin']['registrarLote']>[0]>) =>
+      api.admin.registrarLote({ producto_id: t.jabon.id, formula_id: t.formulaJabon, ...l });
+    await expect(registrar({ producto_id: 'no-existe' })).rejects.toThrow('No encontramos ese producto.');
+    await expect(registrar({ formula_id: 'no-existe' })).rejects.toThrow('No encontramos esa fórmula.');
+    await expect(registrar({ producto_id: t.vela.id })).rejects.toThrow('Esa fórmula es de otro producto.');
+    await expect(registrar({ formula_id: null })).rejects.toThrow('Elige la fórmula o escribe los insumos que usaste.');
+    await expect(registrar({ producto_id: t.vela.id, formula_id: null, items: [{ insumo_id: t.aceite.id, cantidad: 100 }] })).rejects.toThrow(
+      'Escribe cuántas piezas salen del lote.',
+    );
+    // Un jabón sin fórmula no tendría curado: se rechaza aunque traiga las piezas y lo que se usó.
+    await expect(registrar({ formula_id: null, piezas: 4, items: [{ insumo_id: t.aceite.id, cantidad: 100 }] })).rejects.toThrow(M.jabonSinFormula);
+    await expect(registrar({ piezas: -2 })).rejects.toThrow('Revisa las piezas: más de cero.');
+    await expect(registrar({ elaborado_en: MARTES })).rejects.toThrow('La fecha de elaboración no puede ser futura.');
+    await expect(registrar({ caduca_en: sumarDias(LUNES, -1) })).rejects.toThrow('La caducidad debe ser después de la elaboración.');
+    await expect(registrar({ notas: 'n'.repeat(1001) })).rejects.toThrow(M.notasLargas);
+    await expect(registrar({ items: [{ insumo_id: 'no-existe', cantidad: 1 }] })).rejects.toThrow('Uno de los insumos del lote no existe.');
+    // Hay 2000 ml de aceite: para 45 piezas (500 ml por cada 10) se necesitan 2250.
+    await expect(registrar({ piezas: 45 })).rejects.toThrow('No alcanza el inventario de Aceite de prueba: hay 2000 ml y se necesitan 2250 ml.');
+    expect(await api.admin.getLotes()).toEqual([]);
+
+    // 15 piezas: la fórmula × 1.5 → 750 ml, 150 g y 15 etiquetas = $172.50 ($11.50 por pieza), en curado 28 días.
+    const r1 = await registrar({ piezas: 15, caduca_en: '2027-11-02', notas: 'Primer lote' });
+    expect(r1).toEqual({ id: expect.any(String), codigo: 'JAB-261102-01', costo_materiales: 172.5, costo_unitario: 11.5, listo_desde: '2026-11-30', estado: 'en_curado' });
+    const consumos = (await api.admin.getMovimientos(null, 100)).filter((m) => m.tipo === 'insumo_produccion');
+    expect(consumos.map((m) => [m.producto_nombre, m.cantidad, m.costo_unitario, m.nota]).sort()).toEqual(
+      [
+        ['Aceite de prueba', -750, 0.2, 'Lote JAB-261102-01'],
+        ['Etiqueta de prueba', -15, 0.5, 'Lote JAB-261102-01'],
+        ['Sosa de prueba', -150, 0.1, 'Lote JAB-261102-01'],
+      ].sort(),
+    );
+    const stock = async (id: string) => (await api.admin.getProductos()).find((p) => p.id === id)!.stock_actual;
+    expect(await stock(t.aceite.id)).toBe(1250);
+    expect(await stock(t.jabon.id)).toBe(0); // sigue en curado
+
+    // Con lo que realmente se usó (materiales ajustados): el costo sale de esos materiales y cura igual que su fórmula.
+    const r2 = await registrar({ piezas: 4, items: [{ insumo_id: t.aceite.id, cantidad: 200 }, { insumo_id: t.sosa.id, cantidad: 40 }] });
+    expect(r2).toMatchObject({ codigo: 'JAB-261102-02', costo_materiales: 44, costo_unitario: 11, listo_desde: '2026-11-30', estado: 'en_curado' });
+    expect(await stock(t.jabon.id)).toBe(0);
+
+    // Vela: fórmula sin curado (se libera al registrarla) y elaborada ayer → VEL-261101-01.
+    const formulaVela = await api.admin.guardarFormula({
+      producto_id: t.vela.id,
+      nombre: 'Vela de prueba · 4 frascos',
+      rendimiento_piezas: 4,
+      dias_curado: 0,
+      instrucciones: null,
+      activa: true,
+      items: [{ insumo_id: t.cera.id, cantidad: 800 }, { insumo_id: t.etiqueta.id, cantidad: 4 }],
+    });
+    const r3 = await api.admin.registrarLote({ producto_id: t.vela.id, formula_id: formulaVela, elaborado_en: sumarDias(LUNES, -1) });
+    expect(r3).toMatchObject({ codigo: 'VEL-261101-01', costo_materiales: 242, costo_unitario: 60.5, estado: 'disponible' });
+    // Un producto que no es jabón, vela ni set → PRD.
+    const aceiteCorporal = await api.admin.guardarProducto(propio({ nombre: 'Aceite corporal de prueba', categoria: 'corporal' }));
+    const r4 = await api.admin.registrarLote({ producto_id: aceiteCorporal.id, piezas: 2, items: [{ insumo_id: t.aceite.id, cantidad: 100 }] });
+    expect(r4.codigo).toBe('PRD-261102-01');
+
+    const lotes = await api.admin.getLotes();
+    expect(lotes.map((l) => l.codigo)).toEqual(['PRD-261102-01', 'JAB-261102-02', 'JAB-261102-01', 'VEL-261101-01']);
+    const curando = await api.admin.getLotes('en_curado');
+    expect(curando.map((l) => l.codigo)).toEqual(['JAB-261102-02', 'JAB-261102-01']);
+    const enCurado = curando.find((l) => l.id === r1.id);
+    expect(enCurado).toMatchObject({
+      id: r1.id,
+      producto_nombre: 'Jabón de prueba',
+      categoria: 'jabon',
+      formula_nombre: 'Jabón de prueba · lote de 10',
+      elaborado_en: LUNES,
+      dias_para_listo: 28,
+      caduca_en: '2027-11-02',
+      piezas_planeadas: 15,
+      piezas_obtenidas: null,
+      notas: 'Primer lote',
+      liberado_en: null,
+    });
+    // La tienda avisa cuándo estará listo el lote que cura.
+    expect((await api.getProductosTienda()).find((p) => p.id === t.jabon.id)).toMatchObject({ stock_disponible: 0, proximo_lote_listo: '2026-11-30' });
+    const produccion = (await api.admin.getMovimientos(t.vela.id)).filter((m) => m.tipo === 'produccion');
+    expect(produccion).toMatchObject([{ cantidad: 4, costo_unitario: 60.5, nota: 'Lote VEL-261101-01' }]);
+
+    await entrar(api, 'cliente');
+    await expect(api.admin.registrarLote({ producto_id: t.jabon.id, formula_id: t.formulaJabon })).rejects.toThrow(M.permiso);
+  });
+
+  it('liberar: respeta el curado (salvo forzar), fija las piezas obtenidas y el costo real; descartar', async () => {
+    const { api, fijarHora } = entorno();
+    const t = await tallerDePrueba(api);
+    const l1 = await api.admin.registrarLote({ producto_id: t.jabon.id, formula_id: t.formulaJabon });
+    expect(l1).toMatchObject({ costo_materiales: 115, costo_unitario: 11.5, listo_desde: '2026-11-30' });
+    await expect(api.admin.liberarLote(l1.id)).rejects.toThrow('Este lote sigue en curado hasta el 30 de noviembre de 2026.');
+    await expect(api.admin.liberarLote('no-existe')).rejects.toThrow('No encontramos ese lote.');
+    expect((await api.admin.getResumenHoy()).lotes_listos).toEqual([]);
+
+    // Ya cumplió su curado: aparece en el resumen del día como listo para liberar.
+    fijarHora(new Date(a('2026-11-30', '09:00')));
+    const resumen = await api.admin.getResumenHoy();
+    expect(resumen.lotes_listos.map((l) => [l.id, l.dias_para_listo])).toEqual([[l1.id, 0]]);
+    await expect(api.admin.liberarLote(l1.id, 0)).rejects.toThrow('Revisa las piezas obtenidas: más de cero.');
+    await api.admin.liberarLote(l1.id, 8); // dos barras no salieron bien: el costo por pieza sube
+    const [liberado] = await api.admin.getLotes('disponible');
+    expect(liberado).toMatchObject({ id: l1.id, piezas_obtenidas: 8, costo_unitario: 14.375, estado: 'disponible' });
+    expect(liberado.liberado_en).not.toBeNull();
+    const jabon = (await api.admin.getProductos()).find((p) => p.id === t.jabon.id)!;
+    expect(jabon).toMatchObject({ stock_actual: 8, costo_presentacion: 14.38, costo_unitario: 14.38 });
+    expect((await api.admin.getMovimientos(t.jabon.id)).filter((m) => m.tipo === 'produccion')).toMatchObject([{ cantidad: 8, costo_unitario: 14.375 }]);
+    await expect(api.admin.liberarLote(l1.id)).rejects.toThrow('Este lote ya se liberó.');
+    await expect(api.admin.descartarLote(l1.id, 'x')).rejects.toThrow('Este lote ya se liberó.');
+    expect((await api.admin.getResumenHoy()).lotes_listos).toEqual([]);
+
+    // Forzar: un lote que todavía cura se puede liberar antes.
+    const l2 = await api.admin.registrarLote({ producto_id: t.jabon.id, formula_id: t.formulaJabon, piezas: 5 });
+    await expect(api.admin.liberarLote(l2.id)).rejects.toThrow('Este lote sigue en curado hasta el 28 de diciembre de 2026.');
+    await api.admin.liberarLote(l2.id, null, true);
+    expect((await api.admin.getProductos()).find((p) => p.id === t.jabon.id)!.stock_actual).toBe(13);
+
+    // Descartar: no entra al inventario y su costo es merma del mes.
+    const l3 = await api.admin.registrarLote({ producto_id: t.jabon.id, formula_id: t.formulaJabon, piezas: 5 });
+    await expect(api.admin.descartarLote(l3.id, '  ')).rejects.toThrow('Escribe por qué se descarta el lote.');
+    await expect(api.admin.descartarLote(l3.id, 'n'.repeat(1001))).rejects.toThrow(M.notasLargas);
+    await api.admin.descartarLote(l3.id, 'Se cortó la mezcla');
+    await expect(api.admin.liberarLote(l3.id, null, true)).rejects.toThrow('Este lote se descartó.');
+    await expect(api.admin.descartarLote(l3.id, 'otra vez')).rejects.toThrow('Este lote se descartó.');
+    expect((await api.admin.getLotes('descartado')).map((l) => l.id)).toEqual([l3.id]);
+    expect((await api.admin.getProductos()).find((p) => p.id === t.jabon.id)!.stock_actual).toBe(13);
+  });
+
+  it('márgenes: costo por pieza (el de la fórmula mientras no hay lote), piezas en curado y vendidas en 30 días', async () => {
+    const { api, fijarHora } = entorno();
+    const t = await tallerDePrueba(api);
+    const margen = async () => (await api.admin.getMargenesProductos()).find((m) => m.id === t.jabon.id)!;
+    expect(await margen()).toMatchObject({ categoria: 'jabon', precio_venta: 100, costo_unitario: 11.5, margen: 88.5, margen_pct: 88.5, stock_actual: 0, piezas_en_curado: 0, vendidas_30d: 0 });
+    const lista = await api.admin.getMargenesProductos();
+    expect(lista.some((m) => m.id === t.aceite.id)).toBe(false); // la materia prima no se vende
+    expect(lista.find((m) => m.id === t.vela.id)).toMatchObject({ costo_unitario: 0, margen: 250 }); // sin fórmula ni lote
+
+    const l1 = await api.admin.registrarLote({ producto_id: t.jabon.id, formula_id: t.formulaJabon });
+    expect(await margen()).toMatchObject({ piezas_en_curado: 10 });
+    await api.admin.liberarLote(l1.id, 8, true);
+    expect(await margen()).toMatchObject({ costo_unitario: 14.38, margen: 85.62, margen_pct: 85.6, stock_actual: 8, piezas_en_curado: 0 });
+
+    await api.admin.ventaMostrador({ items: [{ tipo: 'producto', id: t.jabon.id, cantidad: 3 }], metodo: 'efectivo' });
+    expect(await margen()).toMatchObject({ stock_actual: 5, vendidas_30d: 3 });
+    fijarHora(new Date(a('2026-12-03', '12:00')));
+    expect(await margen()).toMatchObject({ vendidas_30d: 0 });
+  });
+});
+
+describe('mostrador y entregas (ESPEC §10.3)', () => {
+  it('venta de mostrador: valida, cobra completo, entrega en el acto y sale en resultados (la cortesía no es ingreso)', async () => {
+    const { api } = entorno();
+    const cejas = await servicio(api, 'cejas');
+    await entrar(api, 'personal');
+    const jabon = await api.admin.guardarProducto(propio({ nombre: 'Jabón de prueba', categoria: 'jabon', precio_venta: 120, costo_presentacion: 30 }));
+    const soloSpa = await api.admin.guardarProducto(
+      propio({ nombre: 'Aceite sólo en el spa', categoria: 'venta', precio_venta: 200, costo_presentacion: 80, vendible_en_linea: false, hecho_en_opalo: false }),
+    );
+    await api.admin.ajustarInventario(jabon.id, 5, 'ajuste');
+    await api.admin.ajustarInventario(soloSpa.id, 1, 'ajuste');
+    const vender = (v: Partial<Parameters<OpaloApi['admin']['ventaMostrador']>[0]>) =>
+      api.admin.ventaMostrador({ items: [{ tipo: 'producto', id: jabon.id, cantidad: 1 }], metodo: 'efectivo', ...v });
+    await expect(vender({ metodo: undefined as unknown as MetodoPago })).rejects.toThrow('Elige el método de pago.');
+    await expect(vender({ propina: -5 })).rejects.toThrow('La propina no puede ser negativa.');
+    await expect(vender({ notas: 'n'.repeat(1001) })).rejects.toThrow(M.notasLargas);
+    await expect(vender({ cliente_id: 'no-existe' })).rejects.toThrow('No encontramos a esa clienta.');
+    await expect(vender({ items: [] })).rejects.toThrow('Tu carrito está vacío.');
+    await expect(vender({ items: [{ tipo: 'producto', id: 'no-existe', cantidad: 1 }] })).rejects.toThrow(M.noALaVenta);
+    await expect(vender({ items: [{ tipo: 'servicio', id: cejas.id, cantidad: 1 }] })).rejects.toThrow(M.serviciosSinClienta);
+    await expect(vender({ items: [{ tipo: 'producto', id: jabon.id, cantidad: 6 }] })).rejects.toThrow('Por ahora sólo quedan 5 piezas de Jabón de prueba.');
+    await expect(vender({ items: [{ tipo: 'producto', id: jabon.id, cantidad: 0 }] })).rejects.toThrow(M.cantidadMinima);
+    expect(await api.admin.getPedidos()).toEqual([]); // un error no deja nada a medias
+
+    // En el spa se vende también lo que no está en la tienda en línea.
+    const v = await vender({
+      items: [{ tipo: 'producto', id: jabon.id, cantidad: 2 }, { tipo: 'producto', id: soloSpa.id, cantidad: 1 }],
+      metodo: 'tarjeta',
+      propina: 30,
+      notas: 'Para regalo',
+    });
+    expect(v).toEqual({ id: expect.any(String), folio: 'OP-00001', total: 440 });
+    const [p] = await api.admin.getPedidos('pagado');
+    expect(p).toMatchObject({
+      id: v.id,
+      cliente_id: null,
+      cliente_nombre: 'Venta de mostrador',
+      origen: 'mostrador',
+      estado: 'pagado',
+      total: 440,
+      pagado: 440,
+      metodo_pago_preferido: 'tarjeta',
+      notas: 'Para regalo',
+      tiene_productos: true,
+    });
+    expect(p.pagado_en).not.toBeNull();
+    expect(p.entregado_en).not.toBeNull();
+    expect(p.items.map((i) => [i.descripcion, i.cantidad, i.importe])).toEqual([['Jabón de prueba', 2, 240], ['Aceite sólo en el spa', 1, 200]]);
+    const ventas = (await api.admin.getMovimientos(jabon.id)).filter((m) => m.tipo === 'venta');
+    expect(ventas).toMatchObject([{ cantidad: -2, costo_unitario: 30, nota: 'Venta del pedido OP-00001' }]);
+    await expect(vender({ items: [{ tipo: 'producto', id: soloSpa.id, cantidad: 1 }] })).rejects.toThrow('Por ahora no tenemos Aceite sólo en el spa.');
+    expect((await api.admin.getResumenHoy()).pedidos_por_entregar).toBe(0);
+
+    await vender({ metodo: 'cortesia', notas: 'Cortesía' }); // un jabón de cortesía: su costo sí cuenta
+    await entrar(api, 'admin');
+    const [mes] = await api.admin.getResultados(1);
+    expect(mes).toMatchObject({ ingresos: 440, propinas: 30, costo_ventas: 170, mermas: 0, utilidad: 270 });
+    // Una venta sin clienta registrada no es de ninguna clienta.
+    await entrar(api, 'cliente');
+    expect(await api.getMisPedidos()).toEqual([]);
+    await expect(vender({})).rejects.toThrow(M.permiso);
+  });
+
+  it('servicios y paquetes en mostrador: con la clienta elegida se vuelven sus créditos (aunque no se vendan en línea)', async () => {
+    const { api } = entorno();
+    const cejas = await servicio(api, 'cejas');
+    const express = await paquete(api, 'express');
+    const sesion = await entrar(api, 'cliente');
+    await entrar(api, 'admin');
+    await api.admin.guardarServicio({ ...cejas, vendible_en_linea: false });
+    const v = await api.admin.ventaMostrador({
+      items: [
+        { tipo: 'servicio', id: cejas.id, cantidad: 2 },
+        { tipo: 'paquete', id: express.id, cantidad: 1, regalo_para: 'Ana' },
+      ],
+      metodo: 'efectivo',
+      cliente_id: sesion.cliente!.id,
+    });
+    expect(v.total).toBe(540);
+    const [p] = await api.admin.getPedidos();
+    expect(p).toMatchObject({ origen: 'mostrador', cliente_nombre: 'Mariana López (ejemplo)', estado: 'pagado', tiene_productos: false, entregado_en: null });
+    await expect(api.admin.marcarEntregado(v.id)).rejects.toThrow('Este pedido no tiene productos que entregar.');
+
+    await entrar(api, 'cliente');
+    const creditos = await api.getMisCreditos();
+    expect(creditos.find((c) => c.servicio_id === cejas.id)).toMatchObject({ cantidad: 2, codigo_regalo: null });
+    expect(creditos.find((c) => c.paquete_id === express.id)?.codigo_regalo).toMatch(/^[A-HJ-NP-Z2-9]{8}$/);
+    expect((await api.getMisPedidos()).map((x) => x.origen)).toEqual(['mostrador']);
+    await expect(api.crearPedido([{ tipo: 'servicio', id: cejas.id, cantidad: 1 }], 'efectivo')).rejects.toThrow(M.noVendible);
+  });
+
+  it('pedido en línea con productos: pagado queda por entregar hasta que el personal lo entrega', async () => {
+    const { api, fijarHora } = entorno();
+    await entrar(api, 'personal');
+    const jabon = await api.admin.guardarProducto(propio({ nombre: 'Jabón de prueba', categoria: 'jabon', precio_venta: 120 }));
+    await api.admin.ajustarInventario(jabon.id, 3, 'ajuste');
+    await clientaLista(api);
+    const ped = await api.crearPedido([{ tipo: 'producto', id: jabon.id, cantidad: 2 }], 'transferencia');
+    const [mio] = await api.getMisPedidos();
+    expect(mio).toMatchObject({ origen: 'web', tiene_productos: true, entregado_en: null, cliente_nombre: 'Mariana López (ejemplo)' });
+    await expect(api.admin.marcarEntregado(ped.id)).rejects.toThrow(M.permiso);
+
+    await entrar(api, 'personal');
+    await expect(api.admin.marcarEntregado('no-existe')).rejects.toThrow('No encontramos ese pedido.');
+    await expect(api.admin.marcarEntregado(ped.id)).rejects.toThrow('Este pedido todavía no está pagado.');
+    expect((await api.admin.getResumenHoy()).pedidos_por_entregar).toBe(0);
+    await api.admin.registrarPago({ monto: 240, metodo: 'transferencia', pedido_id: ped.id });
+    expect((await api.admin.getResumenHoy()).pedidos_por_entregar).toBe(1);
+    await api.admin.marcarEntregado(ped.id);
+    const [entregado] = await api.admin.getPedidos('pagado');
+    expect(entregado.entregado_en).toBe(AHORA.toISOString());
+    fijarHora(new Date(a(MARTES, '12:00')));
+    await api.admin.marcarEntregado(ped.id); // otra vez: no cambia la fecha
+    expect((await api.admin.getPedidos('pagado'))[0].entregado_en).toBe(AHORA.toISOString());
+    expect((await api.admin.getResumenHoy()).pedidos_por_entregar).toBe(0);
+  });
+
+  it('un pedido en línea no aparta piezas: si se agotan antes de pagarlo, el pago no pasa y el stock no queda en negativo', async () => {
+    const { api } = entorno();
+    await entrar(api, 'personal');
+    const jabon = await api.admin.guardarProducto(propio({ nombre: 'Jabón de prueba', categoria: 'jabon', precio_venta: 120 }));
+    await api.admin.ajustarInventario(jabon.id, 3, 'ajuste');
+    await clientaLista(api);
+    const ped = await api.crearPedido([{ tipo: 'producto', id: jabon.id, cantidad: 2 }], 'efectivo');
+
+    await entrar(api, 'personal');
+    await api.admin.ventaMostrador({ items: [{ tipo: 'producto', id: jabon.id, cantidad: 2 }], metodo: 'efectivo' });
+    await expect(api.admin.registrarPago({ monto: 240, metodo: 'efectivo', pedido_id: ped.id })).rejects.toThrow(
+      'Por ahora sólo queda 1 pieza de Jabón de prueba.',
+    );
+    const [pendiente] = await api.admin.getPedidos('pendiente_pago');
+    expect(pendiente).toMatchObject({ id: ped.id, pagado: 0 });
+    expect((await api.admin.getProductos()).find((p) => p.id === jabon.id)!.stock_actual).toBe(1);
+    // Un anticipo que no completa el total sí se registra (todavía no se entrega nada).
+    await api.admin.registrarPago({ monto: 1, metodo: 'efectivo', pedido_id: ped.id });
+    expect((await api.admin.getPedidos('pendiente_pago'))[0].pagado).toBe(1);
+  });
+});
+
+describe('resultados con costo de ventas y mermas (ESPEC §10.4)', () => {
+  it('la merma y el lote descartado cuentan en su mes; la materia prima de un lote no es gasto', async () => {
+    const { api, fijarHora } = entorno({ ahora: new Date(a('2026-10-30', '12:00')) });
+    const t = await tallerDePrueba(api);
+    const lote = await api.admin.registrarLote({ producto_id: t.jabon.id, formula_id: t.formulaJabon }); // $115 en octubre
+    fijarHora(new Date(a(LUNES, '12:00')));
+    await api.admin.descartarLote(lote.id, 'Se cortó la mezcla'); // noviembre
+    await api.admin.ajustarInventario(t.aceite.id, 100, 'merma', 'Se derramó'); // 100 ml × $0.20
+    await entrar(api, 'admin');
+    const [oct, nov] = await api.admin.getResultados(2);
+    // Compra del taller de prueba: 2 × $200 + $100 + $50 + $300 = $850; los insumos del lote no son gasto del mes.
+    expect(oct).toMatchObject({ mes: '2026-10-01', costo_insumos: 0, costo_ventas: 0, mermas: 0, compras: 850, utilidad: 0, flujo: -850 });
+    expect(nov).toMatchObject({ mes: '2026-11-01', mermas: 135, utilidad: -135, flujo: 0 });
+    expect((await api.admin.getResumenHoy()).mes_actual).toMatchObject({ mermas: 135 });
+  });
+});
+
+describe('datos de ejemplo del taller y la tienda', () => {
+  it('jabones, velas y set con ficha completa; materia prima, fórmulas, lotes, ventas y resultados', async () => {
+    const aviso = vi.spyOn(console, 'warn');
+    const { api } = entorno({ ejemplos: true, ahora: ANTES_DE_ABRIR });
+    const tienda = await api.getProductosTienda();
+    const propios = tienda.filter((p) => p.hecho_en_opalo);
+    expect(propios.filter((p) => p.categoria === 'jabon')).toHaveLength(4);
+    expect(propios.filter((p) => p.categoria === 'vela')).toHaveLength(3);
+    expect(propios.filter((p) => p.categoria === 'set')).toHaveLength(1);
+    expect(propios.every((p) => CATEGORIAS_TIENDA.includes(p.categoria) && p.nombre.endsWith('(ejemplo)'))).toBe(true);
+    for (const p of propios) {
+      for (const campo of ['slug', 'descripcion', 'aroma', 'ingredientes', 'modo_uso', 'advertencias', 'contenido_neto'] as const)
+        expect(p[campo], `${p.nombre}: ${campo}`).toBeTruthy();
+      expect(p.color_hex).toMatch(/^#[0-9a-fA-F]{6}$/);
+      expect(p.precio_venta).toBeGreaterThan(0);
+    }
+    expect(new Set(propios.map((p) => p.color_hex)).size).toBe(propios.length);
+    expect(propios.filter((p) => p.destacado)).toHaveLength(2);
+    expect(tienda.slice(0, 2).every((p) => p.destacado)).toBe(true);
+    for (const v of propios.filter((p) => p.categoria === 'vela')) {
+      expect(v.advertencias).toContain('sin supervisión');
+      expect(v.advertencias).toContain('mecha');
+      expect(v.advertencias).toContain('niñas, niños y mascotas');
+    }
+    // Agotado, con un lote de jabón que estará listo en 10 días: "disponible desde…".
+    const agotado = propios.find((p) => !p.hay_stock && p.proximo_lote_listo)!;
+    expect(agotado).toMatchObject({ categoria: 'jabon', stock_disponible: 0, proximo_lote_listo: sumarDias(HOY_PREVIO, 10) });
+    expect(propios.filter((p) => p.hay_stock).length).toBeGreaterThanOrEqual(6);
+
+    await entrar(api, 'personal');
+    const productos = await api.admin.getProductos();
+    expect(productos.every((p) => p.stock_actual >= 0)).toBe(true);
+    const materia = productos.filter((p) => p.uso === 'produccion');
+    for (const nombre of [
+      'Aceite de oliva',
+      'Aceite de coco',
+      'Manteca de karité',
+      'Sosa cáustica',
+      'Agua destilada',
+      'Avena coloidal',
+      'Aceite esencial de lavanda',
+      'Carbón activado',
+      'Arcilla rosa',
+      'Cera de soya',
+      'Mechas de algodón',
+      'Fragancia de vainilla',
+      'Frascos ámbar',
+      'Etiquetas',
+    ])
+      expect(materia.some((m) => m.nombre.startsWith(nombre)), nombre).toBe(true);
+    expect(materia.every((m) => m.nombre.endsWith('(ejemplo)') && m.costo_unitario > 0)).toBe(true);
+    expect((await api.admin.getReposicion()).some((r) => materia.some((m) => m.id === r.id))).toBe(true); // "se acabó" algo del taller
+
+    const formulas = await api.admin.getFormulas();
+    expect(formulas).toHaveLength(8);
+    const categoriaDe = new Map(productos.map((p) => [p.id, p.categoria]));
+    expect(formulas.filter((f) => categoriaDe.get(f.producto_id) === 'jabon').every((f) => f.dias_curado === 28)).toBe(true);
+    expect(formulas.filter((f) => categoriaDe.get(f.producto_id) === 'vela').every((f) => f.dias_curado === 2)).toBe(true);
+    expect((await api.admin.getCostosFormulas()).every((c) => c.costo_pieza > 0 && (c.margen_pct ?? 0) > 0)).toBe(true);
+
+    const lotes = await api.admin.getLotes();
+    expect(lotes.every((l) => /^(JAB|VEL|SET)-\d{6}-\d{2}$/.test(l.codigo))).toBe(true);
+    expect(lotes.some((l) => l.estado === 'en_curado' && l.categoria === 'jabon' && l.dias_para_listo === 10)).toBe(true);
+    expect(lotes.filter((l) => l.estado === 'disponible').length).toBeGreaterThanOrEqual(5);
+    expect(lotes.some((l) => l.estado === 'descartado')).toBe(true);
+    expect(lotes.some((l) => l.codigo.startsWith('SET-'))).toBe(true);
+    const resumen = await api.admin.getResumenHoy();
+    expect(resumen.lotes_listos).toHaveLength(1);
+    expect(resumen.lotes_listos[0].dias_para_listo).toBeLessThanOrEqual(0);
+    expect(resumen.pedidos_por_entregar).toBe(1);
+
+    const margenes = await api.admin.getMargenesProductos();
+    expect(margenes.some((m) => m.vendidas_30d > 0)).toBe(true);
+    expect(margenes.some((m) => m.piezas_en_curado > 0)).toBe(true);
+    expect(margenes.filter((m) => propios.some((p) => p.id === m.id)).every((m) => m.costo_unitario > 0 && (m.margen ?? 0) > 0)).toBe(true);
+
+    const pedidos = await api.admin.getPedidos();
+    expect(pedidos.some((p) => p.origen === 'mostrador' && p.cliente_id === null && p.cliente_nombre === 'Venta de mostrador')).toBe(true);
+    expect(pedidos.some((p) => p.origen === 'mostrador' && p.cliente_id !== null)).toBe(true);
+    expect(pedidos.some((p) => p.origen === 'mostrador' && p.metodo_pago_preferido === 'cortesia')).toBe(true);
+    expect(pedidos.filter((p) => p.origen === 'mostrador').every((p) => p.estado === 'pagado' && p.entregado_en !== null)).toBe(true);
+    expect(pedidos.some((p) => p.origen === 'web' && p.estado === 'pagado' && p.tiene_productos && p.entregado_en === null)).toBe(true);
+    expect(pedidos.some((p) => p.origen === 'web' && p.entregado_en !== null)).toBe(true);
+
+    await entrar(api, 'admin');
+    const resultados = await api.admin.getResultados(4);
+    expect(resultados.some((r) => r.costo_ventas > 0)).toBe(true);
+    expect(resultados.some((r) => r.mermas > 0)).toBe(true);
+    for (const r of resultados) expect(r.utilidad).toBeCloseTo(r.ingresos - r.costo_insumos - r.costo_ventas - r.mermas - r.gastos, 1);
+    expect(aviso).not.toHaveBeenCalled();
+  });
+});
+
+describe('utilidades del taller', () => {
+  it('fecha y cantidad legibles (como fecha_legible y cantidad_legible) y slug (como slug_de)', () => {
+    expect(fechaLegible('2026-11-12')).toBe('12 de noviembre de 2026');
+    expect(fechaLegible('2027-01-01')).toBe('1 de enero de 2027');
+    expect(cantidadLegible(12.5)).toBe('12.5');
+    expect(cantidadLegible(300)).toBe('300');
+    expect(cantidadLegible(0.1 + 0.2)).toBe('0.3');
+    expect(cantidadLegible(-0)).toBe('0');
+    expect(slugDe('Jabón de Avena (ejemplo)')).toBe('jabon-de-avena-ejemplo');
+    expect(slugDe('  ¡Vela Ñandú!  ')).toBe('vela-nandu');
+    expect(slugDe('¿?')).toBe('');
   });
 });

@@ -46,7 +46,9 @@ begin
   perform pruebas.igual(v.costo_insumos, 25.00::numeric, 'costo de insumos = −Σ consumo × costo');
   perform pruebas.igual(v.compras, 300.00::numeric, 'compras');
   perform pruebas.igual(v.gastos, 400.00::numeric, 'gastos por periodo');
-  perform pruebas.igual(v.utilidad, 625.00::numeric, 'utilidad = 1050 − 25 − 400');
+  perform pruebas.igual(v.costo_ventas, 0.00::numeric, 'sin productos vendidos');
+  perform pruebas.igual(v.mermas, 7.50::numeric, 'merma = 3 g × 2.50 (ya no es costo de insumos)');
+  perform pruebas.igual(v.utilidad, 617.50::numeric, 'utilidad = 1050 − 25 − 0 − 7.50 − 400');
   perform pruebas.igual(v.flujo, 350.00::numeric, 'flujo = 1050 − 300 − 400');
   perform pruebas.igual(v.citas_completadas, 1, 'citas completadas');
   perform pruebas.igual((select ingresos from public.v_resultado_mensual where mes = (v_mes + interval '1 month')::date),

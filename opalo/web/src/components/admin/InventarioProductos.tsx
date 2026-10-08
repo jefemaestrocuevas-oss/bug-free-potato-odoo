@@ -6,6 +6,15 @@ import { InventarioAjuste } from './InventarioAjuste';
 import { InventarioFormProducto } from './InventarioFormProducto';
 import { CATEGORIAS_PRODUCTO, equivalencia, necesitaReponer, nombrePresentacion, pesos } from './InventarioPiezas';
 import { ETIQUETA_CATEGORIA_PRODUCTO, ETIQUETA_USO, cantidadConUnidad, dineroUnitario, porTexto } from './util';
+import { esMateriaPrima, esTerminado } from './TallerPiezas';
+
+/** Filtros por grupo además de la categoría exacta. */
+type Grupo = '__materias' | '__tienda';
+type FiltroCategoria = CategoriaProducto | Grupo | '';
+const GRUPOS: { id: Grupo; texto: string; incluye: (c: CategoriaProducto) => boolean }[] = [
+  { id: '__materias', texto: 'Materias primas y envases (taller)', incluye: esMateriaPrima },
+  { id: '__tienda', texto: 'Jabones, velas y sets (tienda)', incluye: esTerminado },
+];
 
 function normal(t: string) {
   return t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -20,7 +29,7 @@ interface Props {
 }
 
 export function InventarioProductos({ productos, proveedores, onCambio, recargando = false }: Props) {
-  const [categoria, setCategoria] = useState<CategoriaProducto | ''>('');
+  const [categoria, setCategoria] = useState<FiltroCategoria>('');
   const [busqueda, setBusqueda] = useState('');
   const [soloReponer, setSoloReponer] = useState(false);
   const [verInactivos, setVerInactivos] = useState(true);
@@ -32,7 +41,11 @@ export function InventarioProductos({ productos, proveedores, onCambio, recargan
   const nombresProveedor = new Map(proveedores.map((p) => [p.id, p.nombre]));
   const q = normal(busqueda.trim());
   const filtrados = productos
-    .filter((p) => !categoria || p.categoria === categoria)
+    .filter((p) => {
+      if (!categoria) return true;
+      const grupo = GRUPOS.find((g) => g.id === categoria);
+      return grupo ? grupo.incluye(p.categoria) : p.categoria === categoria;
+    })
     .filter((p) => !q || normal(`${p.nombre} ${p.marca ?? ''} ${p.presentacion ?? ''}`).includes(q))
     .filter((p) => !soloReponer || necesitaReponer(p))
     .filter((p) => verInactivos || p.activo)
@@ -54,13 +67,22 @@ export function InventarioProductos({ productos, proveedores, onCambio, recargan
           <label className="etiqueta" htmlFor="inv-categoria">
             Categoría
           </label>
-          <select id="inv-categoria" className="input" value={categoria} onChange={(e) => setCategoria(e.target.value as CategoriaProducto | '')}>
+          <select id="inv-categoria" className="input" value={categoria} onChange={(e) => setCategoria(e.target.value as FiltroCategoria)}>
             <option value="">Todas</option>
-            {categoriasUsadas.map((c) => (
-              <option key={c} value={c}>
-                {ETIQUETA_CATEGORIA_PRODUCTO[c]}
-              </option>
-            ))}
+            <optgroup label="Grupos">
+              {GRUPOS.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.texto}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Categoría">
+              {categoriasUsadas.map((c) => (
+                <option key={c} value={c}>
+                  {ETIQUETA_CATEGORIA_PRODUCTO[c]}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </div>
         <button type="button" className="btn btn-primario inv-boton-nuevo" onClick={() => setEditando('nuevo')}>
@@ -82,7 +104,7 @@ export function InventarioProductos({ productos, proveedores, onCambio, recargan
 
       {productos.length === 0 ? (
         <Vacio titulo="Aún no hay productos">
-          <p>Da de alta tus insumos de cabina (cera, lociones, desechables…) y los productos que vendes.</p>
+          <p>Da de alta tus insumos de cabina (cera, lociones, desechables…), la materia prima del taller y los productos que vendes.</p>
           <button type="button" className="btn btn-primario" onClick={() => setEditando('nuevo')}>
             + Nuevo producto
           </button>
@@ -137,7 +159,12 @@ export function InventarioProductos({ productos, proveedores, onCambio, recargan
                       <span className="inv-pills">
                         {reponer && <span className="pill pill-alerta">Reponer</span>}
                         {!p.activo && <span className="pill pill-gris">Inactivo</span>}
-                        {p.uso !== 'cabina' && (
+                        {p.uso === 'produccion' && (
+                          <span className="pill pill-info" title={ETIQUETA_USO[p.uso]}>
+                            Taller
+                          </span>
+                        )}
+                        {(p.uso === 'venta' || p.uso === 'ambos') && (
                           <span className="pill pill-oro" title={ETIQUETA_USO[p.uso]}>
                             {p.uso === 'venta' ? 'Venta' : 'Cabina y venta'}
                             {p.vendible_en_linea ? ' · en línea' : ''}
@@ -202,13 +229,14 @@ export function InventarioProductos({ productos, proveedores, onCambio, recargan
         </div>
       )}
       <p className="ayuda inv-nota-pie">
-        El stock se mueve solo: sube con cada compra, baja con los consumos de cada cita completada (según la receta del servicio) y con las ventas. Para
-        corregirlo, usa “Ajuste o merma”.
+        El stock se mueve solo: sube con cada compra y con los lotes que se liberan en el taller; baja con los consumos de cada cita completada (según la
+        receta del servicio), con las ventas y con la materia prima de cada lote. Para corregirlo, usa “Ajuste o merma”.
       </p>
 
       {editando && (
         <InventarioFormProducto
           producto={editando === 'nuevo' ? null : editando}
+          categoriaInicial={categoria === '__materias' ? 'materia_prima' : categoria === '__tienda' ? 'jabon' : categoria || undefined}
           proveedores={proveedores}
           onCerrar={() => setEditando(null)}
           onGuardado={(p, nuevo) => {

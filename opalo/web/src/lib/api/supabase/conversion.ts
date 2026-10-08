@@ -15,12 +15,16 @@ import type {
   Configuracion,
   ConsentimientoFirmado,
   Contraindicacion,
+  CostoFormula,
   CostoServicio,
   Credito,
   EstadoCita,
+  EstadoLote,
   EstadoPedido,
   EtapaServicio,
   FichaSalud,
+  Formula,
+  FormulaItem,
   FrecuenciaGasto,
   Gasto,
   GastoPorVencer,
@@ -28,9 +32,12 @@ import type {
   Horario,
   ItemCita,
   ItemPedido,
+  Lote,
+  MargenProducto,
   MetodoPago,
   MovimientoInventario,
   OrigenCita,
+  OrigenPedido,
   Paquete,
   PaqueteItem,
   PedidoDetalle,
@@ -39,6 +46,7 @@ import type {
   ProductoReposicion,
   ProductoTienda,
   Proveedor,
+  ResultadoLote,
   ResultadoMensual,
   ResultadoPedido,
   ResultadoReserva,
@@ -220,7 +228,7 @@ export const ORDEN_POLITICAS: TipoPolitica[] = [
 
 /** Columnas de configuracion (ESPEC §4.1); se piden por nombre, nunca con '*'. */
 export const COLUMNAS_CONFIGURACION =
-  'nombre_negocio, lema, telefono_whatsapp, direccion, zona_horaria, duracion_sesion_min, intervalo_slots_min, anticipacion_min_horas, ventana_reserva_dias, horas_cancelacion, tolerancia_retraso_min, edad_minima, edad_mayoria, vigencia_creditos_dias, fecha_apertura';
+  'nombre_negocio, lema, telefono_whatsapp, direccion, zona_horaria, duracion_sesion_min, intervalo_slots_min, anticipacion_min_horas, ventana_reserva_dias, horas_cancelacion, tolerancia_retraso_min, edad_minima, edad_mayoria, vigencia_creditos_dias, fecha_apertura, firma_en_linea';
 
 export function aConfiguracion(f: Fila | null): Configuracion {
   const x = f ?? {};
@@ -240,6 +248,8 @@ export function aConfiguracion(f: Fila | null): Configuracion {
     edad_mayoria: num(x.edad_mayoria, 18),
     vigencia_creditos_dias: num(x.vigencia_creditos_dias, 365),
     fecha_apertura: fechaONula(x.fecha_apertura),
+    // ESPEC §9: default false (la firma se hace en la tablet de cabina).
+    firma_en_linea: bool(x.firma_en_linea),
   };
 }
 
@@ -336,15 +346,59 @@ export function aContraindicacion(f: Fila): Contraindicacion {
   };
 }
 
+/** Columnas de la vista pública productos_tienda (ESPEC §10.1). */
+export const COLUMNAS_PRODUCTO_TIENDA =
+  'id, slug, nombre, categoria, marca, presentacion, descripcion, aroma, ingredientes, modo_uso, advertencias, contenido_neto, foto_url, color_hex, destacado, hecho_en_opalo, precio_venta, stock_disponible, hay_stock, proximo_lote_listo';
+
+/** '#rrggbb' válido o null (la ilustración usa su color por defecto). */
+export function colorHex(v: unknown): string | null {
+  const t = typeof v === 'string' ? v.trim() : '';
+  if (/^#[0-9a-fA-F]{6}$/.test(t)) return t;
+  const corto = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(t);
+  return corto ? `#${corto[1]}${corto[1]}${corto[2]}${corto[2]}${corto[3]}${corto[3]}` : null;
+}
+
+/** Fila de productos_tienda. */
 export function aProductoTienda(f: Fila): ProductoTienda {
+  const stock = Math.max(0, Math.floor(num(f.stock_disponible)));
   return {
     id: texto(f.id),
+    slug: textoONulo(f.slug),
     nombre: texto(f.nombre),
+    categoria: texto(f.categoria, 'venta') as CategoriaProducto,
     marca: textoONulo(f.marca),
     presentacion: textoONulo(f.presentacion),
+    descripcion: textoONulo(f.descripcion),
+    aroma: textoONulo(f.aroma),
+    ingredientes: textoONulo(f.ingredientes),
+    modo_uso: textoONulo(f.modo_uso),
+    advertencias: textoONulo(f.advertencias),
+    contenido_neto: textoONulo(f.contenido_neto),
+    foto_url: textoONulo(f.foto_url),
+    color_hex: colorHex(f.color_hex),
+    destacado: bool(f.destacado),
+    hecho_en_opalo: bool(f.hecho_en_opalo),
     precio_venta: num(f.precio_venta),
-    hay_stock: bool(f.hay_stock),
+    stock_disponible: stock,
+    hay_stock: f.hay_stock === null || f.hay_stock === undefined ? stock > 0 : bool(f.hay_stock),
+    proximo_lote_listo: fechaONula(f.proximo_lote_listo),
   };
+}
+
+/**
+ * Orden de la tienda (ESPEC §10.1): destacados primero, luego categoría; dentro de eso se respeta
+ * el orden en que llegaron (la vista ya ordena por orden y nombre, columnas que no expone todas).
+ */
+export function ordenarTienda(lista: ProductoTienda[]): ProductoTienda[] {
+  return lista
+    .map((p, i) => ({ p, i }))
+    .sort(
+      (a, b) =>
+        Number(b.p.destacado) - Number(a.p.destacado) ||
+        (a.p.categoria < b.p.categoria ? -1 : a.p.categoria > b.p.categoria ? 1 : 0) ||
+        a.i - b.i,
+    )
+    .map((x) => x.p);
 }
 
 export function aSlot(f: Fila): Slot {
@@ -463,15 +517,20 @@ export function aItemPedido(f: Fila): ItemPedido {
 
 /** Columnas de v_pedidos_detalle (ESPEC §7). */
 export const COLUMNAS_PEDIDO_DETALLE =
-  'id, folio, cliente_id, cliente_nombre, estado, total, pagado, metodo_pago_preferido, notas, creado_en, pagado_en, items';
+  'id, folio, cliente_id, cliente_nombre, estado, total, pagado, metodo_pago_preferido, notas, creado_en, pagado_en, origen, entregado_en, tiene_productos, items';
+
+/** Nombre que da v_pedidos_detalle a una venta sin clienta registrada (ESPEC §10.3). */
+export const NOMBRE_VENTA_MOSTRADOR = 'Venta de mostrador';
 
 /** Fila de v_pedidos_detalle. */
 export function aPedidoDetalle(f: Fila): PedidoDetalle {
+  const items = filas(f.items).map(aItemPedido);
+  const clienteId = textoONulo(f.cliente_id);
   return {
     id: texto(f.id),
     folio: texto(f.folio),
-    cliente_id: texto(f.cliente_id),
-    cliente_nombre: texto(f.cliente_nombre),
+    cliente_id: clienteId,
+    cliente_nombre: texto(f.cliente_nombre) || (clienteId ? '' : NOMBRE_VENTA_MOSTRADOR),
     estado: texto(f.estado, 'pendiente_pago') as EstadoPedido,
     total: num(f.total),
     pagado: num(f.pagado),
@@ -479,7 +538,13 @@ export function aPedidoDetalle(f: Fila): PedidoDetalle {
     notas: textoONulo(f.notas),
     creado_en: instante(f.creado_en),
     pagado_en: instanteONulo(f.pagado_en),
-    items: filas(f.items).map(aItemPedido),
+    origen: (texto(f.origen) === 'mostrador' ? 'mostrador' : 'web') as OrigenPedido,
+    entregado_en: instanteONulo(f.entregado_en),
+    tiene_productos:
+      f.tiene_productos === null || f.tiene_productos === undefined
+        ? items.some((it) => it.tipo === 'producto')
+        : bool(f.tiene_productos),
+    items,
   };
 }
 
@@ -580,8 +645,9 @@ export function aProveedor(f: Fila): Proveedor {
   };
 }
 
+/** Columnas de productos, incluida la ficha pública de la tienda (ESPEC §4.7 y §10.1). */
 export const COLUMNAS_PRODUCTO =
-  'id, nombre, marca, categoria, unidad_medida, presentacion, contenido_presentacion, costo_presentacion, costo_unitario, stock_actual, stock_minimo, proveedor_id, uso, precio_venta, vendible_en_linea, activo, notas';
+  'id, nombre, marca, categoria, unidad_medida, presentacion, contenido_presentacion, costo_presentacion, costo_unitario, stock_actual, stock_minimo, proveedor_id, uso, precio_venta, vendible_en_linea, activo, notas, slug, descripcion, aroma, ingredientes, modo_uso, advertencias, contenido_neto, foto_url, color_hex, destacado, hecho_en_opalo, orden';
 
 export function aProducto(f: Fila): Producto {
   const contenido = num(f.contenido_presentacion, 1);
@@ -605,6 +671,18 @@ export function aProducto(f: Fila): Producto {
     vendible_en_linea: bool(f.vendible_en_linea),
     activo: f.activo === undefined ? true : bool(f.activo),
     notas: textoONulo(f.notas),
+    slug: textoONulo(f.slug),
+    descripcion: textoONulo(f.descripcion),
+    aroma: textoONulo(f.aroma),
+    ingredientes: textoONulo(f.ingredientes),
+    modo_uso: textoONulo(f.modo_uso),
+    advertencias: textoONulo(f.advertencias),
+    contenido_neto: textoONulo(f.contenido_neto),
+    foto_url: textoONulo(f.foto_url),
+    color_hex: colorHex(f.color_hex),
+    destacado: bool(f.destacado),
+    hecho_en_opalo: bool(f.hecho_en_opalo),
+    orden: num(f.orden),
   };
 }
 
@@ -721,11 +799,24 @@ export function aGastoPorVencer(f: Fila): GastoPorVencer {
 }
 
 export function resultadoVacio(mes: string): ResultadoMensual {
-  return { mes, ingresos: 0, propinas: 0, costo_insumos: 0, compras: 0, gastos: 0, utilidad: 0, flujo: 0, citas_completadas: 0 };
+  return {
+    mes,
+    ingresos: 0,
+    propinas: 0,
+    costo_insumos: 0,
+    costo_ventas: 0,
+    mermas: 0,
+    compras: 0,
+    gastos: 0,
+    utilidad: 0,
+    flujo: 0,
+    citas_completadas: 0,
+  };
 }
 
-/** Columnas de v_resultado_mensual (ESPEC §7). */
-export const COLUMNAS_RESULTADO_MENSUAL = 'mes, ingresos, propinas, costo_insumos, compras, gastos, utilidad, flujo, citas_completadas';
+/** Columnas de v_resultado_mensual (ESPEC §7 y §10.4). */
+export const COLUMNAS_RESULTADO_MENSUAL =
+  'mes, ingresos, propinas, costo_insumos, costo_ventas, mermas, compras, gastos, utilidad, flujo, citas_completadas';
 
 /** Fila de v_resultado_mensual. */
 export function aResultadoMensual(f: Fila): ResultadoMensual {
@@ -734,6 +825,8 @@ export function aResultadoMensual(f: Fila): ResultadoMensual {
     ingresos: num(f.ingresos),
     propinas: num(f.propinas),
     costo_insumos: num(f.costo_insumos),
+    costo_ventas: num(f.costo_ventas),
+    mermas: num(f.mermas),
     compras: num(f.compras),
     gastos: num(f.gastos),
     utilidad: num(f.utilidad),
@@ -763,6 +856,127 @@ export function aHorario(f: Fila): Horario {
 export const COLUMNAS_PERSONAL = 'id, usuario_id, slug, nombre, titulo, bio, foto_url, color_agenda, activo, mostrar_en_sitio, orden';
 export const COLUMNAS_CAPACITACION =
   'id, personal_id, nombre, institucion, tipo, fecha, horas, constancia_url, mostrar_en_sitio, notas';
+
+// ---------------------------------------------------------------------------
+// Taller: fórmulas, lotes y márgenes de la tienda propia (ESPEC §10.2)
+// ---------------------------------------------------------------------------
+
+const ESTADOS_LOTE: EstadoLote[] = ['en_curado', 'disponible', 'descartado'];
+
+function estadoLote(v: unknown): EstadoLote {
+  const e = texto(v) as EstadoLote;
+  return ESTADOS_LOTE.includes(e) ? e : 'en_curado';
+}
+
+/** Columnas de formulas con sus insumos embebidos (formula_items). */
+export const COLUMNAS_FORMULA =
+  'id, producto_id, nombre, rendimiento_piezas, dias_curado, instrucciones, activa, formula_items(insumo_id, cantidad)';
+
+export function aFormulaItem(f: Fila): FormulaItem {
+  return { insumo_id: texto(f.insumo_id), cantidad: num(f.cantidad) };
+}
+
+/** Fila de formulas con formula_items embebido. */
+export function aFormula(f: Fila): Formula {
+  return {
+    id: texto(f.id),
+    producto_id: texto(f.producto_id),
+    nombre: texto(f.nombre),
+    rendimiento_piezas: num(f.rendimiento_piezas, 1),
+    dias_curado: num(f.dias_curado),
+    instrucciones: textoONulo(f.instrucciones),
+    activa: f.activa === undefined || f.activa === null ? true : bool(f.activa),
+    items: filas(f.formula_items).map(aFormulaItem),
+  };
+}
+
+/** Columnas de v_costo_formulas (ESPEC §10.2). */
+export const COLUMNAS_COSTO_FORMULA =
+  'formula_id, producto_id, producto_nombre, nombre, rendimiento_piezas, dias_curado, costo_lote, costo_pieza, precio_venta, margen_pieza, margen_pct, insumos';
+
+/** Fila de v_costo_formulas (insumos jsonb → arreglo). */
+export function aCostoFormula(f: Fila): CostoFormula {
+  return {
+    formula_id: texto(f.formula_id),
+    producto_id: texto(f.producto_id),
+    producto_nombre: texto(f.producto_nombre),
+    nombre: texto(f.nombre),
+    rendimiento_piezas: num(f.rendimiento_piezas, 1),
+    dias_curado: num(f.dias_curado),
+    costo_lote: num(f.costo_lote),
+    costo_pieza: num(f.costo_pieza),
+    precio_venta: numONulo(f.precio_venta),
+    margen_pieza: numONulo(f.margen_pieza),
+    margen_pct: numONulo(f.margen_pct),
+    insumos: filas(f.insumos).map((i) => ({
+      insumo_id: texto(i.insumo_id),
+      nombre: texto(i.nombre),
+      unidad_medida: texto(i.unidad_medida, 'pz') as UnidadMedida,
+      cantidad: num(i.cantidad),
+      costo: num(i.costo),
+    })),
+  };
+}
+
+/** Columnas de v_lotes (ESPEC §10.2). */
+export const COLUMNAS_LOTE =
+  'id, codigo, producto_id, producto_nombre, categoria, formula_nombre, elaborado_en, listo_desde, dias_para_listo, caduca_en, piezas_planeadas, piezas_obtenidas, costo_materiales, costo_unitario, estado, liberado_en, notas';
+
+/** Fila de v_lotes. */
+export function aLote(f: Fila): Lote {
+  return {
+    id: texto(f.id),
+    codigo: texto(f.codigo),
+    producto_id: texto(f.producto_id),
+    producto_nombre: texto(f.producto_nombre),
+    categoria: texto(f.categoria, 'otro') as CategoriaProducto,
+    formula_nombre: textoONulo(f.formula_nombre),
+    elaborado_en: fecha(f.elaborado_en),
+    listo_desde: fecha(f.listo_desde),
+    dias_para_listo: num(f.dias_para_listo),
+    caduca_en: fechaONula(f.caduca_en),
+    piezas_planeadas: num(f.piezas_planeadas),
+    piezas_obtenidas: numONulo(f.piezas_obtenidas),
+    costo_materiales: num(f.costo_materiales),
+    costo_unitario: numONulo(f.costo_unitario),
+    estado: estadoLote(f.estado),
+    liberado_en: instanteONulo(f.liberado_en),
+    notas: textoONulo(f.notas),
+  };
+}
+
+/** Respuesta jsonb de registrar_lote: {id, codigo, costo_materiales, costo_unitario, listo_desde, estado}. */
+export function aResultadoLote(v: unknown): ResultadoLote {
+  const f = objeto(v);
+  return {
+    id: texto(f.id),
+    codigo: texto(f.codigo),
+    costo_materiales: num(f.costo_materiales),
+    costo_unitario: numONulo(f.costo_unitario),
+    listo_desde: fecha(f.listo_desde),
+    estado: estadoLote(f.estado),
+  };
+}
+
+/** Columnas de v_margen_productos (ESPEC §10.2). */
+export const COLUMNAS_MARGEN_PRODUCTO =
+  'id, nombre, categoria, precio_venta, costo_unitario, margen, margen_pct, stock_actual, piezas_en_curado, vendidas_30d';
+
+/** Fila de v_margen_productos. */
+export function aMargenProducto(f: Fila): MargenProducto {
+  return {
+    id: texto(f.id),
+    nombre: texto(f.nombre),
+    categoria: texto(f.categoria, 'venta') as CategoriaProducto,
+    precio_venta: numONulo(f.precio_venta),
+    costo_unitario: num(f.costo_unitario),
+    margen: numONulo(f.margen),
+    margen_pct: numONulo(f.margen_pct),
+    stock_actual: num(f.stock_actual),
+    piezas_en_curado: num(f.piezas_en_curado),
+    vendidas_30d: num(f.vendidas_30d),
+  };
+}
 
 /** Agrupa filas por una columna conservando el orden en que llegaron. */
 export function agrupar<T>(lista: Fila[], clave: string, mapear: (f: Fila) => T): Map<string, T[]> {

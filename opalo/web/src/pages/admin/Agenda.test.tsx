@@ -9,6 +9,7 @@ import { ErrorOpalo } from '../../lib/api/tipos';
 import { salirCabina } from '../../components/admin/cabina';
 import { ModoCabina } from '../../components/admin/ModoCabina';
 import { aNumero } from '../../components/admin/util';
+import { fechaLocal, isoDesdeLocal, sumarDias } from '../../lib/format';
 import Agenda from './Agenda';
 
 const m = vi.hoisted(() => ({
@@ -88,11 +89,11 @@ async function esperar() {
   });
 }
 
-async function montar(citas: CitaDetalle[]) {
+async function montar(citas: CitaDetalle[], fecha = FECHA) {
   m.admin.getAgenda.mockResolvedValue(citas);
   await act(async () => {
     raiz.render(
-      <MemoryRouter initialEntries={[`/admin/agenda?fecha=${FECHA}`]}>
+      <MemoryRouter initialEntries={[`/admin/agenda?fecha=${fecha}`]}>
         <Agenda />
         <ModoCabina />
       </MemoryRouter>,
@@ -237,6 +238,32 @@ describe('Agenda', () => {
     expect(a.textContent).toContain('Lucía');
     expect(a.textContent).toContain('Pagado de más $920');
     for (const t of [a, b]) expect([...t.querySelectorAll('button')].some((x) => x.textContent?.includes('Registrar pago'))).toBe(false);
+  });
+});
+
+describe('Agenda · citas de otro día', () => {
+  const botones = (t: Element) => [...t.querySelectorAll('button')].map((b) => b.textContent?.trim() ?? '');
+
+  it('una cita de un día futuro no se inicia, completa ni marca «No asistió» antes de tiempo', async () => {
+    const dia = sumarDias(fechaLocal(), 33);
+    await montar([cita({ inicio: isoDesdeLocal(dia, '11:00'), fin: isoDesdeLocal(dia, '12:00'), consentimientos_firmados: 1 })], dia);
+    const tarjeta = contenedor.querySelector('article.adm-cita')!;
+    const b = botones(tarjeta);
+    expect(b.some((x) => x.startsWith('Iniciar'))).toBe(false);
+    expect(b.some((x) => x.startsWith('Completar'))).toBe(false);
+    expect(b.some((x) => x.startsWith('No asistió'))).toBe(false);
+    // Sí se puede cobrar un anticipo o cancelarla.
+    expect(b.some((x) => x.startsWith('Registrar pago'))).toBe(true);
+    expect(b.some((x) => x.startsWith('Cancelar'))).toBe(true);
+    expect(tarjeta.textContent).toContain('Se inicia y se completa el día de la cita');
+  });
+
+  it('una cita de hoy sí se inicia y se completa', async () => {
+    const hoy = fechaLocal();
+    await montar([cita({ inicio: isoDesdeLocal(hoy, '23:00'), fin: isoDesdeLocal(hoy, '23:59'), consentimientos_firmados: 1 })], hoy);
+    const b = botones(contenedor.querySelector('article.adm-cita')!);
+    expect(b.some((x) => x.startsWith('Iniciar'))).toBe(true);
+    expect(b.some((x) => x.startsWith('Completar'))).toBe(true);
   });
 });
 

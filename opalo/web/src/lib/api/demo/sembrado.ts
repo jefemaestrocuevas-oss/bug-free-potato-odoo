@@ -8,6 +8,7 @@ import type {
   ItemReserva,
   MetodoPago,
   OrigenCita,
+  ProductoEditable,
   TipoCapacitacion,
   UnidadMedida,
   UsoProducto,
@@ -26,19 +27,24 @@ import {
   crearUsuario,
   duracionReserva,
   expandirServicios,
+  firmaEnLinea,
   firmarConsentimientoCita,
   guardarBloqueo,
   guardarFicha,
   guardarGasto,
+  guardarProducto,
   insertarCita,
   insertarMovimiento,
   insertarPolitica,
+  marcarEntregado,
   mesesDeFrecuencia,
   registrarCompra,
   registrarPago,
   reservarCita,
   reservarCitaStaff,
+  ventaMostrador,
 } from './reglas';
+import { FICHA_VACIA, sembrarTaller } from './sembradoTaller';
 import { fechaEnMes, ms, MS_MIN, sumarMesesAMes, uuid } from './utilidades';
 import { costoUnitario, nombreCompleto, ORDEN_POLITICAS, politicaActiva } from './vistas';
 
@@ -52,7 +58,12 @@ export const FIRMA_EJEMPLO =
 export function dbVacia(configuracion: Configuracion): Db {
   return {
     folio_pedidos: 0,
-    configuracion: { ...configuracion, fecha_apertura: configuracion.fecha_apertura ?? null },
+    configuracion: {
+      ...configuracion,
+      fecha_apertura: configuracion.fecha_apertura ?? null,
+      // ESPEC §9: false (lo de Ópalo) = la firma se hace en la tablet de cabina.
+      firma_en_linea: configuracion.firma_en_linea === true,
+    },
     usuarios: [],
     perfiles: [],
     clientes: [],
@@ -82,6 +93,9 @@ export function dbVacia(configuracion: Configuracion): Db {
     recetas_servicio: [],
     compras: [],
     compra_items: [],
+    formulas: [],
+    formula_items: [],
+    lotes_produccion: [],
     movimientos_inventario: [],
     categorias_gasto: [],
     gastos_recurrentes: [],
@@ -358,31 +372,39 @@ export function sembrar(fuentes: FuentesDemo, ahora: Date, opciones: OpcionesSem
   ];
   const prodId = new Map<string, string>();
   const deseado = new Map<string, number>();
-  for (const p of productos) {
-    const id = uuid();
-    prodId.set(p.clave, id);
-    deseado.set(id, p.deseado);
-    const venta = p.uso === 'venta';
-    db.productos.push({
-      id,
-      nombre: p.nombre,
+  /** Alta de un producto como lo haría el personal (guardarProducto: misma regla de slug y de piezas que la base). */
+  const altaProducto = (cuando: Date, datos: Partial<ProductoEditable> & Pick<ProductoEditable, 'nombre' | 'categoria' | 'unidad_medida'>) =>
+    guardarProducto(en(cuando, staff), {
+      ...FICHA_VACIA,
       marca: null,
+      presentacion: null,
+      contenido_presentacion: 1,
+      costo_presentacion: 0,
+      stock_minimo: 0,
+      proveedor_id: null,
+      uso: 'cabina',
+      precio_venta: null,
+      vendible_en_linea: false,
+      activo: true,
+      notas: 'Producto de ejemplo: costos y existencias inventados.',
+      ...datos,
+    }).id;
+  for (const p of productos) {
+    const id = altaProducto(hace(110), {
+      nombre: p.nombre,
       categoria: p.categoria,
       unidad_medida: p.unidad,
       presentacion: p.presentacion,
       contenido_presentacion: p.contenido,
       costo_presentacion: p.costo,
-      stock_actual: 0,
       stock_minimo: p.minimo,
       proveedor_id: p.proveedor,
       uso: p.uso ?? 'cabina',
       precio_venta: p.precio_venta ?? null,
-      vendible_en_linea: venta,
-      activo: true,
-      notas: 'Producto de ejemplo: costos y existencias inventados.',
-      creado_en: hace(110).toISOString(),
-      actualizado_en: hace(110).toISOString(),
+      vendible_en_linea: p.uso === 'venta',
     });
+    prodId.set(p.clave, id);
+    deseado.set(id, p.deseado);
   }
 
   // ---------- Recetas (ejemplo) ----------
@@ -599,25 +621,84 @@ export function sembrar(fuentes: FuentesDemo, ahora: Date, opciones: OpcionesSem
     });
   });
 
-  // ---------- Pedidos (ejemplo) ----------
+  // ---------- Inventario inicial de cabina (ajuste con fecha anterior a todo lo demás) ----------
+  // Va antes de las ventas: deja cada insumo de cabina en su existencia "deseada" después de los consumos
+  // y compras de arriba, y así hay producto que vender en la tienda.
+  for (const p of db.productos) {
+    const meta = deseado.get(p.id);
+    if (meta === undefined) continue;
+    const diferencia = meta - p.stock_actual;
+    if (diferencia > 0)
+      insertarMovimiento(en(hace(75), staff), {
+        producto_id: p.id,
+        tipo: 'ajuste',
+        cantidad: diferencia,
+        costo_unitario: costoUnitario(p),
+        nota: 'Inventario inicial (ejemplo)',
+      });
+  }
+
+  // ---------- Taller y tienda propia (ESPEC §10): jabones y velas hechos en Ópalo ----------
+  const t = sembrarTaller({ db, hoy, staff, en, altaProducto });
+
+  // ---------- Pedidos y ventas (ejemplo), en orden de fecha ----------
+  // En línea (la clienta pide; el personal registra el pago y entrega en el spa) y en mostrador (se paga y se
+  // entrega en el acto). Todo pasa por las mismas reglas que en la base (existencias, precios, créditos).
   let creditoExpress: string | null = null;
-  intentar('pedido pagado', () => {
+  const T = t.producto;
+  t.evento(50, '12:30', 'pedido en línea de Mariana', () => {
+    const r = crearPedido(en(t.momento(50, '12:30'), usuarios.cliente), [
+      { tipo: 'producto', id: T('avena-miel'), cantidad: 2 },
+      { tipo: 'producto', id: T('lavanda-eucalipto'), cantidad: 1 },
+    ], 'transferencia', 'Para regalar a mi mamá (ejemplo).');
+    registrarPago(en(t.momento(49, '10:15'), staff), { monto: r.total, metodo: 'transferencia', pedido_id: r.id, referencia: 'SPEI (ejemplo)' });
+    marcarEntregado(en(t.momento(47, '17:00'), staff), r.id);
+  });
+  t.evento(20, '11:00', 'pedido en línea de Daniela', () => {
+    const r = crearPedido(en(t.momento(20, '11:00'), danielaUid), [
+      { tipo: 'producto', id: T('lavanda'), cantidad: 2 },
+      { tipo: 'producto', id: T('naranja-canela'), cantidad: 1 },
+    ], 'efectivo', null);
+    registrarPago(en(t.momento(19, '13:00'), staff), { monto: r.total, metodo: 'efectivo', pedido_id: r.id });
+    marcarEntregado(en(t.momento(19, '13:05'), staff), r.id);
+  });
+  t.evento(12, '19:00', 'pedido pagado de Mariana (por entregar)', () => {
     const r = crearPedido(
-      en(hace(12), usuarios.cliente),
+      en(t.momento(12, '19:00'), usuarios.cliente),
       [
         { tipo: 'paquete', id: paqId.get('express')!, cantidad: 2 },
         { tipo: 'servicio', id: servId.get('bikini-brasileno')!, cantidad: 1, regalo_para: 'Ana (ejemplo)' },
         { tipo: 'producto', id: prodId.get('protector')!, cantidad: 1 },
+        { tipo: 'producto', id: T('avena-miel'), cantidad: 1 },
       ],
       'transferencia',
-      'Pedido de ejemplo.',
+      'Pedido de ejemplo: lo recojo el día de mi cita.',
     );
-    registrarPago(en(hace(11), staff), { monto: r.total, metodo: 'transferencia', pedido_id: r.id, referencia: 'SPEI (ejemplo)' });
+    registrarPago(en(t.momento(11, '10:30'), staff), { monto: r.total, metodo: 'transferencia', pedido_id: r.id, referencia: 'SPEI (ejemplo)' });
     creditoExpress = db.creditos.find((c) => c.cliente_id === mariana.id && c.paquete_id === paqId.get('express'))?.id ?? null;
   });
-  intentar('pedido pendiente', () => {
-    crearPedido(en(hace(1), danielaUid), [{ tipo: 'producto', id: prodId.get('aceite-casa')!, cantidad: 1 }], 'efectivo', 'Lo recojo en mi próxima cita (ejemplo).');
+  t.evento(1, '18:00', 'pedido pendiente de Daniela', () => {
+    crearPedido(en(t.momento(1, '18:00'), danielaUid), [{ tipo: 'producto', id: prodId.get('aceite-casa')!, cantidad: 1 }], 'efectivo', 'Lo recojo en mi próxima cita (ejemplo).');
   });
+  // Mostrador: sin clienta registrada o con su expediente; una cortesía (no cuenta como ingreso).
+  const mostrador = (dias: number, hhmm: string, items: [string, number][], metodo: MetodoPago, cliente: ClienteFila | null, notas: string | null = null) =>
+    t.evento(dias, hhmm, `venta de mostrador (hace ${dias} días)`, () =>
+      ventaMostrador(en(t.momento(dias, hhmm), staff), {
+        items: items.map(([clave, cantidad]) => ({ tipo: 'producto' as const, id: T(clave), cantidad })),
+        metodo,
+        cliente_id: cliente?.id ?? null,
+        notas,
+      }),
+    );
+  mostrador(58, '13:00', [['lavanda', 1], ['vainilla-coco', 1]], 'efectivo', null);
+  mostrador(44, '16:30', [['avena-miel', 2]], 'tarjeta', fernanda);
+  mostrador(33, '12:00', [['lavanda-eucalipto', 2]], 'tarjeta', null);
+  mostrador(14, '17:30', [['set-lavanda', 1]], 'transferencia', null, 'Para un cumpleaños (ejemplo).');
+  mostrador(9, '11:30', [['rosa-arcilla', 1]], 'efectivo', lucia);
+  mostrador(5, '15:00', [['avena-miel', 1]], 'cortesia', null, 'Cortesía de bienvenida (ejemplo).');
+  mostrador(2, '18:30', [['naranja-canela', 1], ['rosa-arcilla', 1]], 'efectivo', null);
+
+  t.ejecutar(intentar);
 
   // ---------- Citas futuras ----------
   // Las de clientas van desde el día de apertura: antes no se reserva en línea (y así se siembran con
@@ -627,6 +708,9 @@ export function sembrar(fuentes: FuentesDemo, ahora: Date, opciones: OpcionesSem
   // Con un par de días de margen: las reservas se siembran "hechas" uno o dos días antes de hoy.
   const ultimoDiaReservable = sumarDias(hoy, db.configuracion.ventana_reserva_dias - 2);
   const firmaDe = (c: ClienteFila) => ({ nombre_firmante: nombreCompleto(c), firma_svg: FIRMA_EJEMPLO, tutor_nombre: null });
+  // ESPEC §9: con firma_en_linea = false la clienta reserva sin firmar (la cita queda "falta firma" y se
+  // firma en la tablet de cabina); con true firma al reservar, como antes.
+  const firmaEnReserva = (c: ClienteFila) => (firmaEnLinea(db) ? firmaDe(c) : null);
   /** Inicio a `dias` del primer día en que las clientas reservan, o null si queda fuera de la ventana de reserva. */
   const futura = (dias: number, hhmm: string) => {
     const fecha = diaHabil(sumarDias(desde, dias), 1);
@@ -638,7 +722,7 @@ export function sembrar(fuentes: FuentesDemo, ahora: Date, opciones: OpcionesSem
     reservarCita(en(hace(1), usuarios.cliente), {
       items: [{ paquete_id: paqId.get('express'), credito_id: creditoExpress }],
       inicio,
-      firma: firmaDe(mariana),
+      firma: firmaEnReserva(mariana),
       notas: 'Cita de ejemplo.',
     });
   });
@@ -648,7 +732,7 @@ export function sembrar(fuentes: FuentesDemo, ahora: Date, opciones: OpcionesSem
     reservarCita(en(hace(1), danielaUid), {
       items: [S('facial-hidratante'), S('shot-hidratante')],
       inicio,
-      firma: firmaDe(daniela),
+      firma: firmaEnReserva(daniela),
       notas: 'Es mi primera vez con un facial (ejemplo).',
     });
   });
@@ -731,21 +815,6 @@ export function sembrar(fuentes: FuentesDemo, ahora: Date, opciones: OpcionesSem
     r.proximo_vencimiento = ultimo
       ? fechaEnMes(sumarMesesAMes(ultimo, mesesDeFrecuencia(r.frecuencia)), r.dia_pago)
       : fechaEnMes(mesActual, r.dia_pago);
-  }
-
-  // ---------- Inventario inicial (ajuste con fecha anterior a todo lo demás) ----------
-  for (const p of db.productos) {
-    const meta = deseado.get(p.id);
-    if (meta === undefined) continue;
-    const diferencia = meta - p.stock_actual;
-    if (diferencia > 0)
-      insertarMovimiento(en(hace(75), staff), {
-        producto_id: p.id,
-        tipo: 'ajuste',
-        cantidad: diferencia,
-        costo_unitario: costoUnitario(p),
-        nota: 'Inventario inicial (ejemplo)',
-      });
   }
 
   return db;

@@ -82,6 +82,7 @@
 .cu-cita-mes { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
 .cu-cita-cuerpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .cu-cita-cabeza { align-items: flex-start; }
+.cu-pedido-estados { gap: 6px; justify-content: flex-end; }
 .cu-cita-titulo { font-family: var(--display); font-size: 1.3rem; font-weight: 600; margin: 0; color: var(--tinta); overflow-wrap: anywhere; }
 @media (max-width: 479px) {
   .cu-cita { flex-direction: column; }
@@ -148,6 +149,9 @@
 .cu-huella-fila { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 100%; }
 .cu-documento-cita { margin: 0; color: var(--tinta-2); overflow-wrap: anywhere; }
 .cu-firma { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.cu-copia summary { cursor: pointer; font-weight: 700; color: var(--verde); min-height: 44px; display: flex; align-items: center; }
+.cu-copia summary:focus-visible { outline: 2px solid var(--oro); outline-offset: 2px; border-radius: var(--radio-sm); }
+.cu-copia .rv-documento { margin-top: 0; }
 
 /* Datos */
 .cu-form { gap: 4px; }

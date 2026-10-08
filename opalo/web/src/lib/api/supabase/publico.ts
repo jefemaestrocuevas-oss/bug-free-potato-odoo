@@ -13,8 +13,10 @@ import {
   aServicio,
   aSlot,
   COLUMNAS_CONFIGURACION,
+  COLUMNAS_PRODUCTO_TIENDA,
   compararPoliticas,
   num,
+  ordenarTienda,
   texto,
   textoONulo,
   type Fila,
@@ -134,10 +136,10 @@ export function crearApiPublica(ctx: Contexto): ApiPublica {
     },
 
     async getProductosTienda() {
-      const fs = await ctx.filas(
-        sb.from('productos_tienda').select('id, nombre, marca, presentacion, precio_venta, hay_stock').order('nombre'),
-      );
-      return fs.map(aProductoTienda);
+      // Sin .order(): la vista ya ordena por destacado, categoría, orden y nombre (ESPEC §10.1), y
+      // `orden` no es una de sus columnas. ordenarTienda sólo asegura destacados y categoría.
+      const fs = await ctx.filas(sb.from('productos_tienda').select(COLUMNAS_PRODUCTO_TIENDA));
+      return ordenarTienda(fs.map(aProductoTienda));
     },
 
     async getHorariosDisponibles(fecha, duracion_min, personal_id) {

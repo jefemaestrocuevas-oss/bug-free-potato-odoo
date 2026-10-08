@@ -24,8 +24,10 @@ create type public.origen_cita as enum ('web', 'whatsapp', 'mostrador', 'telefon
 create type public.estado_pedido as enum ('pendiente_pago', 'pagado', 'cancelado', 'reembolsado');
 create type public.metodo_pago as enum ('efectivo', 'tarjeta', 'transferencia', 'mercado_pago', 'cortesia');
 create type public.tipo_item_pedido as enum ('servicio', 'paquete', 'producto');
-create type public.tipo_movimiento as enum ('compra', 'consumo', 'venta', 'ajuste', 'merma');
+-- produccion: + piezas terminadas de un lote del taller · insumo_produccion: − materia prima usada en un lote
+create type public.tipo_movimiento as enum ('compra', 'consumo', 'venta', 'ajuste', 'merma', 'produccion', 'insumo_produccion');
 create type public.frecuencia_gasto as enum ('mensual', 'bimestral', 'trimestral', 'anual');
+create type public.estado_lote as enum ('en_curado', 'disponible', 'descartado');   -- taller (ESPEC §10.2)
 
 -- -----------------------------------------------------------------------------
 -- Trigger genérico: actualizado_en
@@ -61,12 +63,16 @@ create table public.configuracion (
   edad_mayoria            int  not null default 18  check (edad_mayoria >= 0),
   vigencia_creditos_dias  int  not null default 365 check (vigencia_creditos_dias > 0),
   fecha_apertura          date,                                   -- null = sin restricción
+  firma_en_linea          boolean not null default false,         -- ESPEC §9: false = se firma en cabina
   actualizado_en          timestamptz not null default now()
 );
 comment on table public.configuracion is 'Parámetros del negocio (una sola fila, id = 1).';
 comment on column public.configuracion.fecha_apertura is
   'Día de apertura (hora local). Antes de esa fecha las clientas no ven horarios ni reservan en línea; '
   'el personal sí agenda (p. ej. el ensayo de apertura). Null = sin restricción.';
+comment on column public.configuracion.firma_en_linea is
+  'false (decisión de Ópalo, ESPEC §9): el consentimiento se firma en el spa, en la tablet de cabina; '
+  'reservar_cita ignora la firma y la clienta no firma desde su portal. true: se firma al reservar en línea.';
 
 create trigger configuracion_actualizado_en
   before update on public.configuracion
@@ -123,6 +129,43 @@ begin
   end if;
   return nullif(p_telefono, '');
 end;
+$$;
+
+-- 'Jabón de Avena (ejemplo)' → 'jabon-de-avena-ejemplo' (sin acentos ni ñ; '' si no queda nada).
+create or replace function public.slug_de(p_texto text)
+returns text
+language sql
+immutable
+set search_path = public, extensions, pg_temp
+as $$
+  select btrim(regexp_replace(
+           lower(translate(coalesce(p_texto, ''),
+                           'ÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑÇáàäâãéèëêíìïîóòöôõúùüûñç',
+                           'aaaaaeeeeiiiiooooouuuuncaaaaaeeeeiiiiooooouuuunc')),
+           '[^a-z0-9_-]+', '-', 'g'), '-_')
+$$;
+
+-- '2026-11-12' → '12 de noviembre de 2026' (para mensajes; no depende del idioma del servidor).
+create or replace function public.fecha_legible(p_fecha date)
+returns text
+language sql
+immutable
+set search_path = public, extensions, pg_temp
+as $$
+  select extract(day from p_fecha)::int || ' de '
+         || (array['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
+                   'septiembre', 'octubre', 'noviembre', 'diciembre'])[extract(month from p_fecha)::int]
+         || ' de ' || extract(year from p_fecha)::int
+$$;
+
+-- 12.500 → '12.5', 300.000 → '300' (cantidades en mensajes).
+create or replace function public.cantidad_legible(p_cantidad numeric)
+returns text
+language sql
+immutable
+set search_path = public, extensions, pg_temp
+as $$
+  select trim_scale(round(p_cantidad, 3))::text
 $$;
 
 -- IP de la petición (PostgREST pone los encabezados en request.headers). Null en local.

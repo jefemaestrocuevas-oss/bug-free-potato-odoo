@@ -5,6 +5,11 @@ begin;
 -- configuracion.fecha_apertura): sin fecha de apertura, salvo en el bloque que prueba esa regla.
 update public.configuracion set fecha_apertura = null;
 
+-- Este archivo prueba el modo CON firma en línea (configuracion.firma_en_linea = true: la clienta
+-- firma al reservar y puede firmar desde su portal). El modo de Ópalo (false: se firma en la
+-- tablet de la cabina, ESPEC §9) se prueba al final de este archivo y en tests/10_tienda.sql.
+update public.configuracion set firma_en_linea = true;
+
 -- ---------------------------------------------------------------------------
 -- Requisitos antes de reservar
 -- ---------------------------------------------------------------------------
@@ -42,6 +47,10 @@ begin
 
   perform pruebas.espera_error(format('select public.reservar_cita(%L::jsonb, %L::timestamptz, %L, %L)',
       pruebas.items('cejas'), pruebas.instante(v_martes, '10:00'), '   ', v_firma),
+    'Falta tu firma o tu nombre completo.');
+  -- Con firma en línea, la firma (ahora parámetro opcional) sigue siendo obligatoria al reservar
+  perform pruebas.espera_error(format('select public.reservar_cita(%L::jsonb, %L::timestamptz)',
+      pruebas.items('cejas'), pruebas.instante(v_martes, '10:00')),
     'Falta tu firma o tu nombre completo.');
   perform pruebas.espera_error(format('select public.reservar_cita(%L::jsonb, %L::timestamptz, %L, %L)',
       pruebas.items('cejas'), pruebas.instante(v_martes, '10:00'), 'Ana Prueba Reserva', ''),
@@ -834,6 +843,53 @@ begin
   perform pruebas.igual((select count(*)::int from public.citas where cliente_id = pruebas.cliente_de(v_c)), 3,
                         'tres citas: apertura, ensayo y la del jueves sin restricción');
   raise notice 'OK - apertura: la clienta no reserva antes (fecha local), sí el día de apertura; el personal agenda antes';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- ESPEC §9 · Firma en cabina (configuracion.firma_en_linea = false, lo de Ópalo): la reserva no
+-- pide firma y la clienta no firma desde su portal; el personal (tablet de la cabina) sí.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_c uuid := pruebas.clienta_lista('cabina.prueba@ejemplo.mx');
+  v_otra uuid := pruebas.clienta_lista('cabina.otra@ejemplo.mx');
+  v_esp uuid := pruebas.usuario('especialista@demo.opalo.mx');
+  v_dia date := pruebas.proximo_dia(5, 42);
+  r jsonb;
+begin
+  update public.configuracion set firma_en_linea = false;
+
+  perform pruebas.como(v_c);
+  r := public.reservar_cita(pruebas.items('cejas'), pruebas.instante(v_dia, '10:00'));
+  perform pruebas.igual((select consentimientos_firmados from public.v_citas_detalle where id = (r ->> 'id')::uuid), 0,
+                        'sin firma en línea la cita nace sin consentimientos');
+  -- Su propia cita: no firma desde el portal (aunque la firma sea válida)
+  perform pruebas.espera_error(format('select public.firmar_consentimiento_cita(%L, %L, %L)', r ->> 'id', 'Cabina Prueba', pruebas.firma()),
+    'La firma se hace en el spa, el día de tu cita.');
+  -- La cita de otra clienta sigue siendo "no tienes permiso"
+  perform pruebas.como(v_otra);
+  perform pruebas.espera_error(format('select public.firmar_consentimiento_cita(%L, %L, %L)', r ->> 'id', 'Otra', pruebas.firma()),
+    'No tienes permiso para hacer esto.');
+  perform pruebas.como_anon();
+  perform pruebas.espera_error(format('select public.firmar_consentimiento_cita(%L, %L, %L)', r ->> 'id', 'Nadie', pruebas.firma()),
+    'Inicia sesión para continuar.');
+
+  -- R6 no cambia: sin firma no inicia; el personal firma en cabina y entonces sí
+  perform pruebas.como(v_esp);
+  perform pruebas.espera_error(format('select public.cambiar_estado_cita(%L, %L)', r ->> 'id', 'en_curso'),
+    'Sin consentimiento firmado no hay servicio: pide a la clienta que firme primero.');
+  perform public.firmar_consentimiento_cita((r ->> 'id')::uuid, 'Cabina Prueba', pruebas.firma(), null, 'Tablet de cabina');
+  perform pruebas.igual((select canal || '/' || (capturado_por = v_esp)::text from public.consentimientos where cita_id = (r ->> 'id')::uuid),
+                        'cabina/true', 'firmado en cabina, capturado por el personal');
+  perform public.cambiar_estado_cita((r ->> 'id')::uuid, 'en_curso');
+
+  -- La clienta ve en su cuenta lo que firmó en el spa (copia de su documento)
+  perform pruebas.como(v_c);
+  perform pruebas.igual((select count(*)::int from public.consentimientos where cita_id = (r ->> 'id')::uuid), 1,
+                        'la clienta ve su consentimiento firmado en cabina');
+  perform pruebas.como_postgres();
+  update public.configuracion set firma_en_linea = true;
+  raise notice 'OK - §9: con firma en cabina la clienta no firma en el portal; el personal sí y R6 se respeta';
 end $$;
 
 rollback;

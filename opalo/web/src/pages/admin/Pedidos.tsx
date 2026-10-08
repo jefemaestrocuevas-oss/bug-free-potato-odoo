@@ -1,23 +1,28 @@
-// Pedidos y pagos (/admin/pedidos): pedidos de la tienda en línea, cobro y cancelación.
+// Pedidos y pagos (/admin/pedidos): pedidos de la tienda en línea y ventas de mostrador; cobro,
+// cancelación y entrega de los productos que se recogen en el spa.
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api, type EstadoPedido, type PedidoDetalle } from '../../lib/api';
 import { dinero, fechaLocal } from '../../lib/format';
 import { useAsync } from '../../lib/useAsync';
 import { Cargando, MensajeError, Vacio } from '../../components/ui/Estado';
 import { EncabezadoAdmin, Exito, Kpi } from '../../components/admin/Piezas';
-import { PedidosDetalleModal, PedidosTabla, pedidoSaldo } from '../../components/admin/PedidosDetalle';
+import { PedidosDetalleModal, PedidosTabla, pedidoPorEntregar, pedidoSaldo } from '../../components/admin/PedidosDetalle';
 import { mesActual, nombreDeMes } from '../../components/admin/util';
 import './Pedidos.css';
 
-type Filtro = '' | Extract<EstadoPedido, 'pendiente_pago' | 'pagado' | 'cancelado'>;
+type Filtro = '' | Extract<EstadoPedido, 'pendiente_pago' | 'pagado' | 'cancelado'> | 'por_entregar';
 
 const FILTROS: { valor: Filtro; texto: string }[] = [
   { valor: '', texto: 'Todos' },
   { valor: 'pendiente_pago', texto: 'Pendientes de pago' },
+  { valor: 'por_entregar', texto: 'Por entregar' },
   { valor: 'pagado', texto: 'Pagados' },
   { valor: 'cancelado', texto: 'Cancelados' },
 ];
+
+/** ¿El pedido entra en el filtro? «Por entregar» = pagado, con productos y sin entregar. */
+const coincide = (p: PedidoDetalle, f: Filtro) => (!f ? true : f === 'por_entregar' ? pedidoPorEntregar(p) : p.estado === f);
 
 const normalizar = (s: string) =>
   s
@@ -72,14 +77,15 @@ export default function Pedidos() {
       abonado: pendientes.reduce((s, p) => s + p.pagado, 0),
       pagadosMes: delMes.length,
       cobradoMes: delMes.reduce((s, p) => s + p.pagado, 0),
+      porEntregar: todos.filter(pedidoPorEntregar).length,
     };
   }, [todos, mes]);
 
-  const cuenta = (v: Filtro) => (v ? todos.filter((p) => p.estado === v).length : todos.length);
+  const cuenta = (v: Filtro) => todos.filter((p) => coincide(p, v)).length;
 
   const q = normalizar(busqueda.trim());
   const visibles = todos.filter(
-    (p) => (!filtro || p.estado === filtro) && (!q || normalizar(`${p.folio} ${p.cliente_nombre} ${p.items.map((i) => i.descripcion).join(' ')}`).includes(q)),
+    (p) => coincide(p, filtro) && (!q || normalizar(`${p.folio} ${p.cliente_nombre} ${p.items.map((i) => i.descripcion).join(' ')}`).includes(q)),
   );
   const elegido: PedidoDetalle | undefined = verId ? todos.find((p) => p.id === verId) : undefined;
   const textoFiltro = FILTROS.find((f) => f.valor === filtro)?.texto.toLowerCase() ?? '';
@@ -88,8 +94,12 @@ export default function Pedidos() {
     <div className="adm-pagina adm-pe">
       <EncabezadoAdmin
         titulo="Pedidos y pagos"
-        descripcion="Pedidos de la tienda en línea. Se pagan en el spa o por transferencia: al registrar el pago completo se activan los servicios prepagados de la clienta."
-      />
+        descripcion="Pedidos de la tienda en línea y ventas de mostrador. Los de la tienda se pagan en el spa o por transferencia: al registrar el pago completo se activan los servicios prepagados de la clienta, y los productos se recogen en el spa."
+      >
+        <Link className="btn btn-secundario" to="/admin/mostrador">
+          Vender en mostrador
+        </Link>
+      </EncabezadoAdmin>
 
       <MensajeError error={pedidos.error} onReintentar={pedidos.recargar} />
       {pedidos.cargando && !pedidos.datos && <Cargando texto="Cargando pedidos…" />}
@@ -106,6 +116,12 @@ export default function Pedidos() {
                   : `${totales.pendientes} ${totales.pendientes === 1 ? 'pedido' : 'pedidos'} por pagar${totales.abonado > 0 ? ` · ya abonaron ${dinero(totales.abonado)}` : ''}`
               }
               tono={totales.pendientes > 0 ? 'alerta' : undefined}
+            />
+            <Kpi
+              etiqueta="Por entregar"
+              valor={<span className="num">{totales.porEntregar}</span>}
+              detalle={totales.porEntregar === 0 ? 'Todos los productos pagados ya se entregaron' : 'Pagados con productos que se recogen en el spa'}
+              tono={totales.porEntregar > 0 ? 'alerta' : undefined}
             />
             <Kpi
               etiqueta="Cobrado este mes"
@@ -151,14 +167,20 @@ export default function Pedidos() {
           <div id="pe-lista" role="tabpanel" className={pedidos.cargando ? 'adm-pe-recargando' : ''}>
             {visibles.length === 0 ? (
               todos.length === 0 ? (
-                <Vacio titulo="Aún no hay pedidos">Cuando una clienta compre servicios, paquetes o productos en la tienda en línea, su pedido aparecerá aquí.</Vacio>
+                <Vacio titulo="Aún no hay pedidos">
+                  Cuando una clienta compre servicios, paquetes o productos en la tienda en línea, o vendas algo en el mostrador, aparecerá aquí.
+                </Vacio>
               ) : q ? (
                 <Vacio titulo={`No encontramos “${busqueda.trim()}”`}>
                   Revisa el folio o el nombre{filtro ? `, o busca en todos los pedidos en lugar de sólo ${textoFiltro}` : ''}.
                 </Vacio>
               ) : (
-                <Vacio titulo={`No hay pedidos ${textoFiltro}`}>
-                  {filtro === 'pendiente_pago' ? '¡Todo cobrado! No hay pedidos esperando pago.' : 'Prueba con otro estado.'}
+                <Vacio titulo={filtro === 'por_entregar' ? 'Nada por entregar' : `No hay pedidos ${textoFiltro}`}>
+                  {filtro === 'pendiente_pago'
+                    ? '¡Todo cobrado! No hay pedidos esperando pago.'
+                    : filtro === 'por_entregar'
+                      ? 'Todos los productos pagados ya se entregaron.'
+                      : 'Prueba con otro estado.'}
                 </Vacio>
               )
             ) : (
@@ -167,7 +189,17 @@ export default function Pedidos() {
                   {visibles.length} {visibles.length === 1 ? 'pedido' : 'pedidos'}
                   {filtro ? ` · ${textoFiltro}` : ''}
                 </p>
-                <PedidosTabla pedidos={visibles} onVer={(p) => setVerId(p.id)} />
+                {filtro === 'por_entregar' && (
+                  <p className="ayuda adm-pe-conteo">Pedidos pagados con productos que la clienta recoge en el spa. Márcalos cuando se los entregues.</p>
+                )}
+                <PedidosTabla
+                  pedidos={visibles}
+                  onVer={(p) => setVerId(p.id)}
+                  onEntregado={(mensaje) => {
+                    setAviso(mensaje);
+                    pedidos.recargar();
+                  }}
+                />
               </>
             )}
           </div>

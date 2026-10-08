@@ -1,5 +1,8 @@
 // Archivo .ics (iCalendar, RFC 5545) generado en el navegador para "Agregar a mi calendario".
 // Las horas van en UTC (sufijo Z): cualquier calendario las muestra en la hora local de quien lo abre.
+import type { Configuracion } from '../../lib/api/tipos';
+import { telefonoBonito } from '../../lib/format';
+import { unirConY } from './utilidades';
 
 export interface EventoCalendario {
   uid: string;
@@ -10,6 +13,28 @@ export interface EventoCalendario {
   titulo: string;
   descripcion?: string;
   lugar?: string;
+}
+
+/**
+ * Evento de una cita de Ópalo (confirmación de la reserva y Mis citas): quién te atiende, tolerancia y
+ * cómo cancelar. Sólo datos de la cita: nada de la ficha de salud ni de documentos.
+ */
+export function eventoDeCita(
+  cita: { id: string; inicio: string; fin: string; servicios: string[]; personal_nombre: string },
+  config: Pick<Configuracion, 'nombre_negocio' | 'direccion' | 'telefono_whatsapp' | 'tolerancia_retraso_min' | 'horas_cancelacion'>,
+): EventoCalendario {
+  return {
+    uid: cita.id,
+    inicio: cita.inicio,
+    fin: cita.fin,
+    titulo: `Cita en ${config.nombre_negocio}: ${unirConY(cita.servicios)}`,
+    descripcion: [
+      `Te atiende ${cita.personal_nombre}.`,
+      `Llega puntual: tienes ${config.tolerancia_retraso_min} minutos de tolerancia.`,
+      `Para cancelar o cambiar tu cita, hazlo con ${config.horas_cancelacion} horas de anticipación desde tu cuenta o por WhatsApp al ${telefonoBonito(config.telefono_whatsapp)}.`,
+    ].join('\n'),
+    lugar: config.direccion,
+  };
 }
 
 function fechaIcs(iso: string): string {

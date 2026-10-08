@@ -12,6 +12,8 @@ function mes(m: string, ingresos: number, gastos: number): ResultadoMensual {
     ingresos,
     propinas: 0,
     costo_insumos: 0,
+    costo_ventas: 0,
+    mermas: 0,
     compras: 0,
     gastos,
     utilidad: ingresos - gastos,

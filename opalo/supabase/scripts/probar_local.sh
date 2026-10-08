@@ -73,11 +73,17 @@ if ! "${PSQL_CMD[@]}" -X -q -d postgres -c 'select 1' >/dev/null 2>&1; then
   fi
 fi
 
-# 0.1) ¿seed.sql está al día con datos/?
+# 0.1) ¿seed.sql está al día con datos/? Si no, se detiene: la base tendría otro texto que el demo
+#      (por ejemplo, políticas viejas). Con OPALO_SEED_DESFASADO=1 sólo avisa.
 if command -v node >/dev/null 2>&1; then
   if ! node "$SUPA/scripts/generar_seed.mjs" --stdout 2>/dev/null | cmp -s - "$SUPA/seed.sql"; then
-    echo "AVISO: seed.sql no coincide con datos/ — corre: node opalo/supabase/scripts/generar_seed.mjs"
+    echo "FALLA: seed.sql no coincide con datos/ — corre: node opalo/supabase/scripts/generar_seed.mjs"
+    if [[ "${OPALO_SEED_DESFASADO:-}" != "1" ]]; then
+      exit 1
+    fi
   fi
+else
+  echo "AVISO: no hay node; no pude revisar que seed.sql esté al día con datos/."
 fi
 
 # 1) Base limpia

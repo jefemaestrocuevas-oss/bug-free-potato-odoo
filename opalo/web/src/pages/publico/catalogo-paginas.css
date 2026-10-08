@@ -76,6 +76,60 @@
 .srv-cierre-item p { margin: 0 0 12px; color: var(--tinta-2); }
 
 /* ---------- Tienda ---------- */
+/* Cabecera "Hecho en Ópalo": texto + ilustración de un jabón y una vela (decorativa). */
+.tda-hero-rejilla { position: relative; display: grid; gap: 8px 32px; grid-template-columns: 1fr; align-items: center; }
+@media (min-width: 760px) { .tda-hero-rejilla { grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.65fr); } }
+.tda-hero .sp-cabecera-titulo { max-width: 16ch; }
+.tda-hero .sp-cabecera-acciones { gap: 8px 12px; }
+.tda-hero-arte {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 100%;
+  max-width: 230px;
+  margin: 8px auto 0;
+  aspect-ratio: 16 / 9;
+}
+@media (min-width: 760px) { .tda-hero-arte { max-width: 420px; margin: 0 0 0 auto; aspect-ratio: 4 / 3; } }
+.tda-hero-halo {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: 4%;
+  top: 0;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--oro-suave), transparent);
+  opacity: 0.9;
+}
+.tda-hero-arte .ilustracion-producto { position: relative; width: auto; }
+.tda-hero-jabon { height: 78%; margin-right: -12%; }
+.tda-hero-vela { height: 100%; }
+
+.tda-productos, .tda-servicios { scroll-margin-top: 84px; }
+.tda-filtros { margin-bottom: 4px; }
+.tda-grupo { padding: clamp(20px, 4vw, 36px) 0 8px; }
+.tda-grupo:first-of-type { padding-top: 18px; }
+.tda-grupo .srv-seccion-cabeza h2 { font-size: clamp(1.7rem, 3.2vw, 2.2rem); }
+
+.tda-pronto { display: grid; gap: 12px; justify-items: center; }
+.tda-pronto-arte { display: flex; align-items: flex-end; justify-content: center; gap: 4px; width: 100%; max-width: 260px; }
+.tda-pronto-arte .ilustracion-producto { width: 50%; }
+.tda-pronto .vacio { width: 100%; }
+
+/* Servicios y paquetes prepagados (para regalar o usar después) */
+.tda-servicios {
+  margin-top: clamp(40px, 7vw, 80px);
+  padding-top: clamp(32px, 5vw, 56px);
+  border-top: 1px solid var(--linea-2);
+}
+.tda-servicios-cabeza { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
+.tda-servicios-cabeza h2 { color: var(--verde); margin: 0 0 6px; }
+.tda-servicios-cabeza p:not(.eyebrow) { margin: 0; color: var(--tinta-2); max-width: 64ch; }
+.tda-servicios-cabeza .eyebrow { margin: 0 0 4px; }
+.tda-servicios .srv-seccion-cabeza h3 { margin: 0 0 4px; color: var(--verde); font-size: clamp(1.4rem, 2.6vw, 1.75rem); }
+.sitio-publico .tda-pasos-servicios { margin: 8px 0 0; box-shadow: none; background: var(--fondo-alt); }
+
 .sitio-publico .tda-como { margin-top: -22px; position: relative; z-index: 1; }
 .tda-pasos {
   list-style: none;

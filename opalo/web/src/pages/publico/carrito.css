@@ -17,6 +17,13 @@
 @media (min-width: 640px) { .car-item { grid-template-columns: minmax(0, 1fr) auto; align-items: center; } }
 .car-item.no-disponible .car-item-nombre { color: var(--tinta-2); text-decoration: line-through; }
 .car-item-info { min-width: 0; }
+.car-item-info.con-miniatura { display: flex; gap: 14px; align-items: flex-start; }
+.car-item-texto { min-width: 0; }
+.car-item-nombre a { color: var(--tinta); text-decoration: none; }
+.car-item-nombre a:hover { color: var(--verde); text-decoration: underline; text-decoration-thickness: 1px; }
+.car-item-limite { margin: 6px 0 0; font-size: 0.85rem; color: var(--tinta-2); }
+.car-recoger { display: flex; gap: 8px; align-items: flex-start; }
+.car-recoger .sp-icono { flex: none; color: var(--verde); margin-top: 2px; }
 .car-item-tipo { margin: 0; font-size: 0.74rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--oro-osc); }
 .car-item-nombre { margin: 0; font-size: 1.4rem; overflow-wrap: anywhere; }
 .car-item-detalle { margin: 2px 0 0; font-size: 0.9rem; color: var(--tinta-2); }

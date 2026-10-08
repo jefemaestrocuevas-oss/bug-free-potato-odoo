@@ -93,6 +93,13 @@ describe('LayoutAdmin', () => {
     expect(contenedor.hasAttribute('inert')).toBe(true);
   });
 
+  it('la barra lateral lleva al taller y al mostrador', async () => {
+    await montar();
+    const enlaces = [...document.querySelectorAll('nav a')].map((a) => [a.textContent?.trim(), a.getAttribute('href')]);
+    expect(enlaces).toContainEqual(['Taller', '/admin/taller']);
+    expect(enlaces).toContainEqual(['Mostrador', '/admin/mostrador']);
+  });
+
   it('un modo cabina que dejó otra cuenta en la pestaña no aplica', async () => {
     await act(async () => entrarCabina({ ...CABINA, user_id: 'otra-cuenta' }));
     await montar();

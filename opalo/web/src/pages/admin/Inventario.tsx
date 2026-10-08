@@ -91,7 +91,7 @@ export default function Inventario() {
     <div className="adm-pagina inv-pagina">
       <EncabezadoAdmin
         titulo="Inventario"
-        descripcion="Existencias de cabina y de venta. El stock sube con las compras y baja solo al completar citas (según la receta de cada servicio) y con las ventas."
+        descripcion="Existencias de cabina, de venta y del taller. El stock sube con las compras y los lotes liberados; baja solo al completar citas (según la receta de cada servicio), con las ventas y con la materia prima de cada lote."
       />
 
       {datos.cargando && !datos.datos && <Cargando texto="Cargando inventario…" />}
@@ -100,7 +100,7 @@ export default function Inventario() {
       {datos.datos && (
         <>
           <div className="adm-kpis inv-kpis">
-            <Kpi etiqueta="Productos activos" valor={activos.length} detalle={productos.length > activos.length ? `${productos.length - activos.length} inactivos` : 'Insumos y venta'} />
+            <Kpi etiqueta="Productos activos" valor={activos.length} detalle={productos.length > activos.length ? `${productos.length - activos.length} inactivos` : 'Insumos, taller y venta'} />
             <Kpi
               etiqueta="Hay que reponer"
               valor={porReponer}

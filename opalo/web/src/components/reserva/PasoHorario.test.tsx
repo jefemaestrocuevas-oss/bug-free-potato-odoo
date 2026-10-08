@@ -26,6 +26,7 @@ const CONFIG = {
   edad_mayoria: 18,
   vigencia_creditos_dias: 365,
   fecha_apertura: '2026-10-31',
+  firma_en_linea: false,
 } satisfies Configuracion;
 
 function slot(fecha: string, hhmm: string, personal: string): Slot {

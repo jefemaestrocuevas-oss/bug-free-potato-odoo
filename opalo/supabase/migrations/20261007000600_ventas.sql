@@ -5,17 +5,24 @@
 
 create sequence public.pedidos_folio_seq;
 
+-- origen: 'web' (tienda en línea; siempre de una clienta con cuenta) o 'mostrador' (venta en el spa
+-- con venta_mostrador; puede no tener clienta registrada → cliente_id null, ESPEC §10.3).
+-- entregado_en: cuándo se entregaron los productos en el spa (null = por entregar o sin productos).
+-- RLS: una clienta sólo ve sus pedidos; uno sin clienta (null) no lo ve ninguna (null = x no es true).
 create table public.pedidos (
   id                     uuid primary key default gen_random_uuid(),
   folio                  text unique,       -- 'OP-00001' (trigger)
-  cliente_id             uuid not null references public.clientes (id),
+  cliente_id             uuid references public.clientes (id),
   estado                 public.estado_pedido not null default 'pendiente_pago',
   total                  numeric(10,2) not null default 0 check (total >= 0),
   metodo_pago_preferido  public.metodo_pago,
   notas                  text,
+  origen                 text not null default 'web' check (origen in ('web', 'mostrador')),
+  entregado_en           timestamptz,
   creado_en              timestamptz not null default now(),
   pagado_en              timestamptz,
-  cancelado_en           timestamptz
+  cancelado_en           timestamptz,
+  check (origen = 'mostrador' or cliente_id is not null)
 );
 create index pedidos_cliente_idx on public.pedidos (cliente_id, creado_en desc);
 create index pedidos_estado_idx on public.pedidos (estado);

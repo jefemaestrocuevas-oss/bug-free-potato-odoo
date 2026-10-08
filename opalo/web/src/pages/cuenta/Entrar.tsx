@@ -24,7 +24,7 @@ const PESTANAS: { modo: Modo; texto: string }[] = [
 const PASSWORD_MIN = 8;
 
 const DESCRIPCION_DEMO: Record<Rol, string> = {
-  cliente: 'Prueba el sitio como clienta: haz una reserva completa y revisa tus citas, pedidos, servicios prepagados y documentos firmados.',
+  cliente: 'Prueba el sitio como clienta: haz una reserva completa y revisa tus citas, pedidos, servicios prepagados y documentos.',
   personal: 'Entra al panel interno como especialista: agenda, clientas y sus fichas, pedidos y pagos, inventario y costos.',
   admin: 'Todo lo del personal, más gastos, resultados del mes, catálogo y precios, equipo y políticas.',
 };
@@ -399,8 +399,9 @@ function FormRegistro({ onListo, onConfirmarCorreo }: { onListo: (s: Sesion) => 
       </div>
       {anios !== null && anios >= edadMinima && anios < edadMayoria && (
         <p className="aviso aviso-info">
-          Como tienes menos de {edadMayoria} años, a tus citas debe acompañarte tu mamá, papá o tutor, y escribir su nombre cuando firmes el
-          consentimiento.
+          Como tienes menos de {edadMayoria} años, a tus citas debe acompañarte tu mamá, papá o tutor
+          {/* ESPEC §9: sin firma en línea, la firma (con el nombre de quien te acompaña) se hace en el spa. */}
+          {config.datos?.firma_en_linea === true ? ', y escribir su nombre cuando firmes el consentimiento.' : '.'}
         </p>
       )}
       <CampoTexto id="rg-email" etiqueta="Correo electrónico" error={errores.email}>

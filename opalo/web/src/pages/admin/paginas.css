@@ -248,3 +248,10 @@
   .tabla.adm-hoy .adm-hoy-atiende { grid-area: atiende; color: var(--tinta-2); font-size: 0.85rem; }
   .tabla.adm-hoy .adm-hoy-atiende::before { content: attr(data-etiqueta) ': '; }
 }
+
+/* ---------- Resumen: firma en cabina ---------- */
+.aviso.adm-res-firma { margin-bottom: 12px; }
+.adm-res-falta-firma { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.adm-res-firmar { font-size: 0.85rem; font-weight: 700; white-space: nowrap; }
+/* Cinco indicadores del día: en una fila cuando caben (170 px cada uno). */
+.adm-kpis.adm-kpis-hoy { grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); }

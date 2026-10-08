@@ -44,7 +44,7 @@ export default function Equipo() {
             </span>
             <div>
               <h2>Tu seguridad primero</h2>
-              <p>Revisamos tu ficha de salud antes de cada cita y firmas tu consentimiento informado.</p>
+              <p>Revisamos tu ficha de salud antes de cada cita y tu especialista la repasa contigo antes de empezar.</p>
             </div>
           </li>
           <li>

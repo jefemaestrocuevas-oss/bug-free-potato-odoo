@@ -1,7 +1,7 @@
 /*
   Pedidos y pagos (/admin/pedidos). Prefijo .adm-pe-. Sólo tokens de color.
 */
-.adm-pe-kpis { grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); max-width: 760px; }
+.adm-pe-kpis { grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); max-width: 980px; }
 
 .adm-pe-barra { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .pestanas.adm-pe-pestanas { margin-bottom: 0; }

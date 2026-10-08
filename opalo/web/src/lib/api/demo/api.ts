@@ -12,6 +12,7 @@ import type { Db, EstadoGuardado, FuentesDemo, GastoFila, ProveedorFila } from '
 import { type Ctx, esAdmin, esPersonal, exigirAdmin, exigirPersonal, miCliente, MSG_EXTRA } from './permisos';
 import * as R from './reglas';
 import { sembrar } from './sembrado';
+import * as T from './taller';
 import { clonar, emailValido, ms, normalizar, rangoFechas, rangoInstantes, sha256 } from './utilidades';
 import * as V from './vistas';
 
@@ -20,8 +21,9 @@ export const CLAVE_DEMO = 'opalo-demo-v1';
 /**
  * Versión de la forma de las filas guardadas. Entra en la huella: si cambia (p. ej. columnas nuevas en
  * consentimientos), lo guardado en el navegador se descarta y se vuelve a sembrar.
+ * 3: firma en cabina (§9), ficha de productos, taller (fórmulas y lotes), mostrador y entregas (§10).
  */
-export const ESQUEMA_DEMO = 2;
+export const ESQUEMA_DEMO = 3;
 
 export type AlmacenDemo = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
@@ -237,6 +239,7 @@ export function crearApiDemoCon(fuentes: FuentesDemo, opciones: OpcionesDemo = {
           const dia = hoy(ctx);
           const [d, h] = rangoInstantes(dia, dia);
           const admin = esAdmin(ctx);
+          const conProductos = new Set(db.pedido_items.filter((i) => i.tipo === 'producto').map((i) => i.pedido_id));
           return {
             citas_hoy: V.citasDetalle(db, (c) => c.estado !== 'cancelada' && ms(c.inicio) >= d && ms(c.inicio) < h),
             por_revisar: db.citas.filter((c) => c.estado === 'pendiente' && ms(c.fin) >= ctx.ahora.getTime()).length,
@@ -244,6 +247,10 @@ export function crearApiDemoCon(fuentes: FuentesDemo, opciones: OpcionesDemo = {
             gastos_por_vencer: admin ? V.gastosPorVencer(db, dia).filter((g) => g.estado !== 'al_corriente') : [],
             mes_actual: admin ? V.resultadosMensuales(db, ctx.ahora, 1)[0] : null,
             pedidos_pendientes: db.pedidos.filter((p) => p.estado === 'pendiente_pago').length,
+            // Pagados con productos que falta entregar en el spa (ESPEC §10.3).
+            pedidos_por_entregar: db.pedidos.filter((p) => p.estado === 'pagado' && p.entregado_en === null && conProductos.has(p.id)).length,
+            // Lotes en curado que ya cumplieron su fecha: listos para liberar (ESPEC §10.2).
+            lotes_listos: V.lotesListos(db, dia),
           };
         }),
 
@@ -429,6 +436,36 @@ export function crearApiDemoCon(fuentes: FuentesDemo, opciones: OpcionesDemo = {
           return V.politicasTodas(ctx.db);
         }),
       publicarPolitica: (tipo, titulo, contenido) => escribir((ctx) => void R.publicarPolitica(ctx, tipo, titulo, contenido)),
+
+      // taller: fórmulas y lotes (ESPEC §10.2)
+      getFormulas: () =>
+        leer((ctx) => {
+          exigirPersonal(ctx);
+          return V.formulasVista(ctx.db);
+        }),
+      guardarFormula: (f) => escribir((ctx) => T.guardarFormula(ctx, f)),
+      getCostosFormulas: () =>
+        leer((ctx) => {
+          exigirPersonal(ctx);
+          return V.costosFormulas(ctx.db);
+        }),
+      getLotes: (estado) =>
+        leer((ctx) => {
+          exigirPersonal(ctx);
+          return V.lotesVista(ctx.db, hoy(ctx), (l) => !estado || l.estado === estado);
+        }),
+      registrarLote: (l) => escribir((ctx) => T.registrarLote(ctx, l)),
+      liberarLote: (id, piezas, forzar) => escribir((ctx) => T.liberarLote(ctx, id, piezas, forzar)),
+      descartarLote: (id, motivo) => escribir((ctx) => T.descartarLote(ctx, id, motivo)),
+      getMargenesProductos: () =>
+        leer((ctx) => {
+          exigirPersonal(ctx);
+          return V.margenesProductos(ctx.db, ctx.ahora);
+        }),
+
+      // mostrador y entregas (ESPEC §10.3)
+      ventaMostrador: (v) => escribir((ctx) => R.ventaMostrador(ctx, v)),
+      marcarEntregado: (id) => escribir((ctx) => R.marcarEntregado(ctx, id)),
     },
   };
 

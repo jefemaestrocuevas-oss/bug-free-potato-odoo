@@ -45,7 +45,7 @@ type Clave = `s:${string}` | `p:${string}`;
 const ORIGENES: OrigenCita[] = ['whatsapp', 'mostrador', 'telefono'];
 
 /** Busca clientas mientras se escribe (con una pequeña espera). */
-function useBusquedaClientes(q: string) {
+export function useBusquedaClientes(q: string) {
   const [res, setRes] = useState<{ datos: ClienteResumen[]; cargando: boolean; error: string | null }>({ datos: [], cargando: false, error: null });
   useEffect(() => {
     const t = q.trim();
@@ -203,7 +203,11 @@ export function NuevaCita({ onCerrar, onListo, inicial }: Props) {
   // ---------- Pantalla de cita creada ----------
   if (resultado) {
     const { r, inicio: ini } = resultado;
-    const mensaje = `Hola${cliente ? `, ${cliente.nombre.split(' ')[0]}` : ''}. Tu cita en Ópalo quedó agendada para el ${fechaHora(ini)}. Antes del servicio te pediremos firmar tu consentimiento informado; si tienes cuenta puedes hacerlo desde "Mi cuenta". ¡Te esperamos!`;
+    // ESPEC §9: con la firma en cabina (lo de Ópalo) el mensaje a la clienta no habla de la firma.
+    const enLinea = config?.firma_en_linea === true;
+    const mensaje = `Hola${cliente ? `, ${cliente.nombre.split(' ')[0]}` : ''}. Tu cita en Ópalo quedó agendada para el ${fechaHora(ini)}.${
+      enLinea ? ' Antes del servicio te pediremos firmar tu consentimiento informado; si tienes cuenta puedes hacerlo desde "Mi cuenta".' : ''
+    } ¡Te esperamos!`;
     return (
       <Modal
         titulo="Cita creada"
@@ -233,8 +237,8 @@ export function NuevaCita({ onCerrar, onListo, inicial }: Props) {
             </div>
           )}
           <p className="aviso aviso-info adm-sin-margen">
-            Recuerda: sin consentimiento firmado no hay servicio. La clienta puede firmar desde su portal (si tiene cuenta) o en la tablet de la cabina con
-            “Firmar en cabina” en la agenda.
+            Recuerda: sin consentimiento firmado no hay servicio. La clienta firma en la tablet de la cabina antes de empezar, con “Firmar en cabina” en la
+            agenda{enLinea ? ' (o desde su cuenta, si tiene)' : ''}.
           </p>
           {cliente?.telefono && (
             <a className="btn btn-secundario" href={enlaceWhatsApp(cliente.telefono, mensaje)} target="_blank" rel="noreferrer">
@@ -272,8 +276,7 @@ export function NuevaCita({ onCerrar, onListo, inicial }: Props) {
       }
     >
       <p className="ayuda adm-sin-margen">
-        Para citas que llegan por WhatsApp, teléfono o en mostrador. La clienta deberá firmar su consentimiento antes del servicio (desde su cuenta o en la
-        tablet de la cabina).
+        Para citas que llegan por WhatsApp, teléfono o en mostrador. La clienta firmará su consentimiento en la tablet de la cabina, antes del servicio.
       </p>
 
       {/* 1 · Clienta */}

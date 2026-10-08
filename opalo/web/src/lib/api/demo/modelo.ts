@@ -8,12 +8,14 @@ import type {
   CategoriaProducto,
   Configuracion,
   EstadoCita,
+  EstadoLote,
   EstadoPedido,
   EtapaServicio,
   FrecuenciaGasto,
   GastoRecurrente,
   MetodoPago,
   OrigenCita,
+  OrigenPedido,
   Rol,
   TipoCapacitacion,
   TipoItemPedido,
@@ -253,11 +255,16 @@ export interface ConsentimientoFila {
 export interface PedidoFila {
   id: string;
   folio: string;
-  cliente_id: string;
+  /** null en una venta de mostrador sin clienta registrada (ESPEC §10.3). */
+  cliente_id: string | null;
   estado: EstadoPedido;
   total: number;
   metodo_pago_preferido: MetodoPago | null;
   notas: string | null;
+  /** 'web' (tienda en línea) o 'mostrador' (venta en el spa). */
+  origen: OrigenPedido;
+  /** Cuándo se entregaron los productos en el spa (null = por entregar o sin productos). */
+  entregado_en: string | null;
   creado_en: string;
   pagado_en: string | null;
   cancelado_en: string | null;
@@ -333,8 +340,69 @@ export interface ProductoFila {
   vendible_en_linea: boolean;
   activo: boolean;
   notas: string | null;
+  // Ficha pública de la tienda (ESPEC §10.1)
+  slug: string | null;
+  descripcion: string | null;
+  aroma: string | null;
+  ingredientes: string | null;
+  modo_uso: string | null;
+  advertencias: string | null;
+  contenido_neto: string | null;
+  foto_url: string | null;
+  color_hex: string | null;
+  destacado: boolean;
+  hecho_en_opalo: boolean;
+  orden: number;
   creado_en: string;
   actualizado_en: string;
+}
+
+// ---------- Taller (ESPEC §10.2) ----------
+
+export interface FormulaFila {
+  id: string;
+  /** Producto terminado que se elabora. */
+  producto_id: string;
+  nombre: string;
+  /** Piezas por lote. */
+  rendimiento_piezas: number;
+  dias_curado: number;
+  instrucciones: string | null;
+  activa: boolean;
+  creado_en: string;
+  actualizado_en: string;
+}
+
+/** Insumo de una fórmula, en la unidad del insumo, para un lote completo. */
+export interface FormulaItemFila {
+  formula_id: string;
+  insumo_id: string;
+  cantidad: number;
+}
+
+export interface LoteFila {
+  id: string;
+  /** JAB|VEL|SET|PRD-AAMMDD-NN (como el trigger tg_lotes_codigo). */
+  codigo: string;
+  producto_id: string;
+  formula_id: string | null;
+  elaborado_en: string;
+  piezas_planeadas: number;
+  piezas_obtenidas: number | null;
+  dias_curado: number;
+  /** elaborado_en + dias_curado (columna generada). */
+  listo_desde: string;
+  caduca_en: string | null;
+  costo_materiales: number;
+  costo_unitario: number | null;
+  estado: EstadoLote;
+  liberado_en: string | null;
+  /** El mes de la merma en v_resultado_mensual. */
+  descartado_en: string | null;
+  motivo_descarte: string | null;
+  notas: string | null;
+  creado_por: string | null;
+  creado_en: string;
 }
 
 export interface RecetaFila {
@@ -372,6 +440,8 @@ export interface MovimientoFila {
   cita_id: string | null;
   compra_id: string | null;
   pedido_id: string | null;
+  /** Lote del taller (produccion / insumo_produccion). */
+  lote_id: string | null;
   nota: string | null;
   creado_por: string | null;
   creado_en: string;
@@ -433,6 +503,9 @@ export interface Db {
   recetas_servicio: RecetaFila[];
   compras: CompraFila[];
   compra_items: CompraItemFila[];
+  formulas: FormulaFila[];
+  formula_items: FormulaItemFila[];
+  lotes_produccion: LoteFila[];
   movimientos_inventario: MovimientoFila[];
   categorias_gasto: CategoriaGastoFila[];
   gastos_recurrentes: GastoRecurrenteFila[];

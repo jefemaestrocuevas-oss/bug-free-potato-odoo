@@ -64,6 +64,8 @@ const CLASE_MOVIMIENTO: Record<TipoMovimiento, string> = {
   venta: 'pill-verde',
   ajuste: 'pill-oro',
   merma: 'pill-error',
+  produccion: 'pill-exito',
+  insumo_produccion: 'pill-info',
 };
 
 export function PillMovimiento({ tipo }: { tipo: TipoMovimiento }) {
@@ -147,6 +149,7 @@ export function EntradaConUnidad({
   invalido,
   requerido,
   descrita,
+  deshabilitado,
 }: {
   id: string;
   valor: string;
@@ -158,6 +161,7 @@ export function EntradaConUnidad({
   invalido?: boolean;
   requerido?: boolean;
   descrita?: string;
+  deshabilitado?: boolean;
 }) {
   return (
     <div className="inv-entrada">
@@ -178,6 +182,7 @@ export function EntradaConUnidad({
         aria-invalid={invalido || undefined}
         aria-describedby={descrita}
         required={requerido}
+        disabled={deshabilitado}
       />
       {unidad && (
         <span className="inv-entrada-post" aria-hidden="true">

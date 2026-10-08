@@ -1,5 +1,6 @@
 // Pestaña "Reposición": lo que está en su mínimo o por debajo, agrupado por proveedor.
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, type Producto, type ProductoReposicion, type Proveedor } from '../../lib/api';
 import { fechaCorta, fechaLocal, telefonoBonito } from '../../lib/format';
 import { useAsync } from '../../lib/useAsync';
@@ -8,6 +9,7 @@ import { Modal } from './Modal';
 import type { PrecargaCompra } from './InventarioCompra';
 import { centavos, nombrePresentacion, pesos } from './InventarioPiezas';
 import { cantidadConUnidad, copiarAlPortapapeles } from './util';
+import { curadoCubre, curadoPorProducto, esTerminado, textoLoteEnCurado } from './TallerPiezas';
 
 interface Grupo {
   clave: string;
@@ -59,13 +61,15 @@ interface Props {
 
 export function InventarioReposicion({ productos, proveedores, version, onPrecargar }: Props) {
   const repo = useAsync(() => api.admin.getReposicion(), [version]);
+  // Lotes que ya curan: si alcanzan para pasar del mínimo, no hace falta otro lote (sólo esperar).
+  const curando = useAsync(() => Promise.resolve().then(() => api.admin.getLotes('en_curado')).catch(() => []), [version]);
   const [copiado, setCopiado] = useState<string | null>(null);
   const [textoManual, setTextoManual] = useState<string | null>(null);
 
   if (repo.cargando && !repo.datos) return <Cargando texto="Revisando qué hace falta…" />;
   if (repo.error && !repo.datos) return <MensajeError error={repo.error} onReintentar={repo.recargar} />;
-  const filas = repo.datos ?? [];
-  if (filas.length === 0) {
+  const todas = repo.datos ?? [];
+  if (todas.length === 0) {
     return (
       <Vacio titulo="Todo en orden">
         Ningún producto activo está en su mínimo o por debajo. Cuando alguno llegue, aparecerá aquí con la cantidad sugerida para reponer.
@@ -73,9 +77,17 @@ export function InventarioReposicion({ productos, proveedores, version, onPrecar
     );
   }
 
+  const porProducto = new Map(productos.map((p) => [p.id, p]));
+  // Jabones, velas y sets no se compran: se hacen en el taller (otro lote).
+  const delTaller = (f: ProductoReposicion) => {
+    const p = porProducto.get(f.id);
+    return !!p && esTerminado(p.categoria);
+  };
+  const filas = todas.filter((f) => !delTaller(f));
+  const aProducir = todas.filter(delTaller);
+  const curado = curadoPorProducto(curando.datos ?? []);
   const grupos = agrupar(filas, productos, proveedores);
   const total = centavos(filas.reduce((s, f) => s + f.costo_estimado, 0));
-  const porProducto = new Map(productos.map((p) => [p.id, p]));
 
   const precargar = (gs: Grupo[]) => {
     const lineas = gs.flatMap((g) =>
@@ -96,6 +108,39 @@ export function InventarioReposicion({ productos, proveedores, version, onPrecar
       window.setTimeout(() => setCopiado(null), 5000);
     } else setTextoManual(texto);
   };
+
+  const taller = aProducir.length > 0 && (
+    <section className="inv-grupo" aria-label="Para hacer en el taller">
+      <div className="inv-grupo-cabeza">
+        <div>
+          <h3 className="inv-grupo-titulo">Para hacer en el taller</h3>
+          <span className="adm-sub">Hechos en Ópalo: no se compran, se reponen con otro lote.</span>
+        </div>
+        <Link className="btn btn-secundario btn-sm" to="/admin/taller?pestana=lotes">
+          Registrar un lote
+        </Link>
+      </div>
+      <ul className="adm-lista tarjeta-plana inv-repo-taller">
+        {aProducir.map((f) => (
+          <li key={f.id} className="adm-lista-item">
+            <div>
+              <strong>{f.nombre}</strong>
+              <span className="adm-sub">
+                Quedan {cantidadConUnidad(f.stock_actual, f.unidad_medida, 0)} · mínimo {cantidadConUnidad(f.stock_minimo, f.unidad_medida, 0)}
+              </span>
+            </div>
+            {curadoCubre(f.stock_actual, f.stock_minimo, curado.get(f.id)) ? (
+              <span className="pill pill-info">{textoLoteEnCurado(curado.get(f.id)!)}</span>
+            ) : (
+              <span className="pill pill-alerta">Hacer otro lote</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+
+  if (filas.length === 0) return <div className={repo.cargando ? 'inv-recargando' : ''}>{taller}</div>;
 
   return (
     <div className={repo.cargando ? 'inv-recargando' : ''}>
@@ -212,6 +257,8 @@ export function InventarioReposicion({ productos, proveedores, version, onPrecar
         <span>Total aproximado</span>
         <strong className="num">{pesos(total)}</strong>
       </div>
+
+      {taller}
 
       {textoManual && (
         <Modal

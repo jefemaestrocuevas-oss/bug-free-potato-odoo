@@ -70,7 +70,17 @@ export function FirmarCabina({ cita, onCerrar, onListo, aviso }: Props) {
     const anios = c.fecha_nacimiento ? edad(c.fecha_nacimiento) : null;
     const menor = anios !== null && anios < config.edad_mayoria;
     const nombre = [c.nombre, c.apellidos].filter(Boolean).join(' ');
-    return { aplican, menor, anios, nombre, sinFicha: !expediente.ficha, tieneCuenta: c.tiene_cuenta, telefono: c.telefono };
+    return {
+      aplican,
+      menor,
+      anios,
+      nombre,
+      sinFicha: !expediente.ficha,
+      tieneCuenta: c.tiene_cuenta,
+      telefono: c.telefono,
+      // ESPEC §9: con firma_en_linea = false (lo de Ópalo) la clienta no firma desde su teléfono.
+      firmaEnLinea: config.firma_en_linea === true,
+    };
   }, [datos.datos, cita.items]);
 
   // Cuando el equipo desbloquea la tablet, se avisa si la clienta firmó o no.
@@ -107,7 +117,7 @@ export function FirmarCabina({ cita, onCerrar, onListo, aviso }: Props) {
     setEntregada(true);
   };
 
-  const enlace = calculo?.tieneCuenta && calculo.telefono ? enlaceFirmaEnLinea(cita.id) : null;
+  const enlace = calculo?.firmaEnLinea && calculo.tieneCuenta && calculo.telefono ? enlaceFirmaEnLinea(cita.id) : null;
   const mensaje = enlace
     ? `Hola, ${cita.cliente_nombre.split(' ')[0]}. Para tu cita en Ópalo del ${fechaHora(cita.inicio)} necesitamos tu firma en el consentimiento informado. Puedes leerlo y firmarlo aquí, con tu cuenta: ${enlace}`
     : '';
@@ -137,7 +147,7 @@ export function FirmarCabina({ cita, onCerrar, onListo, aviso }: Props) {
         <div className="pila">
           {calculo.sinFicha && (
             <p className="aviso aviso-alerta adm-sin-margen">
-              Esta clienta aún no tiene ficha de salud. Pídele que la llene desde su cuenta o repasa las preguntas con ella antes del servicio.
+              Esta clienta aún no tiene ficha de salud. Repasa las preguntas con ella antes del servicio (o pídele que la llene desde su cuenta).
             </p>
           )}
           {calculo.aplican.length === 0 ? (

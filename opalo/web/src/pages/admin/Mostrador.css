@@ -1,0 +1,220 @@
+/*
+  Mostrador (/admin/mostrador): punto de venta para tablet. Prefijo de clases: .mos-
+  Productos a la izquierda y la venta a la derecha cuando el contenido mide 860 px o más; si no,
+  uno debajo del otro con una barra fija abajo para ir a cobrar. Todo color sale de tokens.css.
+*/
+.mos-pagina { min-width: 0; container: mos / inline-size; }
+.mos-marco { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+@container mos (min-width: 860px) {
+  .mos-marco { grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); }
+  /* --mos-tope lo mide Mostrador.tsx: lo que hay arriba de la venta (o 16 px ya pegada) + 16 px abajo. */
+  .mos-carrito { position: sticky; top: 16px; max-height: calc(100vh - var(--mos-tope, 32px)); max-height: calc(100dvh - var(--mos-tope, 32px)); overflow-y: auto; }
+  .mos-barra-fija { display: none !important; }
+}
+
+/* ---------- Catálogo ---------- */
+.mos-catalogo { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.mos-buscar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.mos-buscar-campo { flex: 1 1 240px; }
+.mos-productos { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+@container mos (max-width: 420px) { .mos-productos { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.mos-producto {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  padding: 10px;
+  text-align: left;
+  font: inherit;
+  color: var(--tinta);
+  background: var(--superficie);
+  border: 1.5px solid var(--linea-2);
+  border-radius: var(--radio);
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.mos-producto:hover:not(:disabled) { border-color: var(--verde); box-shadow: var(--sombra); }
+.mos-producto:active:not(:disabled) { transform: scale(0.99); }
+.mos-producto-elegido { border-color: var(--verde); background: var(--verde-suave); }
+.mos-producto:disabled { cursor: not-allowed; opacity: 0.55; }
+.mos-producto-imagen { width: 100%; }
+.mos-producto-nombre { font-weight: 700; font-size: 0.95rem; line-height: 1.3; overflow-wrap: anywhere; flex: 1; }
+.mos-producto-pie { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; }
+.mos-producto-stock { font-size: 0.78rem; color: var(--tinta-3); }
+.mos-pocas { color: var(--alerta); font-weight: 700; }
+.mos-agotado { color: var(--error); font-weight: 700; }
+.mos-producto-cuenta {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--verde);
+  color: var(--superficie);
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.mos-servicios { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.mos-servicios-lista { width: 100%; display: flex; flex-direction: column; gap: 8px; }
+.mos-lista-servicios { list-style: none; margin: 0; padding: 0; border: 1px solid var(--linea-2); border-radius: var(--radio-sm); background: var(--superficie); }
+.mos-lista-servicios li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--linea-2); }
+.mos-lista-servicios li:last-child { border-bottom: 0; }
+.mos-lista-servicios li > span { min-width: 0; overflow-wrap: anywhere; }
+
+/* ---------- Venta (carrito) ---------- */
+.mos-carrito {
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  border-radius: var(--radio);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  scroll-margin-top: 76px;
+}
+.mos-carrito:focus { outline: none; }
+.mos-carrito:focus-visible { outline: 2px solid var(--oro); outline-offset: 2px; }
+.mos-carrito-titulo { font-size: 1.5rem; margin: 0; display: flex; align-items: center; gap: 8px; }
+.mos-carrito-cuenta { font-family: var(--cuerpo); font-size: 0.85rem; background: var(--verde-suave); color: var(--verde); border-radius: 999px; padding: 0 10px; line-height: 1.8; }
+.mos-carrito-vacio { margin: 0; padding: 16px; text-align: center; border: 1px dashed var(--linea); border-radius: var(--radio-sm); }
+.mos-lineas { list-style: none; margin: 0; padding: 0; }
+.mos-linea {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'texto importe'
+    'cantidad quitar';
+  gap: 6px 10px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--linea-2);
+}
+.mos-linea-texto { grid-area: texto; min-width: 0; }
+.mos-linea-nombre { font-weight: 700; overflow-wrap: anywhere; }
+.mos-linea-importe { grid-area: importe; font-weight: 700; text-align: right; }
+.mos-cantidad { grid-area: cantidad; display: inline-flex; align-items: center; gap: 4px; }
+.mos-quitar { grid-area: quitar; justify-self: end; }
+.mos-paso {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1.5px solid var(--linea);
+  background: var(--superficie);
+  color: var(--verde);
+  font-size: 1.3rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.mos-paso:hover:not(:disabled) { border-color: var(--verde); background: var(--verde-suave); }
+.mos-paso:disabled { opacity: 0.4; cursor: not-allowed; }
+.mos-cantidad-num { min-width: 32px; text-align: center; font-weight: 700; font-size: 1.1rem; }
+.mos-total { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 0; border-top: 2px solid var(--linea); }
+.mos-total span { font-weight: 700; color: var(--tinta-2); }
+.mos-total strong { font-size: 1.7rem; }
+
+.mos-bloque { border: 1px solid var(--linea-2); border-radius: var(--radio-sm); padding: 10px 14px 14px; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.mos-bloque legend { font-weight: 700; color: var(--verde); padding: 0 6px; }
+.mos-clienta { display: flex; flex-direction: column; gap: 10px; }
+.entre.mos-clienta { flex-direction: row; }
+.aviso.mos-aviso { font-size: 0.9rem; }
+
+.mos-segmentos, .mos-metodos { display: grid; gap: 6px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mos-segmento, .mos-metodo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 6px 10px;
+  text-align: center;
+  border: 1.5px solid var(--linea);
+  border-radius: var(--radio-sm);
+  background: var(--superficie);
+  font-weight: 700;
+  font-size: 0.92rem;
+  cursor: pointer;
+  color: var(--tinta-2);
+}
+.mos-segmento input, .mos-metodo input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.mos-segmento:has(input:focus-visible), .mos-metodo:has(input:focus-visible) { outline: 2px solid var(--oro); outline-offset: 2px; }
+.mos-segmento-activo, .mos-metodo-activo { border-color: var(--verde); background: var(--verde-suave); color: var(--verde); }
+.mos-pago-campos { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); }
+.mos-cambio { font-weight: 700; color: var(--tinta-2); }
+.btn.mos-cobrar { min-height: 56px; font-size: 1.1rem; }
+/* El botón de cobrar siempre a la vista dentro de la venta (cuando la venta tiene su propio scroll). */
+.mos-cobrar-pie { display: flex; flex-direction: column; gap: 8px; }
+.mos-cobrar-pie .aviso { margin: 0; }
+@container mos (min-width: 860px) {
+  .mos-cobrar-pie { position: sticky; bottom: -16px; margin: 0 -16px -16px; padding: 12px 16px 16px; background: var(--superficie); border-top: 1px solid var(--linea-2); border-radius: 0 0 var(--radio) var(--radio); }
+}
+.mos-falta { text-align: center; }
+
+/* Barra fija para ir a cobrar (sólo cuando la venta queda abajo) */
+.mos-barra-fija {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 calc(-1 * var(--gutter));
+  padding: 10px var(--gutter) calc(10px + env(safe-area-inset-bottom));
+  background: var(--fondo-alt);
+  border-top: 1px solid var(--linea);
+  box-shadow: 0 -6px 18px rgba(42, 46, 34, 0.08);
+}
+/* Apiladas: productos, la barra (que se queda pegada abajo mientras bajas) y la venta. */
+@container mos (max-width: 859.98px) {
+  .mos-marco > .mos-catalogo { order: 1; }
+  .mos-marco > .mos-barra-fija { order: 2; }
+  .mos-marco > .mos-carrito { order: 3; }
+}
+
+/* ---------- Ticket ---------- */
+.mos-ticket-marco { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 8px 0 24px; }
+.mos-ticket {
+  width: 100%;
+  max-width: 420px;
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  border-radius: var(--radio);
+  box-shadow: var(--sombra);
+  padding: 22px 22px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: center;
+}
+.mos-ticket-marca { font-family: var(--display); font-size: 1.1rem; letter-spacing: 0.3em; text-transform: uppercase; color: var(--oro-osc); margin: 0; }
+.mos-ticket-titulo { font-size: 1.7rem; margin: 0; color: var(--verde); }
+.mos-ticket-folio { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 1.4rem; font-weight: 700; margin: 0; letter-spacing: 0.06em; }
+.mos-capital::first-letter { text-transform: uppercase; }
+.mos-ticket-lista { list-style: none; margin: 8px 0 0; padding: 8px 0; border-top: 1px dashed var(--linea); border-bottom: 1px dashed var(--linea); text-align: left; }
+.mos-ticket-lista li { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
+.mos-ticket-lista li span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.mos-ticket-totales { margin: 0; display: flex; flex-direction: column; gap: 2px; text-align: left; }
+.mos-ticket-totales div { display: flex; justify-content: space-between; gap: 12px; }
+.mos-ticket-totales dt { color: var(--tinta-2); }
+.mos-ticket-totales dd { margin: 0; font-weight: 700; }
+.mos-ticket-total dt, .mos-ticket-total dd { font-size: 1.3rem; color: var(--tinta); }
+.mos-ticket-cambio dd { color: var(--verde); }
+.mos-ticket .aviso { text-align: left; }
+.mos-ticket-acciones { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; width: 100%; max-width: 420px; }
+.btn.mos-boton-grande { min-height: 52px; flex: 1 1 100%; font-size: 1.05rem; }
+
+@media print {
+  .mos-ticket-acciones { display: none !important; }
+  .mos-ticket { box-shadow: none; border: 0; }
+}

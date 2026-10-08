@@ -6,11 +6,15 @@ import { crearApiSupabaseCon } from './supabase';
 import { coincideBusqueda, filtroBusquedaClientes, primerVencimiento, slugLimpio } from './supabase/admin';
 import {
   aCitaDetalle,
+  aCostoFormula,
   aCredito,
   aFichaSalud,
+  aLote,
   aPedidoDetalle,
   aProducto,
+  aProductoTienda,
   completarMeses,
+  ordenarTienda,
   rangoInstantes,
 } from './supabase/conversion';
 import { aErrorOpalo } from './supabase/errores';
@@ -114,6 +118,22 @@ const FILA_CLIENTA = {
   email: 'mariana@correo.mx',
   fecha_nacimiento: '1995-04-12',
   acepta_promociones: false,
+};
+
+/** Campos de la ficha pública de un producto (ESPEC §10.1) vacíos, para insumos de cabina. */
+const FICHA_VACIA = {
+  slug: null,
+  descripcion: null,
+  aroma: null,
+  ingredientes: null,
+  modo_uso: null,
+  advertencias: null,
+  contenido_neto: null,
+  foto_url: null,
+  color_hex: null,
+  destacado: false,
+  hecho_en_opalo: false,
+  orden: 0,
 };
 
 const M = {
@@ -610,7 +630,16 @@ describe('crearApiSupabaseCon · panel interno', () => {
       { ahora: () => AHORA },
     );
     const r = await api.admin.getResumenHoy();
-    expect(r).toEqual({ citas_hoy: [], por_revisar: 3, reposicion: [], gastos_por_vencer: [], mes_actual: null, pedidos_pendientes: 2 });
+    expect(r).toEqual({
+      citas_hoy: [],
+      por_revisar: 3,
+      reposicion: [],
+      gastos_por_vencer: [],
+      mes_actual: null,
+      pedidos_pendientes: 2,
+      pedidos_por_entregar: 0,
+      lotes_listos: [],
+    });
     const v = llamadas.find((l) => l.tabla === 'v_citas_detalle');
     expect(ops(v, 'gte')).toContainEqual(['inicio', '2026-11-02T06:00:00.000Z']);
     expect(ops(v, 'lt')).toContainEqual(['inicio', '2026-11-03T06:00:00.000Z']);
@@ -651,6 +680,7 @@ describe('crearApiSupabaseCon · panel interno', () => {
       vendible_en_linea: false,
       activo: true,
       notas: null,
+      ...FICHA_VACIA,
     });
     const [datos] = ops(llamadas[0], 'insert')[0] as [Record<string, unknown>];
     expect(datos).not.toHaveProperty('stock_actual');
@@ -933,6 +963,551 @@ describe('crearApiSupabaseCon · panel interno', () => {
 });
 
 // ---------------------------------------------------------------------------
+// La firma es parte del flujo interno (ESPEC §9)
+// ---------------------------------------------------------------------------
+
+describe('firma en cabina (ESPEC §9)', () => {
+  it('getConfiguracion pide firma_en_linea y la trae como boolean (false si falta)', async () => {
+    const { api, llamadas } = apiCon((l) => (l.tabla === 'configuracion' ? { data: { nombre_negocio: 'Ópalo', firma_en_linea: false } } : undefined));
+    expect((await api.getConfiguracion()).firma_en_linea).toBe(false);
+    expect(String(ops(llamadas[0], 'select')[0][0])).toContain('firma_en_linea');
+
+    const enLinea = apiCon(() => ({ data: { firma_en_linea: true } }));
+    expect((await enLinea.api.getConfiguracion()).firma_en_linea).toBe(true);
+    const sinFila = apiCon(() => ({ data: null }));
+    expect((await sinFila.api.getConfiguracion()).firma_en_linea).toBe(false);
+  });
+
+  it('reservarCita sin firma no manda p_nombre_firmante ni p_firma_svg', async () => {
+    const { api, llamadas } = apiCon((l) =>
+      l.rpc === 'reservar_cita' ? { data: { id: 'c1', estado: 'confirmada', requiere_revision: false, alertas: [] } } : undefined,
+    );
+    const r = await api.reservarCita({ items: [{ servicio_id: 's1' }], inicio: '2026-11-03T16:00:00.000Z', notas: '  Llego 5 min antes ' });
+    expect(r).toEqual({ id: 'c1', estado: 'confirmada', requiere_revision: false, alertas: [] });
+    expect(llamadas).toHaveLength(1);
+    expect(llamadas[0].args).toEqual({
+      p_items: [{ servicio_id: 's1' }],
+      p_inicio: '2026-11-03T16:00:00.000Z',
+      p_personal_id: null,
+      p_notas: 'Llego 5 min antes',
+      p_tutor_nombre: null,
+      p_user_agent: navigator.userAgent,
+    });
+
+    // firma null o vacía cuenta como "sin firma"
+    llamadas.length = 0;
+    await api.reservarCita({ items: [{ servicio_id: 's1' }], inicio: '2026-11-03T16:00:00.000Z', firma: null });
+    await api.reservarCita({
+      items: [{ servicio_id: 's1' }],
+      inicio: '2026-11-03T16:00:00.000Z',
+      firma: { nombre_firmante: '  ', firma_svg: '' },
+    });
+    for (const l of llamadas) {
+      expect(l.args).not.toHaveProperty('p_nombre_firmante');
+      expect(l.args).not.toHaveProperty('p_firma_svg');
+    }
+  });
+
+  it('reservarCita de una menor sin firma (firma_en_linea = false) manda el tutor sin trazo ni firmante', async () => {
+    const { api, llamadas } = apiCon();
+    await api.reservarCita({
+      items: [{ servicio_id: 's1' }],
+      inicio: '2026-11-03T16:00:00.000Z',
+      firma: { nombre_firmante: '', firma_svg: '', tutor_nombre: ' Laura Ruiz ' },
+    });
+    expect(llamadas[0].args).toMatchObject({ p_tutor_nombre: 'Laura Ruiz' });
+    expect(llamadas[0].args).not.toHaveProperty('p_nombre_firmante');
+    expect(llamadas[0].args).not.toHaveProperty('p_firma_svg');
+  });
+
+  it('reservarCita con firma (firma_en_linea = true) la manda con su tutor', async () => {
+    const { api, llamadas } = apiCon();
+    await api.reservarCita({
+      items: [{ servicio_id: 's1' }],
+      inicio: '2026-11-03T16:00:00.000Z',
+      firma: { nombre_firmante: ' Sofía Ruiz ', firma_svg: '<svg/>', tutor_nombre: ' Laura Ruiz ' },
+    });
+    expect(llamadas[0].args).toMatchObject({ p_nombre_firmante: 'Sofía Ruiz', p_firma_svg: '<svg/>', p_tutor_nombre: 'Laura Ruiz' });
+  });
+
+  it('firmarConsentimientoCita de la clienta muestra el mensaje de la base tal cual', async () => {
+    const msg = 'La firma se hace en el spa, el día de tu cita.';
+    const { api } = apiCon(() => ({ error: { code: 'P0001', message: msg }, data: null, status: 400 }));
+    await expect(api.firmarConsentimientoCita('c1', { nombre_firmante: 'Mariana', firma_svg: '<svg/>' })).rejects.toMatchObject({
+      message: msg,
+      codigo: 'P0001',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tienda, taller y mostrador (ESPEC §10)
+// ---------------------------------------------------------------------------
+
+describe('tienda de jabones y velas (ESPEC §10.1)', () => {
+  const JABON = {
+    id: 'j1',
+    slug: 'jabon-avena-miel',
+    nombre: 'Jabón de avena y miel (ejemplo)',
+    categoria: 'jabon',
+    marca: 'Ópalo',
+    presentacion: 'Barra',
+    descripcion: 'Suave para piel sensible.',
+    aroma: 'Miel',
+    ingredientes: 'Avena, miel, aceite de oliva',
+    modo_uso: 'Haz espuma con agua tibia.',
+    advertencias: 'Uso externo.',
+    contenido_neto: '100 g',
+    foto_url: null,
+    color_hex: '#E8D9B5',
+    destacado: true,
+    hecho_en_opalo: true,
+    precio_venta: '120.00',
+    stock_disponible: 7,
+    hay_stock: true,
+    proximo_lote_listo: '2026-11-20',
+  };
+
+  it('productos_tienda: columnas de §10.1, numeric a number y fechas YYYY-MM-DD', () => {
+    expect(aProductoTienda(JABON)).toEqual({ ...JABON, precio_venta: 120 });
+    const sin = aProductoTienda({ id: 'v1', nombre: 'Vela', categoria: 'vela', precio_venta: 250, stock_disponible: '0', hay_stock: false, color_hex: 'rojo' });
+    expect(sin).toMatchObject({ slug: null, stock_disponible: 0, hay_stock: false, proximo_lote_listo: null, color_hex: null, destacado: false });
+    expect(aProductoTienda({ id: 'x', color_hex: '#abc', stock_disponible: '3.7' })).toMatchObject({ color_hex: '#aabbcc', stock_disponible: 3, hay_stock: true });
+  });
+
+  it('getProductosTienda pide la vista sin * ni order() propio y deja destacados primero', async () => {
+    const { api, llamadas } = apiCon((l) =>
+      l.tabla === 'productos_tienda'
+        ? {
+            data: [
+              { ...JABON, id: 'v1', categoria: 'vela', destacado: false, nombre: 'Vela' },
+              { ...JABON, id: 'j2', destacado: false, nombre: 'Jabón 2' },
+              { ...JABON, id: 'j1', destacado: true },
+              { ...JABON, id: 'j3', destacado: false, nombre: 'Jabón 3' },
+            ],
+          }
+        : undefined,
+    );
+    const r = await api.getProductosTienda();
+    expect(r.map((p) => p.id)).toEqual(['j1', 'j2', 'j3', 'v1']);
+    expect(llamadas).toHaveLength(1);
+    expect(ops(llamadas[0], 'order')).toEqual([]);
+    expect(String(ops(llamadas[0], 'select')[0][0])).not.toContain('*');
+  });
+
+  it('ordenarTienda es estable dentro de cada categoría', () => {
+    const p = (id: string, categoria: 'jabon' | 'vela' | 'set', destacado = false) => aProductoTienda({ id, categoria, destacado, precio_venta: 1 });
+    expect(ordenarTienda([p('s', 'set'), p('v', 'vela', true), p('j2', 'jabon'), p('j1', 'jabon')]).map((x) => x.id)).toEqual(['v', 'j2', 'j1', 's']);
+  });
+
+  it('productos: la ficha pública se lee y se guarda (el slug lo normaliza o lo arma la base)', async () => {
+    const pr = aProducto({ ...JABON, unidad_medida: 'pz', contenido_presentacion: 1, costo_presentacion: '18.5', orden: '3' });
+    expect(pr).toMatchObject({ slug: 'jabon-avena-miel', contenido_neto: '100 g', color_hex: '#E8D9B5', destacado: true, hecho_en_opalo: true, orden: 3, costo_unitario: 18.5 });
+
+    const { api, llamadas } = apiCon((l) => (l.tabla === 'productos' ? { data: { id: 'n1', nombre: 'Vela de lavanda', categoria: 'vela' } } : undefined));
+    await api.admin.guardarProducto({
+      nombre: ' Vela de lavanda ',
+      marca: null,
+      categoria: 'vela',
+      unidad_medida: 'pz',
+      presentacion: 'Frasco',
+      contenido_presentacion: 1,
+      costo_presentacion: 60,
+      stock_minimo: 4,
+      proveedor_id: null,
+      uso: 'venta',
+      precio_venta: 250,
+      vendible_en_linea: true,
+      activo: true,
+      notas: null,
+      ...FICHA_VACIA,
+      descripcion: '  Cera de soya. ',
+      aroma: 'Lavanda',
+      contenido_neto: '180 g',
+      color_hex: '#B8A9D9',
+      destacado: true,
+      hecho_en_opalo: true,
+      orden: 2,
+    });
+    const [datos] = ops(llamadas[0], 'insert')[0] as [Record<string, unknown>];
+    expect(datos).toMatchObject({
+      nombre: 'Vela de lavanda',
+      slug: null,
+      descripcion: 'Cera de soya.',
+      aroma: 'Lavanda',
+      ingredientes: null,
+      contenido_neto: '180 g',
+      foto_url: null,
+      color_hex: '#B8A9D9',
+      destacado: true,
+      hecho_en_opalo: true,
+      orden: 2,
+    });
+    expect(datos).not.toHaveProperty('stock_actual');
+    expect(datos).not.toHaveProperty('costo_unitario');
+    expect(String(ops(llamadas[0], 'select')[0][0])).toContain('hecho_en_opalo');
+
+    // Un color que no es #rrggbb no se manda; un slug escrito va tal cual (recortado) a la base.
+    llamadas.length = 0;
+    await api.admin.guardarProducto({
+      id: 'c1',
+      nombre: 'Cera tibia',
+      marca: null,
+      categoria: 'cera',
+      unidad_medida: 'g',
+      presentacion: null,
+      contenido_presentacion: 800,
+      costo_presentacion: 400,
+      stock_minimo: 0,
+      proveedor_id: null,
+      uso: 'cabina',
+      precio_venta: null,
+      vendible_en_linea: false,
+      activo: true,
+      notas: null,
+      ...FICHA_VACIA,
+      color_hex: 'no-es-color',
+    });
+    expect(ops(llamadas[0], 'update')[0][0]).toMatchObject({ slug: null, color_hex: null, destacado: false });
+    llamadas.length = 0;
+    await api.admin.guardarProducto({
+      nombre: 'Set regalo',
+      marca: null,
+      categoria: 'set',
+      unidad_medida: 'pz',
+      presentacion: null,
+      contenido_presentacion: 1,
+      costo_presentacion: 0,
+      stock_minimo: 0,
+      proveedor_id: null,
+      uso: 'venta',
+      precio_venta: null,
+      vendible_en_linea: false,
+      activo: true,
+      notas: null,
+      ...FICHA_VACIA,
+      slug: ' Set Navideño ',
+    });
+    expect(ops(llamadas[0], 'insert')[0][0]).toMatchObject({ slug: 'Set Navideño' });
+
+    // Los avisos del trigger de la ficha llegan tal cual.
+    const msg = 'Los jabones, velas y sets se manejan por pieza: unidad "pz" y contenido 1.';
+    const mala = apiCon(() => ({ error: { code: 'P0001', message: msg }, data: null, status: 400 }));
+    await expect(
+      mala.api.admin.guardarProducto({
+        nombre: 'Jabón',
+        marca: null,
+        categoria: 'jabon',
+        unidad_medida: 'g',
+        presentacion: null,
+        contenido_presentacion: 100,
+        costo_presentacion: 18,
+        stock_minimo: 0,
+        proveedor_id: null,
+        uso: 'venta',
+        precio_venta: 120,
+        vendible_en_linea: true,
+        activo: true,
+        notas: null,
+        ...FICHA_VACIA,
+      }),
+    ).rejects.toThrow(msg);
+  });
+});
+
+describe('pedidos de mostrador y resultados (ESPEC §10.3–§10.4)', () => {
+  it('v_pedidos_detalle: origen, entregado_en, tiene_productos y venta sin clienta', () => {
+    const p = aPedidoDetalle({
+      id: 'pe2',
+      folio: 'OP-00002',
+      cliente_id: null,
+      cliente_nombre: 'Venta de mostrador',
+      estado: 'pagado',
+      total: '240',
+      pagado: '240',
+      creado_en: '2026-10-08T18:00:00+00:00',
+      pagado_en: '2026-10-08T18:00:00+00:00',
+      origen: 'mostrador',
+      entregado_en: '2026-10-08T18:00:01+00:00',
+      tiene_productos: true,
+      items: [{ tipo: 'producto', descripcion: 'Jabón', cantidad: 2, precio_unitario: 120, importe: 240, regalo_para: null }],
+    });
+    expect(p).toMatchObject({ cliente_id: null, cliente_nombre: 'Venta de mostrador', origen: 'mostrador', entregado_en: '2026-10-08T18:00:01.000Z', tiene_productos: true });
+
+    // Sin columnas nuevas (o nulas): origen web, sin entregar, tiene_productos según los ítems.
+    const q = aPedidoDetalle({ id: 'pe3', cliente_id: null, cliente_nombre: null, items: [{ tipo: 'producto', cantidad: 1, precio_unitario: 1 }] });
+    expect(q).toMatchObject({ cliente_nombre: 'Venta de mostrador', origen: 'web', entregado_en: null, tiene_productos: true });
+    expect(aPedidoDetalle({ id: 'pe4', cliente_id: CLIENTE_ID, cliente_nombre: 'Mariana', items: [{ tipo: 'servicio' }] }).tiene_productos).toBe(false);
+  });
+
+  it('resultados: costo_ventas y mermas (en ceros los meses sin actividad)', () => {
+    const ahora = new Date(isoDesdeLocal('2026-11-15', '12:00'));
+    const r = completarMeses([{ mes: '2026-11-01', ingresos: '1000', costo_insumos: '50', costo_ventas: '120.50', mermas: '30', gastos: 200, utilidad: '599.50' }], ahora, 2);
+    expect(r[0]).toMatchObject({ mes: '2026-10-01', costo_ventas: 0, mermas: 0 });
+    expect(r[1]).toMatchObject({ costo_ventas: 120.5, mermas: 30, utilidad: 599.5 });
+  });
+
+  it('ventaMostrador llama venta_mostrador con los ítems de crear_pedido y devuelve folio y total', async () => {
+    const { api, llamadas } = apiCon((l) => (l.rpc === 'venta_mostrador' ? { data: { id: 'pe9', folio: 'OP-00009', total: '370.00' } } : undefined));
+    const r = await api.admin.ventaMostrador({
+      items: [
+        { tipo: 'producto', id: 'j1', cantidad: 2 },
+        { tipo: 'servicio', id: 's1', cantidad: 1, regalo_para: ' Sofía ' },
+      ],
+      metodo: 'tarjeta',
+      cliente_id: CLIENTE_ID,
+      propina: 30,
+      notas: '  ',
+    });
+    expect(r).toEqual({ id: 'pe9', folio: 'OP-00009', total: 370 });
+    expect(llamadas).toHaveLength(1);
+    expect(llamadas[0].args).toEqual({
+      p_items: [
+        { tipo: 'producto', id: 'j1', cantidad: 2, regalo_para: null },
+        { tipo: 'servicio', id: 's1', cantidad: 1, regalo_para: 'Sofía' },
+      ],
+      p_metodo: 'tarjeta',
+      p_cliente_id: CLIENTE_ID,
+      p_propina: 30,
+      p_notas: null,
+    });
+
+    // Sin clienta ni propina
+    llamadas.length = 0;
+    await api.admin.ventaMostrador({ items: [{ tipo: 'producto', id: 'j1', cantidad: 1 }], metodo: 'cortesia' });
+    expect(llamadas[0].args).toMatchObject({ p_cliente_id: null, p_propina: 0, p_metodo: 'cortesia' });
+  });
+
+  it('ventaMostrador y marcarEntregado muestran los mensajes de la base tal cual', async () => {
+    const msg = 'Para vender servicios prepagados elige a la clienta.';
+    const { api } = apiCon(() => ({ error: { code: 'P0001', message: msg }, data: null, status: 400 }));
+    await expect(api.admin.ventaMostrador({ items: [{ tipo: 'servicio', id: 's1', cantidad: 1 }], metodo: 'efectivo' })).rejects.toThrow(msg);
+
+    const ok = apiCon();
+    await ok.api.admin.marcarEntregado('pe1');
+    expect(ok.llamadas[0]).toMatchObject({ rpc: 'marcar_entregado', args: { p_pedido_id: 'pe1' } });
+  });
+
+  it('crearPedido sigue mandando los mismos p_items (y muestra el aviso de existencias)', async () => {
+    const msg = 'Por ahora sólo quedan 2 piezas de Jabón de avena.';
+    const { api, llamadas } = apiCon(() => ({ error: { code: 'P0001', message: msg }, data: null, status: 400 }));
+    await expect(api.crearPedido([{ tipo: 'producto', id: 'j1', cantidad: 3.2 }], 'efectivo')).rejects.toThrow(msg);
+    expect(llamadas[0].args).toEqual({ p_items: [{ tipo: 'producto', id: 'j1', cantidad: 3, regalo_para: null }], p_metodo_pago: 'efectivo', p_notas: null });
+  });
+});
+
+describe('taller: fórmulas y lotes (ESPEC §10.2)', () => {
+  const AHORA = new Date(isoDesdeLocal('2026-11-02', '12:00'));
+  const LOTE = {
+    id: 'l1',
+    codigo: 'JAB-261002-01',
+    producto_id: 'j1',
+    producto_nombre: 'Jabón de avena',
+    categoria: 'jabon',
+    formula_nombre: 'Avena 12 piezas',
+    elaborado_en: '2026-10-02',
+    listo_desde: '2026-10-30',
+    dias_para_listo: -3,
+    caduca_en: null,
+    piezas_planeadas: '12.00',
+    piezas_obtenidas: null,
+    costo_materiales: '222.00',
+    costo_unitario: '18.5000',
+    estado: 'en_curado',
+    liberado_en: null,
+    notas: null,
+  };
+
+  it('v_lotes y v_costo_formulas a sus tipos (insumos jsonb, también como texto)', () => {
+    expect(aLote(LOTE)).toEqual({ ...LOTE, piezas_planeadas: 12, costo_materiales: 222, costo_unitario: 18.5 });
+    expect(aLote({ ...LOTE, estado: 'raro', liberado_en: '2026-10-31T18:00:00+00:00' })).toMatchObject({ estado: 'en_curado', liberado_en: '2026-10-31T18:00:00.000Z' });
+
+    const insumos = [{ insumo_id: 'aceite', nombre: 'Aceite de oliva', unidad_medida: 'ml', cantidad: '500.000', costo: '90.00' }];
+    const fila = { formula_id: 'f1', producto_id: 'j1', producto_nombre: 'Jabón', nombre: 'Avena', rendimiento_piezas: '12', dias_curado: 28, costo_lote: '222', costo_pieza: '18.5', precio_venta: '120', margen_pieza: '101.5', margen_pct: '84.58', insumos };
+    const c = aCostoFormula(fila);
+    expect(c).toMatchObject({ rendimiento_piezas: 12, costo_lote: 222, costo_pieza: 18.5, precio_venta: 120, margen_pieza: 101.5, margen_pct: 84.58 });
+    expect(c.insumos).toEqual([{ insumo_id: 'aceite', nombre: 'Aceite de oliva', unidad_medida: 'ml', cantidad: 500, costo: 90 }]);
+    expect(aCostoFormula({ ...fila, insumos: JSON.stringify(insumos) }).insumos).toHaveLength(1);
+    expect(aCostoFormula({ ...fila, precio_venta: null, margen_pieza: null, margen_pct: null, insumos: null })).toMatchObject({ precio_venta: null, margen_pct: null, insumos: [] });
+  });
+
+  it('getFormulas trae fórmulas con sus insumos embebidos en una consulta', async () => {
+    const { api, llamadas } = apiCon((l) =>
+      l.tabla === 'formulas'
+        ? {
+            data: [
+              { id: 'f2', producto_id: 'v1', nombre: 'Vela soya', rendimiento_piezas: '6', dias_curado: 2, instrucciones: null, activa: true, formula_items: [] },
+              {
+                id: 'f1',
+                producto_id: 'j1',
+                nombre: 'Avena',
+                rendimiento_piezas: '12.00',
+                dias_curado: 28,
+                instrucciones: 'Mezclar a 40 °C',
+                activa: false,
+                formula_items: [{ insumo_id: 'aceite', cantidad: '500.000' }, { insumo_id: 'sosa', cantidad: '70' }],
+              },
+            ],
+          }
+        : undefined,
+    );
+    const fs = await api.admin.getFormulas();
+    expect(llamadas).toHaveLength(1);
+    expect(fs.map((f) => f.id)).toEqual(['f1', 'f2']);
+    expect(fs[0]).toEqual({
+      id: 'f1',
+      producto_id: 'j1',
+      nombre: 'Avena',
+      rendimiento_piezas: 12,
+      dias_curado: 28,
+      instrucciones: 'Mezclar a 40 °C',
+      activa: false,
+      items: [
+        { insumo_id: 'aceite', cantidad: 500 },
+        { insumo_id: 'sosa', cantidad: 70 },
+      ],
+    });
+  });
+
+  it('guardarFormula llama guardar_formula (p_id, p_datos, p_items) y devuelve el id', async () => {
+    const { api, llamadas } = apiCon((l) => (l.rpc === 'guardar_formula' ? { data: 'f9' } : undefined));
+    const id = await api.admin.guardarFormula({
+      producto_id: 'j1',
+      nombre: ' Avena ',
+      rendimiento_piezas: 12,
+      dias_curado: 28,
+      instrucciones: '  ',
+      activa: true,
+      items: [{ insumo_id: 'aceite', cantidad: 500 }],
+    });
+    expect(id).toBe('f9');
+    expect(llamadas).toHaveLength(1);
+    expect(llamadas[0].args).toEqual({
+      p_id: null,
+      p_datos: { producto_id: 'j1', nombre: 'Avena', rendimiento_piezas: 12, dias_curado: 28, instrucciones: null, activa: true },
+      p_items: [{ insumo_id: 'aceite', cantidad: 500 }],
+    });
+    expect(llamadas.some((l) => l.tabla === 'formulas' || l.tabla === 'formula_items')).toBe(false);
+
+    llamadas.length = 0;
+    await api.admin.guardarFormula({ id: 'f1', producto_id: 'j1', nombre: 'Avena', rendimiento_piezas: 0, dias_curado: 28, instrucciones: null, activa: false, items: [] });
+    expect(llamadas[0].args).toMatchObject({ p_id: 'f1', p_datos: { rendimiento_piezas: 0, activa: false }, p_items: [] });
+
+    const msg = 'Agrega al menos un insumo a la fórmula.';
+    const mala = apiCon(() => ({ error: { code: 'P0001', message: msg }, data: null, status: 400 }));
+    await expect(mala.api.admin.guardarFormula({ producto_id: 'j1', nombre: 'Avena', rendimiento_piezas: 12, dias_curado: 28, instrucciones: null, activa: true, items: [] })).rejects.toThrow(msg);
+  });
+
+  it('getCostosFormulas, getMargenesProductos y getLotes leen sus vistas', async () => {
+    const { api, llamadas } = apiCon((l) => {
+      if (l.tabla === 'v_lotes') return { data: [LOTE] };
+      if (l.tabla === 'v_margen_productos')
+        return { data: [{ id: 'j1', nombre: 'Jabón', categoria: 'jabon', precio_venta: '120', costo_unitario: '18.5', margen: '101.5', margen_pct: '84.6', stock_actual: '7', piezas_en_curado: '12', vendidas_30d: 3 }] };
+      return undefined;
+    });
+    const lotes = await api.admin.getLotes('en_curado');
+    expect(lotes[0]).toMatchObject({ codigo: 'JAB-261002-01', dias_para_listo: -3, piezas_planeadas: 12 });
+    const v = llamadas.find((l) => l.tabla === 'v_lotes');
+    expect(ops(v, 'eq')).toEqual([['estado', 'en_curado']]);
+
+    llamadas.length = 0;
+    await api.admin.getLotes();
+    expect(ops(llamadas[0], 'eq')).toEqual([]);
+    await api.admin.getLotes(null);
+    expect(ops(llamadas[1], 'eq')).toEqual([]);
+
+    const [m] = await api.admin.getMargenesProductos();
+    expect(m).toEqual({ id: 'j1', nombre: 'Jabón', categoria: 'jabon', precio_venta: 120, costo_unitario: 18.5, margen: 101.5, margen_pct: 84.6, stock_actual: 7, piezas_en_curado: 12, vendidas_30d: 3 });
+    expect(await api.admin.getCostosFormulas()).toEqual([]);
+  });
+
+  it('registrarLote llama registrar_lote y devuelve el código, el costo y cuándo está listo', async () => {
+    const { api, llamadas } = apiCon((l) =>
+      l.rpc === 'registrar_lote'
+        ? { data: { id: 'l9', codigo: 'JAB-261102-01', costo_materiales: '222.00', costo_unitario: '18.5000', listo_desde: '2026-11-30', estado: 'en_curado' } }
+        : undefined,
+    );
+    const r = await api.admin.registrarLote({ producto_id: 'j1', formula_id: 'f1', piezas: 12, notas: ' Primer lote ' });
+    expect(r).toEqual({ id: 'l9', codigo: 'JAB-261102-01', costo_materiales: 222, costo_unitario: 18.5, listo_desde: '2026-11-30', estado: 'en_curado' });
+    expect(llamadas[0].args).toEqual({
+      p_producto_id: 'j1',
+      p_formula_id: 'f1',
+      p_piezas: 12,
+      p_elaborado_en: null,
+      p_caduca_en: null,
+      p_notas: 'Primer lote',
+      p_items: null,
+    });
+
+    // Con lo que realmente se usó y fechas
+    llamadas.length = 0;
+    await api.admin.registrarLote({
+      producto_id: 'v1',
+      piezas: null,
+      elaborado_en: '2026-11-01',
+      caduca_en: '2027-11-01',
+      items: [{ insumo_id: 'soya', cantidad: 900 }],
+    });
+    expect(llamadas[0].args).toEqual({
+      p_producto_id: 'v1',
+      p_formula_id: null,
+      p_piezas: null,
+      p_elaborado_en: '2026-11-01',
+      p_caduca_en: '2027-11-01',
+      p_notas: null,
+      p_items: [{ insumo_id: 'soya', cantidad: 900 }],
+    });
+
+    const msg = 'No alcanza el inventario de Aceite de oliva: hay 200 ml y se necesitan 500 ml.';
+    const mala = apiCon(() => ({ error: { code: 'P0001', message: msg }, data: null, status: 400 }));
+    await expect(mala.api.admin.registrarLote({ producto_id: 'j1', formula_id: 'f1', piezas: 12 })).rejects.toMatchObject({ message: msg, codigo: 'P0001' });
+  });
+
+  it('liberarLote (con p_forzar) y descartarLote', async () => {
+    const { api, llamadas } = apiCon();
+    await api.admin.liberarLote('l1');
+    await api.admin.liberarLote('l1', 11, true);
+    await api.admin.descartarLote('l2', '  Se cortó la mezcla ');
+    expect(llamadas.map((l) => [l.rpc, l.args])).toEqual([
+      ['liberar_lote', { p_lote_id: 'l1', p_piezas_obtenidas: null, p_forzar: false }],
+      ['liberar_lote', { p_lote_id: 'l1', p_piezas_obtenidas: 11, p_forzar: true }],
+      ['descartar_lote', { p_lote_id: 'l2', p_motivo: 'Se cortó la mezcla' }],
+    ]);
+
+    const msg = 'Este lote sigue en curado hasta el 30 de noviembre de 2026.';
+    const curado = apiCon(() => ({ error: { code: 'P0001', message: msg }, data: null, status: 400 }));
+    await expect(curado.api.admin.liberarLote('l1')).rejects.toThrow(msg);
+  });
+
+  it('getResumenHoy: pedidos por entregar y lotes listos para liberar', async () => {
+    const { api, llamadas } = apiCon(
+      (l) => {
+        if (l.rpc === 'es_admin') return { data: false };
+        if (l.tabla === 'v_pedidos_detalle') return { data: null, count: 4 };
+        if (l.tabla === 'v_lotes') return { data: [LOTE] };
+        return undefined;
+      },
+      { ahora: () => AHORA },
+    );
+    const r = await api.admin.getResumenHoy();
+    expect(r.pedidos_por_entregar).toBe(4);
+    expect(r.lotes_listos).toEqual([aLote(LOTE)]);
+
+    const pe = llamadas.find((l) => l.tabla === 'v_pedidos_detalle');
+    expect(ops(pe, 'select')).toEqual([['id', { count: 'exact', head: true }]]);
+    expect(ops(pe, 'eq')).toEqual([
+      ['estado', 'pagado'],
+      ['tiene_productos', true],
+    ]);
+    expect(ops(pe, 'is')).toEqual([['entregado_en', null]]);
+
+    const lo = llamadas.find((l) => l.tabla === 'v_lotes');
+    expect(ops(lo, 'eq')).toEqual([['estado', 'en_curado']]);
+    expect(ops(lo, 'lte')).toEqual([['dias_para_listo', 0]]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // GRANT por columnas y tablas que anon no lee (ESPEC §5.1, migración 1100_seguridad)
 // ---------------------------------------------------------------------------
 
@@ -1025,6 +1600,7 @@ describe('el adaptador respeta los permisos por columna de la base', () => {
           vendible_en_linea: false,
           activo: true,
           notas: null,
+          ...FICHA_VACIA,
         }),
       () => a.getReposicion(),
       () => a.getMovimientos('x1', 10),
@@ -1106,6 +1682,18 @@ describe('el adaptador respeta los permisos por columna de la base', () => {
         }),
       () => a.eliminarCapacitacion('k1'),
       () => a.getPoliticasTodas(),
+      () => api.reservarCita({ items: [{ servicio_id: 's1' }], inicio: '2026-11-03T16:00:00Z' }),
+      () => a.getFormulas(),
+      () => a.guardarFormula({ producto_id: 'j1', nombre: 'Jabón de avena', rendimiento_piezas: 12, dias_curado: 28, instrucciones: null, activa: true, items: [{ insumo_id: 'aceite', cantidad: 500 }] }),
+      () => a.getCostosFormulas(),
+      () => a.getLotes(),
+      () => a.getLotes('en_curado'),
+      () => a.registrarLote({ producto_id: 'j1', formula_id: 'f1', piezas: 12 }),
+      () => a.liberarLote('l1'),
+      () => a.descartarLote('l1', 'Se cortó la mezcla'),
+      () => a.getMargenesProductos(),
+      () => a.ventaMostrador({ items: [{ tipo: 'producto', id: 'j1', cantidad: 1 }], metodo: 'efectivo' }),
+      () => a.marcarEntregado('pe1'),
     ];
   }
 
@@ -1138,7 +1726,16 @@ describe('el adaptador respeta los permisos por columna de la base', () => {
     const { api, llamadas, estado } = apiCon(responderSesion('admin', (l) => (l.rpc === 'es_admin' ? { data: true } : undefined)));
     estado.sesion = SESION;
     await recorrer(todas(api));
-    const pedidas = (tabla: string) => new Set(llamadas.filter((l) => l.tabla === tabla).flatMap((l) => ops(l, 'select').map((a) => String(a[0]))));
+    // Los conteos (head: true) sólo piden 'id'; las filas se piden con las columnas exactas.
+    const esConteo = (a: unknown[]) => !!(a[1] as { head?: boolean } | undefined)?.head;
+    const conteos = llamadas.flatMap((l) => ops(l, 'select').filter(esConteo).map((a) => `${l.tabla}:${String(a[0])}`));
+    expect(conteos.every((c) => c.endsWith(':id')), conteos.join(' | ')).toBe(true);
+    const pedidas = (tabla: string) =>
+      new Set(
+        llamadas
+          .filter((l) => l.tabla === tabla)
+          .flatMap((l) => ops(l, 'select').filter((a) => !esConteo(a)).map((a) => String(a[0]))),
+      );
     expect([...pedidas('v_clientes_resumen')]).toEqual([
       'id, nombre, apellidos, telefono, email, fecha_nacimiento, tiene_cuenta, citas_completadas, ultima_visita, proxima_cita, total_pagado, creado_en, es_personal',
     ]);
@@ -1148,6 +1745,24 @@ describe('el adaptador respeta los permisos por columna de la base', () => {
     ]);
     for (const v of ['v_citas_detalle', 'v_pedidos_detalle', 'v_creditos', 'v_costo_servicio', 'v_gastos_por_vencer', 'v_resultado_mensual'])
       expect(pedidas(v).size, v).toBe(1);
+    // ESPEC §10
+    expect([...pedidas('v_pedidos_detalle')][0]).toContain('origen, entregado_en, tiene_productos');
+    expect([...pedidas('v_resultado_mensual')][0]).toContain('costo_ventas, mermas');
+    expect([...pedidas('v_lotes')]).toEqual([
+      'id, codigo, producto_id, producto_nombre, categoria, formula_nombre, elaborado_en, listo_desde, dias_para_listo, caduca_en, piezas_planeadas, piezas_obtenidas, costo_materiales, costo_unitario, estado, liberado_en, notas',
+    ]);
+    expect([...pedidas('v_costo_formulas')]).toEqual([
+      'formula_id, producto_id, producto_nombre, nombre, rendimiento_piezas, dias_curado, costo_lote, costo_pieza, precio_venta, margen_pieza, margen_pct, insumos',
+    ]);
+    expect([...pedidas('v_margen_productos')]).toEqual([
+      'id, nombre, categoria, precio_venta, costo_unitario, margen, margen_pct, stock_actual, piezas_en_curado, vendidas_30d',
+    ]);
+    expect([...pedidas('productos_tienda')]).toEqual([
+      'id, slug, nombre, categoria, marca, presentacion, descripcion, aroma, ingredientes, modo_uso, advertencias, contenido_neto, foto_url, color_hex, destacado, hecho_en_opalo, precio_venta, stock_disponible, hay_stock, proximo_lote_listo',
+    ]);
+    expect([...pedidas('formulas')]).toEqual([
+      'id, producto_id, nombre, rendimiento_piezas, dias_curado, instrucciones, activa, formula_items(insumo_id, cantidad)',
+    ]);
   });
 
   it('lo público no lee tablas que anon no puede leer', async () => {

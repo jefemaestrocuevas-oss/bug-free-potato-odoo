@@ -21,7 +21,8 @@ interface Props {
   /** Pedido sólo con productos: al liquidarlo no se generan servicios prepagados. */
   soloProductos?: boolean;
   onCerrar: () => void;
-  onListo: (mensaje: string) => void;
+  /** `liquidado`: el pago cubrió el total de un pedido (quedó pagado). */
+  onListo: (mensaje: string, liquidado: boolean) => void;
 }
 
 export function RegistrarPago({ destino, total, pagado, metodoSugerido, soloProductos = false, onCerrar, onListo }: Props) {
@@ -83,7 +84,7 @@ export function RegistrarPago({ destino, total, pagado, metodoSugerido, soloProd
       mensaje += soloProductos
         ? ' El pedido quedó pagado y los productos se descontaron del inventario.'
         : ' El pedido quedó pagado y sus servicios ya están disponibles como servicios prepagados de la clienta.';
-    onListo(mensaje);
+    onListo(mensaje, destino.tipo === 'pedido' && cubre);
   };
 
   const pideReferencia = metodo === 'transferencia' || metodo === 'tarjeta' || metodo === 'mercado_pago';

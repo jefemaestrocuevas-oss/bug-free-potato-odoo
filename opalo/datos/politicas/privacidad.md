@@ -10,13 +10,13 @@ En Ópalo cuidamos tu piel y también tu información. Este aviso te explica qu�
 
 ## 2. Datos que recabamos
 
-Los obtenemos directamente de ti cuando creas tu cuenta, reservas, llenas tu ficha, compras, firmas o nos escribes:
+Los obtenemos directamente de ti cuando creas tu cuenta, reservas, llenas tu ficha, compras, firmas tu consentimiento en el spa o nos escribes:
 
 - **Identificación y contacto:** nombre, apellidos, fecha de nacimiento (para confirmar tu edad), teléfono o WhatsApp y correo.
 - **Cuenta:** correo y contraseña; la contraseña se guarda cifrada y nadie en Ópalo puede verla.
 - **Citas, compras y pagos:** servicios reservados, historial de visitas, pedidos, servicios prepagados, códigos de regalo (y el nombre de quien recibe el regalo) y pagos. No guardamos los datos completos de tu tarjeta.
 - **Datos personales sensibles de salud** (tu ficha de salud): condiciones como embarazo o lactancia, diabetes, várices, epilepsia, herpes, marcapasos o implantes; medicamentos, como isotretinoína o anticoagulantes; alergias; tratamientos estéticos recientes y tus observaciones.
-- **Firma y evidencia de tu consentimiento:** nombre de quien firma, trazo de la firma en pantalla, fecha y hora, versión del documento y su huella digital, dirección IP y tipo de navegador o dispositivo. Si eres menor de edad, también el nombre de tu mamá, papá o tutor.
+- **Firma y evidencia de tu consentimiento** (la firma se recaba en el spa, en la tablet de la cabina, antes de tu servicio): nombre de quien firma, trazo de la firma, fecha y hora, versión del documento y su huella digital, dirección IP y tipo de dispositivo. Si eres menor de edad, también el nombre de tu mamá, papá o tutor.
 - **Fotografías de resultados**, sólo con tu permiso expreso (ver el punto 9).
 - Cómo nos conociste, si nos lo cuentas.
 
@@ -41,7 +41,7 @@ Sólo te enviamos promociones si **tú lo autorizas** marcando la casilla corres
 
 ## 4. Consentimiento expreso para tus datos de salud
 
-Tus datos de salud son **datos personales sensibles**. Antes de guardar tu ficha te pedimos tu **consentimiento expreso**, que das marcando una casilla con tu sesión iniciada; además, firmas el consentimiento informado de cada tipo de servicio. Sin ese consentimiento no podemos guardar tu ficha y, por tu seguridad, tampoco realizar el servicio. Tu ficha sólo la ven tú y el personal de Ópalo que te atiende o administra la agenda. Nunca la usamos con fines comerciales.
+Tus datos de salud son **datos personales sensibles**. Antes de guardar tu ficha te pedimos tu **consentimiento expreso**, que das marcando una casilla con tu sesión iniciada; además, en el spa, antes de tu servicio, revisamos contigo y firmas en la tablet de la cabina el consentimiento informado de cada tipo de servicio. Sin ese consentimiento no podemos guardar tu ficha y, por tu seguridad, tampoco realizar el servicio. Tu ficha sólo la ven tú y el personal de Ópalo que te atiende o administra la agenda. Nunca la usamos con fines comerciales.
 
 Si tienes entre 15 y 17 años, tu mamá, papá o tutor también debe autorizar el tratamiento de tus datos [CONFIRMAR CON EL ABOGADO: cómo se recaba ese consentimiento].
 

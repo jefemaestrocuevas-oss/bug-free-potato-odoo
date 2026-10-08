@@ -82,7 +82,7 @@ button.rv-progreso-boton:hover { background: var(--verde-suave); color: var(--ve
 }
 /* Paso 6: el resumen ya está dentro del paso; en pantallas chicas no se repite debajo de los botones. */
 @media (max-width: 959px) {
-  .rv-resumen-firma { display: none; }
+  .rv-resumen-final { display: none; }
 }
 .rv-sola { max-width: 760px; }
 .rv-principal { min-width: 0; }
@@ -321,6 +321,7 @@ textarea.input.rv-textarea-corta { min-height: 76px; }
 .rv-consentimiento-doc .ayuda { margin: 0; }
 
 /* ---------- Paso 6 y confirmación ---------- */
+.rv-sin-margen { margin: 0; }
 .rv-final { display: flex; flex-direction: column; gap: 8px; }
 .rv-final .ayuda { margin: 0; }
 .rv-final-datos { margin: 0; display: flex; flex-direction: column; gap: 0; }

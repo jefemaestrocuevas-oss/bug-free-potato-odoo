@@ -39,7 +39,7 @@ export default function MiCuenta() {
   // Se guarda al montar: la sección de citas puede aparecer después (cuando carga la configuración).
   const [avisoInicial] = useState(avisoEnHistorial);
 
-  // El aviso (p. ej. "firmaste tu consentimiento") se muestra una vez: se limpia del historial.
+  // El aviso que llega en el historial (p. ej. al volver de otra página) se muestra una vez: se limpia.
   useEffect(() => {
     if (avisoEnHistorial) navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
   }, [avisoEnHistorial, navigate, location.pathname, location.search]);
@@ -98,7 +98,8 @@ export default function MiCuenta() {
         ) : actual === 'datos' ? (
           <SeccionDatos />
         ) : actual === 'documentos' ? (
-          <SeccionDocumentos />
+          // No espera a la configuración: mientras llega se usa lo de Ópalo (la firma se hace en el spa, ESPEC §9).
+          <SeccionDocumentos firmaEnLinea={config.datos?.firma_en_linea === true} />
         ) : config.cargando && !config.datos ? (
           <Cargando />
         ) : config.error || !config.datos ? (

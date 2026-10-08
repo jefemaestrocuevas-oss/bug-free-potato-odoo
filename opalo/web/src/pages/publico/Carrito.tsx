@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type Catalogo, type MetodoPago, type ProductoTienda, type ResultadoPedido } from '../../lib/api';
-import { claveItem, CANTIDAD_MAXIMA, useCarrito, type ItemCarrito } from '../../lib/carrito';
+import { claveItem, useCarrito, type ItemCarrito } from '../../lib/carrito';
 import { dinero, enlaceWhatsApp, ETIQUETA_METODO_PAGO } from '../../lib/format';
 import { useSesion } from '../../lib/sesion';
 import { useAccion, useAsync } from '../../lib/useAsync';
@@ -9,18 +9,39 @@ import { Cargando, MensajeError, Vacio } from '../../components/ui/Estado';
 import { Gema } from '../../components/ui/Gema';
 import { Modal } from '../../components/cuenta/Modal';
 import { EncabezadoPagina, useTitulo } from '../../components/publico/EncabezadoPagina';
-import { paqueteVendible, servicioVendible } from '../../components/publico/catalogo';
+import { paqueteVendible, servicioVendible, unirConY } from '../../components/publico/catalogo';
 import { textoVigencia, useContacto } from '../../components/publico/contacto';
-import { IconoBasura, IconoMas, IconoMenos, IconoMensaje, IconoRegalo } from '../../components/publico/Iconos';
+import { ImagenProducto } from '../../components/publico/Producto';
+import {
+  colorValido,
+  cuandoAbrimos,
+  direccionCorta,
+  estadoExistencias,
+  etiquetaProducto,
+  fotoValida,
+  piezasDisponibles,
+} from '../../components/publico/tienda';
+import { IconoBasura, IconoMas, IconoMenos, IconoMensaje, IconoRegalo, IconoUbicacion } from '../../components/publico/Iconos';
 import './carrito.css';
 
 type MetodoCarrito = Extract<MetodoPago, 'efectivo' | 'tarjeta' | 'transferencia'>;
+
+interface PedidoHecho {
+  pedido: ResultadoPedido;
+  metodo: MetodoCarrito;
+  regalos: boolean;
+  productos: boolean;
+  servicios: boolean;
+}
 
 const METODOS: { valor: MetodoCarrito; titulo: string; texto: string }[] = [
   { valor: 'efectivo', titulo: 'Efectivo en el spa', texto: 'Pagas en Ópalo, en tu próxima visita o cuando pases.' },
   { valor: 'tarjeta', titulo: 'Tarjeta en el spa', texto: 'Pagas con tarjeta de débito o crédito en Ópalo.' },
   { valor: 'transferencia', titulo: 'Transferencia', texto: 'Te compartimos los datos por WhatsApp y nos envías tu comprobante.' },
 ];
+
+/** Mensajes del servidor sobre existencias ('Por ahora sólo quedan…', 'Por ahora no tenemos…'). */
+const ERROR_EXISTENCIAS = /s[óo]lo queda|no tenemos/i;
 
 /** Precio vigente de un ítem según el catálogo, o null si ya no se vende en línea. */
 function precioVigente(i: ItemCarrito, cat: Catalogo, productos: ProductoTienda[]): number | null {
@@ -39,7 +60,7 @@ function precioVigente(i: ItemCarrito, cat: Catalogo, productos: ProductoTienda[
 export default function Carrito() {
   useTitulo('Tu carrito');
   const carrito = useCarrito();
-  const [resultado, setResultado] = useState<{ pedido: ResultadoPedido; metodo: MetodoCarrito; regalos: boolean } | null>(null);
+  const [resultado, setResultado] = useState<PedidoHecho | null>(null);
   // Al vaciar desaparece el botón que tenía el foco: lo llevamos al aviso de carrito vacío.
   const [recienVaciado, setRecienVaciado] = useState(false);
   const vacio = useRef<HTMLDivElement>(null);
@@ -52,13 +73,13 @@ export default function Carrito() {
   return (
     <>
       <EncabezadoPagina eyebrow="Tienda" titulo="Tu carrito">
-        <p>Revisa tu pedido, elige cómo prefieres pagar y apártalo. El pago se hace en el spa o por transferencia.</p>
+        <p>Revisa tu pedido, elige cómo prefieres pagar y envíanoslo. El pago se hace en el spa o por transferencia.</p>
       </EncabezadoPagina>
       <div className="contenedor seccion">
         {carrito.items.length === 0 ? (
           <div ref={vacio} tabIndex={-1} className="car-vacio">
             <Vacio titulo="Tu carrito está vacío">
-              <p>Compra servicios y paquetes para usarlos cuando quieras, o para regalar.</p>
+              <p>Llévate un jabón o una vela hechos en Ópalo, o compra servicios y paquetes para usarlos cuando quieras o para regalar.</p>
               <div className="car-vacio-acciones">
                 <Link className="btn btn-primario" to="/tienda">
                   Ir a la tienda
@@ -77,23 +98,19 @@ export default function Carrito() {
   );
 }
 
-function ContenidoCarrito({
-  onListo,
-  onVaciado,
-}: {
-  onListo: (r: { pedido: ResultadoPedido; metodo: MetodoCarrito; regalos: boolean }) => void;
-  onVaciado: () => void;
-}) {
+function ContenidoCarrito({ onListo, onVaciado }: { onListo: (r: PedidoHecho) => void; onVaciado: () => void }) {
   const carrito = useCarrito();
   const { sesion, cargando: cargandoSesion } = useSesion();
   const contacto = useContacto();
+  const apertura = cuandoAbrimos(contacto.fecha_apertura);
   const idNotas = useId();
   const [metodo, setMetodo] = useState<MetodoCarrito>('efectivo');
   const [notas, setNotas] = useState('');
   const [confirmandoVaciar, setConfirmandoVaciar] = useState(false);
 
-  // Revisa precios y disponibilidad actuales (el servidor vuelve a validar al confirmar).
+  // Revisa precios, disponibilidad y existencias actuales (el servidor vuelve a validar al confirmar).
   const vigentes = useAsync(() => Promise.all([api.getCatalogo(), api.getProductosTienda()]), []);
+  const productosPorId = useMemo(() => new Map((vigentes.datos?.[1] ?? []).map((p) => [p.id, p])), [vigentes.datos]);
   const precios = useMemo(() => {
     const m = new Map<string, number | null>();
     if (!vigentes.datos) return m;
@@ -102,48 +119,92 @@ function ContenidoCarrito({
     return m;
   }, [vigentes.datos, carrito.items]);
 
-  const { actualizar } = carrito;
+  const { actualizar, ajustarExistencias } = carrito;
   const [preciosCambiaron, setPreciosCambiaron] = useState(false);
+  /** Productos cuya cantidad bajamos a las piezas que quedan (nombre → piezas). */
+  const [ajustados, setAjustados] = useState<Map<string, number>>(new Map());
   useEffect(() => {
     for (const i of carrito.items) {
-      const p = precios.get(claveItem(i));
+      const clave = claveItem(i);
+      const p = precios.get(clave);
       if (p !== undefined && p !== null && p !== i.precio) {
-        actualizar(claveItem(i), { precio: p });
+        actualizar(clave, { precio: p });
         setPreciosCambiaron(true);
       }
+      const prod = i.tipo === 'producto' ? productosPorId.get(i.id) : undefined;
+      if (!prod) continue;
+      // Productos guardados antes de tener miniatura, o con foto/color nuevos.
+      const miniatura = { categoria: prod.categoria, color_hex: colorValido(prod.color_hex), foto_url: fotoValida(prod.foto_url) };
+      actualizar(clave, { miniatura, slug: prod.slug || prod.id });
+      const piezas = piezasDisponibles(prod);
+      if (ajustarExistencias(prod.id, piezas)) {
+        setAjustados((prev) => new Map(prev).set(prod.nombre, piezas));
+      }
     }
-  }, [precios, carrito.items, actualizar]);
+  }, [precios, productosPorId, carrito.items, actualizar, ajustarExistencias]);
 
   const noDisponibles = carrito.items.filter((i) => precios.get(claveItem(i)) === null);
-  const hayRegalos = carrito.items.some((i) => i.regalo_para);
-  const soloProductos = carrito.items.every((i) => i.tipo === 'producto');
+  const agotados = carrito.items.filter((i) => {
+    const p = i.tipo === 'producto' ? productosPorId.get(i.id) : undefined;
+    return !!p && piezasDisponibles(p) === 0;
+  });
+  /** Servicios o paquetes para regalar (llevan código de regalo). */
+  const hayRegalos = carrito.items.some((i) => i.regalo_para && i.tipo !== 'producto');
+  const hayProductos = carrito.items.some((i) => i.tipo === 'producto');
+  const hayServicios = carrito.items.some((i) => i.tipo !== 'producto');
+  const bloqueado = noDisponibles.length > 0 || agotados.length > 0;
 
   const confirmar = useAccion(async () => {
     const pedido = await api.crearPedido(carrito.paraPedido(), metodo, notas.trim() || null);
     carrito.vaciar();
-    onListo({ pedido, metodo, regalos: hayRegalos });
+    onListo({ pedido, metodo, regalos: hayRegalos, productos: hayProductos, servicios: hayServicios });
     return pedido;
   });
+  // Si el servidor dice que ya no alcanzan las piezas, volvemos a revisar existencias para ajustar el carrito.
+  const { recargar } = vigentes;
+  useEffect(() => {
+    if (confirmar.error && ERROR_EXISTENCIAS.test(confirmar.error)) recargar();
+  }, [confirmar.error, recargar]);
+
+  const nombresAjustados = [...ajustados.entries()].filter(([nombre]) => carrito.items.some((i) => i.nombre === nombre));
 
   return (
     <div className="car-rejilla">
       <section aria-labelledby="car-titulo-lista">
         <h2 id="car-titulo-lista" className="sr-only">
-          Productos en tu carrito
+          Artículos en tu carrito
         </h2>
         {preciosCambiaron && (
           <div className="aviso aviso-info" role="status">
             Actualizamos los precios de tu carrito con los vigentes.
           </div>
         )}
+        {nombresAjustados.length > 0 && (
+          <div className="aviso aviso-info" role="status">
+            <span>
+              Ajustamos tu carrito a las piezas que tenemos por ahora:{' '}
+              {unirConY(nombresAjustados.map(([nombre, n]) => `${nombre} (${n} ${n === 1 ? 'pieza' : 'piezas'})`))}.
+            </span>
+          </div>
+        )}
+        {agotados.length > 0 && (
+          <div className="aviso aviso-alerta" role="alert">
+            Por ahora no tenemos {unirConY([...new Set(agotados.map((i) => i.nombre))])}. Quítalo de tu carrito para continuar.
+          </div>
+        )}
         {noDisponibles.length > 0 && (
           <div className="aviso aviso-alerta" role="alert">
-            Uno de los productos ya no está disponible para compra en línea. Quítalo para continuar.
+            Uno de los artículos ya no está disponible para compra en línea. Quítalo para continuar.
           </div>
         )}
         <ul className="car-lista">
           {carrito.items.map((i) => (
-            <FilaCarrito key={claveItem(i)} item={i} disponible={precios.get(claveItem(i)) !== null} />
+            <FilaCarrito
+              key={claveItem(i)}
+              item={i}
+              disponible={precios.get(claveItem(i)) !== null}
+              producto={i.tipo === 'producto' ? productosPorId.get(i.id) : undefined}
+            />
           ))}
         </ul>
         <div className="car-seguir">
@@ -226,20 +287,29 @@ function ContenidoCarrito({
             maxLength={500}
             value={notas}
             onChange={(e) => setNotas(e.target.value)}
-            placeholder="Por ejemplo: cuándo pasarás a pagar"
+            placeholder={hayProductos ? 'Por ejemplo: cuándo pasarás por tus productos' : 'Por ejemplo: cuándo pasarás a pagar'}
           />
         </div>
 
         <div className="car-explica">
           <p>
-            <strong>Todavía no hay pago en línea.</strong> Tu pedido queda apartado y lo pagas en el spa o por
-            transferencia.
+            <strong>Todavía no hay pago en línea.</strong> Haces tu pedido aquí y lo pagas en el spa o por transferencia.
           </p>
-          {!soloProductos && (
+          {hayProductos && (
+            <p className="car-recoger">
+              <IconoUbicacion tam={18} />
+              <span>
+                <strong>Recoges tus productos en Ópalo</strong>, {direccionCorta(contacto.direccion)}.
+                {apertura ? <strong className="car-apertura"> Puedes pagar y recoger {apertura}.</strong> : null} Tus piezas
+                quedan aseguradas en cuanto registramos tu pago. Por ahora no hacemos envíos a domicilio.
+              </span>
+            </p>
+          )}
+          {hayServicios && (
             <p>
               Cuando registremos tu pago, tus servicios se activan en "Mi cuenta" y tienes{' '}
               {textoVigencia(contacto.vigencia_creditos_dias)} para agendarlos.
-              {hayRegalos ? ' Para los regalos te damos un código que la persona canjea en su cuenta.' : ''}
+              {hayRegalos ? ' Para los servicios de regalo te damos un código que la persona canjea en su cuenta.' : ''}
             </p>
           )}
         </div>
@@ -257,21 +327,21 @@ function ContenidoCarrito({
           <button
             type="button"
             className="btn btn-primario btn-bloque car-confirmar"
-            disabled={confirmar.enviando || noDisponibles.length > 0 || carrito.items.length === 0}
+            disabled={confirmar.enviando || bloqueado || carrito.items.length === 0}
             onClick={() => void confirmar.ejecutar()}
           >
-            {confirmar.enviando ? 'Apartando tu pedido…' : `Apartar mi pedido · ${dinero(carrito.total)}`}
+            {confirmar.enviando ? 'Enviando tu pedido…' : `Hacer mi pedido · ${dinero(carrito.total)}`}
           </button>
         ) : (
           <div className="car-sin-sesion">
-            <p>Para apartar tu pedido entra a tu cuenta o créala en un minuto. Tu carrito se queda guardado.</p>
+            <p>Para hacer tu pedido entra a tu cuenta o créala en un minuto. Tu carrito se queda guardado.</p>
             <Link className="btn btn-primario btn-bloque" to={`/entrar?volver=${encodeURIComponent('/carrito')}`}>
               Entrar o crear mi cuenta
             </Link>
           </div>
         )}
         <p className="car-letra-chica">
-          El total final lo confirma el sistema con los precios vigentes. Al apartar aceptas nuestros{' '}
+          El total final lo confirma el sistema con los precios vigentes. Al hacer tu pedido aceptas nuestros{' '}
           <Link to="/politicas/terminos">términos y condiciones</Link>.
         </p>
       </aside>
@@ -279,22 +349,59 @@ function ContenidoCarrito({
   );
 }
 
-function FilaCarrito({ item: i, disponible }: { item: ItemCarrito; disponible: boolean }) {
-  const { cambiarCantidad, quitar } = useCarrito();
+function FilaCarrito({ item: i, disponible, producto }: { item: ItemCarrito; disponible: boolean; producto?: ProductoTienda }) {
+  const { cambiarCantidad, quitar, tope } = useCarrito();
   const clave = claveItem(i);
   const idCantidad = useId();
+  const maximo = Math.max(1, tope(clave));
+  const agotado = !!producto && piezasDisponibles(producto) === 0;
+  const estado = producto ? estadoExistencias(producto) : null;
+  const enTope = i.tipo === 'producto' && typeof i.maximo === 'number' && i.maximo > 0 && i.cantidad >= maximo;
+  const miniatura = i.tipo === 'producto' ? (producto ?? i.miniatura) : null;
+  const ruta = i.tipo === 'producto' && i.slug ? `/tienda/${encodeURIComponent(i.slug)}` : null;
+  const categoria = miniatura?.categoria;
+  const tipo =
+    i.tipo === 'servicio'
+      ? 'Servicio'
+      : i.tipo === 'paquete'
+        ? 'Paquete'
+        : categoria === 'jabon' || categoria === 'vela' || categoria === 'set'
+          ? etiquetaProducto({ categoria, marca: null })
+          : 'Producto';
+
   return (
-    <li className={`car-item ${disponible ? '' : 'no-disponible'}`}>
-      <div className="car-item-info">
-        <p className="car-item-tipo">{i.tipo === 'servicio' ? 'Servicio' : i.tipo === 'paquete' ? 'Paquete' : 'Producto'}</p>
-        <h3 className="car-item-nombre">{i.nombre}</h3>
-        {i.detalle && <p className="car-item-detalle">{i.detalle}</p>}
-        {i.regalo_para && (
-          <p className="car-item-regalo">
-            <IconoRegalo tam={16} /> Regalo para <strong>{i.regalo_para}</strong>
-          </p>
+    <li className={`car-item ${disponible && !agotado ? '' : 'no-disponible'}`}>
+      <div className={`car-item-info ${miniatura ? 'con-miniatura' : ''}`}>
+        {miniatura && (
+          <div className="prod-miniatura">
+            <ImagenProducto
+              categoria={miniatura.categoria}
+              color={miniatura.color_hex}
+              foto={miniatura.foto_url}
+              nombre={i.nombre}
+              alt=""
+            />
+          </div>
         )}
-        {!disponible && <p className="car-item-aviso">Ya no está disponible para compra en línea.</p>}
+        <div className="car-item-texto">
+          <p className="car-item-tipo">{tipo}</p>
+          <h3 className="car-item-nombre">{ruta ? <Link to={ruta}>{i.nombre}</Link> : i.nombre}</h3>
+          {i.detalle && <p className="car-item-detalle">{i.detalle}</p>}
+          {i.regalo_para && (
+            <p className="car-item-regalo">
+              <IconoRegalo tam={16} /> Regalo para <strong>{i.regalo_para}</strong>
+            </p>
+          )}
+          {!disponible && <p className="car-item-aviso">Ya no está disponible para compra en línea.</p>}
+          {disponible && agotado && (
+            <p className="car-item-aviso">
+              Por ahora no tenemos {i.nombre}.{estado?.tipo === 'proximo' ? ` ${estado.texto}.` : ''}
+            </p>
+          )}
+          {disponible && !agotado && enTope && (
+            <p className="car-item-limite">{maximo === 1 ? 'Es la última pieza que tenemos.' : `Son las ${maximo} piezas que tenemos por ahora.`}</p>
+          )}
+        </div>
       </div>
       <div className="car-item-controles">
         <div className="car-cantidad" role="group" aria-label={`Cantidad de ${i.nombre}`}>
@@ -316,7 +423,7 @@ function FilaCarrito({ item: i, disponible }: { item: ItemCarrito; disponible: b
             type="number"
             inputMode="numeric"
             min={1}
-            max={CANTIDAD_MAXIMA}
+            max={maximo}
             value={i.cantidad}
             onChange={(e) => {
               const n = Number(e.target.value);
@@ -327,7 +434,7 @@ function FilaCarrito({ item: i, disponible }: { item: ItemCarrito; disponible: b
             type="button"
             className="car-cantidad-boton"
             onClick={() => cambiarCantidad(clave, i.cantidad + 1)}
-            disabled={i.cantidad >= CANTIDAD_MAXIMA}
+            disabled={i.cantidad >= maximo || agotado}
             aria-label="Agregar uno"
           >
             <IconoMas tam={18} />
@@ -345,11 +452,12 @@ function FilaCarrito({ item: i, disponible }: { item: ItemCarrito; disponible: b
   );
 }
 
-function PedidoListo({ pedido, metodo, regalos }: { pedido: ResultadoPedido; metodo: MetodoCarrito; regalos: boolean }) {
+function PedidoListo({ pedido, metodo, regalos, productos, servicios }: PedidoHecho) {
   const contacto = useContacto();
-  useTitulo('Pedido apartado');
+  useTitulo('Pedido recibido');
+  const apertura = cuandoAbrimos(contacto.fecha_apertura);
   const forma: Record<MetodoCarrito, string> = { efectivo: 'en efectivo', tarjeta: 'con tarjeta', transferencia: 'por transferencia' };
-  const mensaje = `Hola, Ópalo. Aparté el pedido ${pedido.folio} por ${dinero(pedido.total)} y quiero pagarlo ${forma[metodo]}.`;
+  const mensaje = `Hola, Ópalo. Hice el pedido ${pedido.folio} por ${dinero(pedido.total)} y quiero pagarlo ${forma[metodo]}.`;
   const titulo = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -359,9 +467,9 @@ function PedidoListo({ pedido, metodo, regalos }: { pedido: ResultadoPedido; met
     <div className="contenedor seccion car-listo">
       <div className="car-listo-tarjeta">
         <Gema tam={44} className="car-listo-gema" />
-        <p className="eyebrow">Pedido apartado</p>
+        <p className="eyebrow">Pedido recibido</p>
         <h1 className="car-listo-titulo" ref={titulo} tabIndex={-1}>
-          ¡Gracias! Ya apartamos tu pedido
+          ¡Gracias! Recibimos tu pedido
         </h1>
         <dl className="car-listo-datos">
           <div>
@@ -388,11 +496,19 @@ function PedidoListo({ pedido, metodo, regalos }: { pedido: ResultadoPedido; met
           ) : (
             <li>
               Paga con {metodo === 'tarjeta' ? 'tarjeta' : 'efectivo'} en Ópalo ({contacto.direccion}) mencionando tu folio{' '}
-              <strong>{pedido.folio}</strong>.
+              <strong>{pedido.folio}</strong>
+              {apertura ? `, ${apertura}` : ''}.
             </li>
           )}
-          <li>Cuando registremos tu pago, tus servicios se activan en "Mi cuenta" y puedes agendarlos cuando quieras.</li>
-          {regalos && <li>Para cada regalo verás en "Mi cuenta" un código para entregárselo a quien lo recibe.</li>}
+          {productos && (
+            <li>
+              {metodo === 'transferencia'
+                ? `Cuando registremos tu pago, tus piezas quedan aseguradas: pasa por ellas a Ópalo con tu folio${apertura ? `, ${apertura}` : ''}.`
+                : 'Al pagar en el spa te entregamos tus productos.'}
+            </li>
+          )}
+          {servicios && <li>Cuando registremos tu pago, tus servicios se activan en "Mi cuenta" y puedes agendarlos cuando quieras.</li>}
+          {regalos && <li>Para cada servicio de regalo verás en "Mi cuenta" un código para entregárselo a quien lo recibe.</li>}
         </ol>
 
         <div className="car-listo-acciones">

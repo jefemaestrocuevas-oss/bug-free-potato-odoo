@@ -1,22 +1,23 @@
 # Ópalo · base de datos (Supabase / PostgreSQL)
 
-Implementa el contrato de [`../docs/ESPEC.md`](../docs/ESPEC.md) §3–§7: tablas, reglas de negocio,
+Implementa el contrato de [`../docs/ESPEC.md`](../docs/ESPEC.md) §3–§7, §9 (firma en cabina) y §10
+(tienda de jabones y velas: taller, lotes, mostrador y entregas): tablas, reglas de negocio,
 funciones RPC, vistas y seguridad (RLS). La explicación para los socios está en
 [`../docs/MODELO_DATOS.md`](../docs/MODELO_DATOS.md).
 
 ```
 supabase/
   migrations/                 ← esquema completo, en orden (formato Supabase CLI)
-    20261007000100_base.sql         extensiones, tipos, configuración, perfiles, utilidades
+    20261007000100_base.sql         extensiones, tipos, configuración (fecha_apertura, firma_en_linea), perfiles, utilidades
     20261007000200_catalogo.sql     categorías, servicios, paquetes, contraindicaciones
     20261007000300_personas.sql     clientes, personal, capacitaciones, mi_rol()/es_personal()…, alta de usuarios
     20261007000400_agenda.sql       cabinas, horarios, bloqueos, citas (exclusión de traslapes), cita_items
     20261007000500_politicas.sql    políticas (hash), aceptaciones, fichas de salud, consentimientos
-    20261007000600_ventas.sql       pedidos (folio), pedido_items, pagos, créditos, códigos de regalo
-    20261007000700_inventario.sql   proveedores, productos, recetas, compras, movimientos (stock)
+    20261007000600_ventas.sql       pedidos (folio, origen web/mostrador, entregado_en), pedido_items, pagos, créditos, regalos
+    20261007000700_inventario.sql   proveedores, productos (ficha de tienda), recetas, compras, fórmulas, lotes, movimientos
     20261007000800_gastos.sql       categorías de gasto, recurrentes (vencimientos), gastos
-    20261007000900_funciones.sql    RPC de §6 (reservar, cancelar, completar, pedidos, pagos, compras, paquetes, horarios, recetas…)
-    20261007001000_vistas.sql       vistas de §7 (públicas e internas)
+    20261007000900_funciones.sql    RPC de §6 y §10 (reservar, cancelar, completar, pedidos, mostrador, pagos, compras, taller…)
+    20261007001000_vistas.sql       vistas de §7 y §10 (públicas e internas)
     20261007001100_seguridad.sql    políticas RLS, privilegios de tablas y de funciones
   seed.sql                    ← catálogo REAL (generado; idempotente)
   seed_demo.sql               ← datos de EJEMPLO, sólo local (¡nunca en producción!)
@@ -56,7 +57,7 @@ o `supabase db push --include-seed`, que por defecto usa `supabase/seed.sql`).
 
 Es idempotente. Al volver a correrlo:
 
-- **Se sobrescribe con lo de `catalogo.json`**: configuración (incluida `fecha_apertura`), categorías,
+- **Se sobrescribe con lo de `catalogo.json`**: configuración (incluidas `fecha_apertura` y `firma_en_linea`), categorías,
   servicios, paquetes (y sus servicios), contraindicaciones y categorías de gasto (upsert por
   `slug`/`clave`; sólo las columnas que vienen en el JSON). Si un precio o la fecha de apertura se
   cambiaron desde el panel o el SQL Editor, cámbialos también en `catalogo.json` o se perderán al
@@ -64,6 +65,10 @@ Es idempotente. Al volver a correrlo:
 - **No se toca**: personal, horarios, cabinas y gastos recurrentes (sólo se insertan si no existen).
 - **Políticas**: se inserta la versión 1 activa sólo si no existe ninguna de ese tipo. Para cambiar
   una política publicada usa el panel (`publicar_politica`), que crea la versión 2, 3…
+  Ojo (8 oct 2026, §9): los textos de `datos/politicas/` cambiaron para decir que la firma es en la
+  tablet de la cabina. Si tu proyecto ya tenía cargadas las políticas antes de ese cambio, resembrar
+  **no** las actualiza: publica en el panel la versión nueva de términos, privacidad y los tres
+  consentimientos con el texto de `datos/politicas/*.md`.
 
 > `seed_demo.sql` **nunca** se aplica en producción: crea usuarios ficticios directo en `auth.users`.
 
@@ -114,6 +119,27 @@ update public.configuracion set fecha_apertura = '2026-11-07';   -- nueva fecha 
 update public.configuracion set fecha_apertura = null;           -- sin restricción
 ```
 
+## 3.2 Firma del consentimiento en cabina (ESPEC §9)
+
+`configuracion.firma_en_linea` (hoy `false`, viene de `catalogo.json`) decide dónde se firma:
+
+- **`false` (lo de Ópalo)**: la firma se hace en el spa, en la tablet de la cabina.
+  `reservar_cita` acepta `p_nombre_firmante` y `p_firma_svg` como **opcionales** y, si llegan,
+  **los ignora** (ni los valida ni los guarda): la cita nace sin consentimientos
+  (`v_citas_detalle.consentimientos_firmados = 0`, "Falta firma"). `firmar_consentimiento_cita` con
+  la sesión de la propia clienta responde `La firma se hace en el spa, el día de tu cita.`; con la
+  sesión del personal (tablet de cabina) firma siempre, `canal = 'cabina'`. R6 no cambia: sin
+  consentimiento la cita no pasa a `en_curso` ni a `completada`.
+- **`true`**: como antes: la firma es obligatoria al reservar (`Falta tu firma o tu nombre
+  completo.`), se valida y se crea un consentimiento por tipo (`canal = 'reserva_web'`); la clienta
+  también puede firmar desde su portal (`canal = 'portal'`).
+
+Para cambiarlo, en el SQL Editor y también en `datos/catalogo.json` (`configuracion.firma_en_linea`):
+
+```sql
+update public.configuracion set firma_en_linea = true;    -- volver a firmar al reservar en línea
+```
+
 ## 4. Probar en local (PostgreSQL 16)
 
 ```bash
@@ -123,7 +149,8 @@ opalo/supabase/scripts/probar_local.sh
 (Re)crea la base `opalo_test` y aplica, con `ON_ERROR_STOP`:
 `local/auth_shim.sql` → `migrations/*.sql` → `seed.sql` (dos veces, para probar que es idempotente)
 → `seed_demo.sql` → `local/pruebas.sql` → `tests/*.sql`. Imprime un resumen y sale con código ≠ 0
-si algo falla. Avisa si `seed.sql` no está al día con `datos/`.
+si algo falla. Si `seed.sql` no está al día con `datos/` se detiene antes de empezar (corre
+`generar_seed.mjs`; con `OPALO_SEED_DESFASADO=1` sólo avisa).
 
 Las pruebas y las citas de ejemplo usan fechas relativas a hoy, que pueden caer antes de la apertura:
 `seed_demo.sql` quita `fecha_apertura` mientras crea sus citas y la restablece, y cada archivo de
@@ -144,7 +171,20 @@ No son pgTAP: no las corras con `supabase test db`.
 
 Cuentas de `seed_demo.sql` (sólo local): `admin@demo.opalo.mx` (admin),
 `especialista@demo.opalo.mx` (personal), `clienta@demo.opalo.mx`, `sofia@demo.opalo.mx`,
-`valeria@demo.opalo.mx` (16 años) y una clienta sin cuenta.
+`valeria@demo.opalo.mx` (16 años) y una clienta sin cuenta. Además trae un taller de ejemplo:
+12 materias primas y envases con costos de ejemplo (aceite de oliva, aceite de coco, manteca de
+karité, sosa cáustica, agua destilada, avena coloidal, aceite esencial de lavanda, cera de soya,
+mechas, fragancia, frascos ámbar, etiquetas) y su compra; 3 jabones y 2 velas "(ejemplo)" con ficha
+completa y precio de ejemplo; una fórmula por producto; 4 lotes (jabón de avena liberado, jabón de
+lavanda **en curado**, vela de lavanda liberada, vela de vainilla sin curado) y una venta de
+mostrador sin clienta. Las citas pasadas tienen su consentimiento firmado en cabina; las futuras de
+las clientas, "falta firma". `seed.sql` (el real) no trae productos.
+
+Pruebas por archivo: `01` catálogo · `02` horarios · `03` reservas, cancelación, consentimiento
+(modo con firma en línea y regla del portal con firma en cabina) · `04` pedidos y pagos · `05`
+inventario · `06` resultados y gastos · `07` RLS y privilegios · `08` políticas y alta de usuarios ·
+`09` escrituras atómicas del panel · `10` firma en cabina (§9) y tienda, taller, mostrador,
+entregas y resultados (§10).
 
 ## 5. Notas para el sitio (`web/src/lib/api/supabase.ts`)
 
@@ -201,6 +241,41 @@ Cuentas de `seed_demo.sql` (sólo local): `admin@demo.opalo.mx` (admin),
   `Las notas son muy largas; escríbelas en máximo 1000 caracteres.`
   En `crear_pedido`, un servicio/paquete/producto que no se puede comprar responde
   `Uno de los productos ya no está disponible para compra en línea.`
+  Firma (§9): `La firma se hace en el spa, el día de tu cita.`
+  Existencias (`crear_pedido`, `venta_mostrador` y `registrar_pago` cuando liquida un pedido, en piezas
+  completas y sumando renglones del mismo producto): `Por ahora no tenemos {nombre}.` · `Por ahora sólo queda 1 pieza de {nombre}.` ·
+  `Por ahora sólo quedan {n} piezas de {nombre}.`
+  De `venta_mostrador`: `Para vender servicios prepagados elige a la clienta.` ·
+  `Uno de los productos ya no está a la venta.` · `No encontramos a esa clienta.` ·
+  `Elige el método de pago.` · `La propina no puede ser negativa.` · `El monto debe ser mayor a cero.` ·
+  `Tu carrito está vacío.` (y las de cantidades y notas de `crear_pedido`).
+  De `marcar_entregado`: `No encontramos ese pedido.` · `Este pedido todavía no está pagado.` ·
+  `Este pedido no tiene productos que entregar.`
+  De `guardar_formula`: `Escribe el nombre de la fórmula.` · `Elige el producto que se elabora con esta fórmula.` ·
+  `No encontramos ese producto.` · `No encontramos esa fórmula.` ·
+  `Revisa el rendimiento: cuántas piezas salen de un lote (más de cero).` ·
+  `Revisa los días de curado: días enteros, cero o más.` ·
+  `Las instrucciones son muy largas; escríbelas en máximo 5000 caracteres.` · `Revisa los datos de la fórmula.` ·
+  `Agrega al menos un insumo a la fórmula.` · `Uno de los insumos de la fórmula no existe.` ·
+  `La cantidad de cada insumo debe ser mayor a cero.` ·
+  `Un producto no puede ser insumo de sí mismo: elige la materia prima que lleva.`
+  De `registrar_lote`: `No encontramos ese producto.` · `No encontramos esa fórmula.` · `Esa fórmula es de otro producto.` ·
+  `Elige la fórmula o escribe los insumos que usaste.` ·
+  `Los jabones necesitan una fórmula con sus días de curado; elígela o créala primero.` (un jabón sin
+  fórmula no tendría curado y quedaría a la venta el mismo día) · `Escribe cuántas piezas salen del lote.` ·
+  `Revisa las piezas: más de cero.` · `La fecha de elaboración no puede ser futura.` ·
+  `La caducidad debe ser después de la elaboración.` · `La fórmula no tiene insumos.` ·
+  `Uno de los insumos del lote no existe.` ·
+  `No alcanza el inventario de {nombre}: hay {stock} {unidad} y se necesitan {cantidad} {unidad}.`
+  (p. ej. `…de Aceite de oliva: hay 300 ml y se necesitan 450 ml.`).
+  De `liberar_lote` / `descartar_lote`: `No encontramos ese lote.` · `Este lote ya se liberó.` ·
+  `Este lote se descartó.` · `Este lote sigue en curado hasta el {fecha}.` (fecha como
+  `12 de noviembre de 2026`) · `Revisa las piezas obtenidas: más de cero.` ·
+  `Escribe por qué se descarta el lote.`
+  Productos (escritura directa del panel, trigger `productos_ficha`):
+  `Los jabones, velas y sets se manejan por pieza: unidad "pz" y contenido 1.` ·
+  `Ya existe otro producto con ese identificador (slug).` ·
+  `El identificador (slug) del producto debe tener letras o números.`
 - **Límites** (constantes en las funciones): la clienta reserva en línea a lo más **3 citas
   próximas** activas (pendiente/confirmada; el personal sí puede agendarle más) y tiene a lo más
   **5 pedidos por pagar**; cantidades enteras de 1 a 99 por renglón; `crear_pedido` sólo acepta
@@ -208,8 +283,10 @@ Cuentas de `seed_demo.sql` (sólo local): `admin@demo.opalo.mx` (admin),
   Firma: un `<svg>` sólo con trazos (`path`, `g`, `polyline`, `line`, `circle`), sin scripts,
   eventos ni enlaces, de hasta 200 000 caracteres (`firma_valida`, también como restricción de
   `consentimientos`); nombres hasta 200, notas hasta 1000, campos de la ficha hasta 2000.
-- **Fecha de nacimiento**: `reservar_cita` (y `firmar_consentimiento_cita` desde el portal) la
-  exigen; la clienta la captura una vez y después sólo el personal la cambia (`tg_clientes_proteger`).
+- **Fecha de nacimiento**: `reservar_cita` (y `firmar_consentimiento_cita` desde el portal, cuando
+  `firma_en_linea = true`) la exigen; para una menor, `reservar_cita` pide `p_tutor_nombre` en
+  ambos modos (en cabina el tutor firma con ella); la clienta la captura una vez y después sólo
+  el personal la cambia (`tg_clientes_proteger`).
 - **Servicios**: uno activo y en etapa `disponible` debe tener `tipo_consentimiento`
   (trigger `servicios_consentimiento`); una cita sin ningún consentimiento que firmar no se crea.
 - **Agenda del personal**: `reservar_cita_staff` respeta los bloqueos (de la persona o globales)
@@ -251,6 +328,65 @@ Cuentas de `seed_demo.sql` (sólo local): `admin@demo.opalo.mx` (admin),
     (comida), encimados no (pegados, como 10–14 y 14–19, sí). `'[]'` deja a la persona sin horario.
   - `guardar_receta(p_servicio_id uuid, p_items jsonb) returns void` (personal).
     `[{producto_id, cantidad (> 0, en la unidad del producto), notas}]`; `'[]'` la deja vacía.
+- **Tienda y productos (ESPEC §10.1)**: `productos` guarda también la materia prima del taller
+  (`categoria` `materia_prima`/`envase`, `uso = 'produccion'`) y los productos de la tienda propia
+  (`jabon`, `vela`, `set`), que se manejan **por pieza** (`unidad_medida = 'pz'`,
+  `contenido_presentacion = 1`; lo exige el trigger `productos_ficha`). Ficha pública: `slug`
+  (único; se normaliza sin acentos y, si no viene y el producto se vende en línea o es jabón, vela o
+  set, se arma con el nombre: `jabon-de-avena`, `jabon-de-avena-2`…), `descripcion, aroma,
+  ingredientes, modo_uso, advertencias, contenido_neto, foto_url, color_hex` (`#rrggbb`),
+  `destacado, hecho_en_opalo, orden`. El visitante **no** lee la tabla: el sitio usa
+  `productos_tienda` (`stock_disponible` = piezas completas, `hay_stock`, `proximo_lote_listo` = el
+  `listo_desde` más próximo de los lotes en curado), ordenada por destacado, categoría, orden y nombre.
+- **Taller (ESPEC §10.2)**: `formulas` y `formula_items` (insumos de un lote completo, en la unidad
+  del insumo) y `lotes_produccion` (código `JAB|VEL|SET|PRD-AAMMDD-NN` por trigger, según la
+  categoría y `elaborado_en`; `listo_desde = elaborado_en + dias_curado`, columna calculada). El
+  personal los **lee** (RLS) y los escribe **sólo** con estas RPC (personal; `No tienes permiso para
+  hacer esto.` para los demás):
+  - `guardar_formula(p_id uuid, p_datos jsonb, p_items jsonb) returns uuid` — `p_id` null = nueva;
+    `p_datos = {producto_id, nombre, rendimiento_piezas, dias_curado, instrucciones, activa}` (al
+    editar, lo que no venga se queda); `p_items = [{insumo_id, cantidad}]`, al menos uno (repetidos
+    se suman). Reemplaza los insumos en la misma transacción.
+  - `registrar_lote(p_producto_id uuid, p_formula_id uuid default null, p_piezas numeric default null,
+    p_elaborado_en date default null, p_caduca_en date default null, p_notas text default null,
+    p_items jsonb default null) returns jsonb {id, codigo, costo_materiales, costo_unitario,
+    listo_desde, estado}` — materiales: `p_items` (lo que se usó) o la fórmula × `p_piezas /
+    rendimiento_piezas`; piezas: `p_piezas` o el rendimiento; curado: el de la fórmula (0 sin
+    fórmula). Valida existencias (bloquea los insumos), inserta movimientos `insumo_produccion`
+    (−, con el costo vigente, `lote_id`) y calcula `costo_materiales` y `costo_unitario` provisional
+    (÷ piezas planeadas). Con `dias_curado = 0` se libera en el acto.
+  - `liberar_lote(p_lote_id uuid, p_piezas_obtenidas numeric default null, p_forzar boolean default
+    false) returns void` — sólo `en_curado` y, sin `p_forzar`, desde `listo_desde`. Fija
+    `piezas_obtenidas` (default las planeadas), `costo_unitario = costo_materiales /
+    piezas_obtenidas`, movimiento `produccion` (+piezas, ese costo), `productos.costo_presentacion =
+    costo_unitario × contenido_presentacion`, estado `disponible`, `liberado_en`.
+  - `descartar_lote(p_lote_id uuid, p_motivo text) returns void` — sólo `en_curado`; estado
+    `descartado`, `motivo_descarte` y `descartado_en` (columna interna: el mes de la merma).
+  - Vistas (personal): `v_lotes` (`dias_para_listo` = días que faltan, ≤ 0 = listo; el resumen del
+    día filtra `estado = 'en_curado' and dias_para_listo <= 0`), `v_costo_formulas` (costos
+    **actuales** de los insumos), `v_margen_productos` (uso `venta`/`ambos`; `costo_unitario` del
+    producto o, si aún es 0 porque su primer lote sigue en curado, el costo por pieza de su fórmula
+    activa; `vendidas_30d` = −Σ ventas de los últimos 30 días).
+- **Mostrador y entregas (ESPEC §10.3)**: `pedidos.cliente_id` admite null (sólo con
+  `origen = 'mostrador'`), `pedidos.origen` (`web | mostrador`) y `pedidos.entregado_en`. Una fila sin
+  clienta **no la ve ninguna clienta** (RLS `cliente_id = mi_cliente_id()` nunca es verdadera con
+  null), ni sus renglones ni sus pagos; `v_pedidos_detalle` la muestra al personal como
+  `Venta de mostrador` y agrega `origen, entregado_en, tiene_productos`.
+  - `venta_mostrador(p_items jsonb, p_metodo metodo_pago, p_cliente_id uuid default null,
+    p_propina numeric default 0, p_notas text default null) returns jsonb {id, folio, total}`
+    (personal) — mismos `p_items` que `crear_pedido`; en el spa también se vende lo que no está en la
+    tienda en línea (no exige `vendible_en_linea`). Servicios/paquetes exigen clienta. Valida
+    existencias (bloquea los productos), crea el pedido, registra el pago completo (cualquier método,
+    también `cortesia`) con la propina aparte, lo liquida (créditos y movimientos `venta` con el
+    costo de la pieza) y, si lleva productos, pone `entregado_en`.
+  - `marcar_entregado(p_pedido_id uuid) returns void` (personal) — pedido `pagado` con productos;
+    marcarlo otra vez no cambia la fecha.
+  - `crear_pedido` valida existencias de productos (no las aparta: se descuentan al pagarse). Por eso
+    `registrar_pago`, al liquidar un pedido con productos, vuelve a validarlas: si mientras tanto se
+    vendieron en el mostrador, el pago no se registra (mismo mensaje de existencias) y el inventario
+    nunca queda en negativo. Un anticipo que no completa el total sí se registra.
+  - "Pedidos por entregar" del resumen = `v_pedidos_detalle` con `estado = 'pagado'`,
+    `tiene_productos` y `entregado_en is null`.
 - **Privilegios** (además de RLS): la clienta sólo puede `update` en `clientes` de
   `nombre, apellidos, telefono, fecha_nacimiento, acepta_promociones` (un trigger lo exige);
   `productos.stock_actual` no se escribe directo (sólo con movimientos: `registrar_compra`,
@@ -269,7 +405,16 @@ Cuentas de `seed_demo.sql` (sólo local): `admin@demo.opalo.mx` (admin),
   y el producto sale de la lista (con exactamente una lata de faltante se sugieren dos).
   `costo_estimado = presentaciones_sugeridas × costo_presentacion`.
 - **Funciones internas** (no expuestas por la API): `crear_cita_interna`, `cancelar_cita_interna`,
-  `completar_cita_interna`, `liquidar_pedido_interna`, `generar_codigo_regalo`,
-  `personal_puede_hacer`, `edad_en`, `ip_solicitud`, `firma_valida`, `validar_firma` y los `tg_*`.
+  `completar_cita_interna`, `liquidar_pedido_interna`, `lineas_pedido_interna`,
+  `validar_existencias_interna`, `insertar_pedido_interna`, `insumos_interna`,
+  `liberar_lote_interna`, `generar_codigo_regalo`, `personal_puede_hacer`, `edad_en`,
+  `ip_solicitud`, `firma_valida`, `validar_firma`, `slug_de`, `fecha_legible`, `cantidad_legible` y
+  los `tg_*`.
 - **Resultados**: `v_resultado_mensual` da los últimos 12 meses con actividad **hasta el mes en
-  curso** (un gasto con periodo futuro no desplaza a los meses ya vividos).
+  curso** (un gasto con periodo futuro no desplaza a los meses ya vividos). Columnas: `mes,
+  ingresos, propinas, costo_insumos` (−Σ consumo × costo), `costo_ventas` (−Σ venta × costo; también
+  lo regalado como cortesía), `mermas` (−Σ merma × costo + Σ `costo_materiales` de los lotes
+  descartados en el mes, por `descartado_en` en hora local), `compras, gastos, utilidad` (ingresos −
+  costo_insumos − costo_ventas − mermas − gastos), `flujo` (ingresos − compras − gastos; la materia
+  prima ya está en compras) y `citas_completadas`. Los movimientos `produccion` e
+  `insumo_produccion` no son costo del mes: el material de un lote se vuelve costo de sus piezas.

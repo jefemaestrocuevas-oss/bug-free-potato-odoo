@@ -2,7 +2,7 @@
 
 > **BORRADOR para revisión.** Antes de publicarse, este documento debe revisarlo la especialista de Ópalo (en lo técnico) y un abogado (en lo legal). Los cuidados son una guía general que la especialista debe confirmar. Lo que aparece entre corchetes, [ASÍ], es un dato o una decisión pendiente.
 
-Aquí te explicamos en qué consisten nuestros faciales, sus beneficios, riesgos y cuidados, para que decidas con toda la información. Si tienes dudas, pregúntanos antes de firmar o en cabina antes de empezar. Lo firmas en cada reserva que incluya un facial o alguno de sus complementos: shot hidratante, ampolleta despigmentante o azuleno.
+Aquí te explicamos en qué consisten nuestros faciales, sus beneficios, riesgos y cuidados, para que decidas con toda la información. Lo revisamos contigo en el spa y lo firmas en la tablet de la cabina, antes de tu servicio, cada vez que tu cita incluya un facial o alguno de sus complementos: shot hidratante, ampolleta despigmentante o azuleno. Si tienes dudas, pregúntanos antes de firmar.
 
 ## 1. En qué consiste
 
@@ -91,4 +91,4 @@ Si tienes entre 15 y 17 años, escribe el nombre de tu mamá, papá o tutor: esa
 
 ## 9. Firma electrónica
 
-Firmas con tu nombre completo y tu firma trazada en la pantalla. Guardamos además la fecha y hora, la versión exacta de este documento con su **huella digital** (un código que prueba que el texto no cambió), la referencia a tu ficha de salud vigente, tu dirección IP y tu tipo de dispositivo. Esta firma electrónica vale igual que tu firma autógrafa [CONFIRMAR CON EL ABOGADO]. Puedes consultar el documento firmado en Mi cuenta.
+Firmas en el spa, antes de tu servicio, en la tablet de la cabina: escribes tu nombre completo y trazas tu firma en la pantalla. Guardamos además la fecha y hora, la versión exacta de este documento con su **huella digital** (un código que prueba que el texto no cambió), la referencia a tu ficha de salud vigente, la dirección IP y el tipo de dispositivo. Esta firma electrónica vale igual que tu firma autógrafa [CONFIRMAR CON EL ABOGADO]. Puedes consultar una copia del documento firmado en Mi cuenta.

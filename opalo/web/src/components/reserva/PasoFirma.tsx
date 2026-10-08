@@ -1,12 +1,11 @@
-// Paso 6: resumen final + firma del consentimiento en pantalla + confirmar.
+// Paso 6 con configuracion.firma_en_linea = true: resumen final + firma del consentimiento en
+// pantalla + confirmar. Con false (decisión de Ópalo, ESPEC §9) el paso 6 es PasoConfirmar.
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import type { DatosFirma, Slot, TipoPolitica } from '../../lib/api/tipos';
-import { duracion, enlaceWhatsApp, ETIQUETA_POLITICA, fechaLarga, hora } from '../../lib/format';
-import { useContacto } from '../publico/contacto';
+import { ETIQUETA_POLITICA } from '../../lib/format';
 import { PanelFirma } from '../ui/PanelFirma';
-import { PieAsistente, type LineaResumen } from './Piezas';
-import { notaPago, unirConY, type Total } from './utilidades';
+import { DatosFinales, ErrorReserva, PieAsistente, type LineaResumen } from './Piezas';
+import { unirConY, type Total } from './utilidades';
 
 const MSG_FIRMA = 'Falta tu firma o tu nombre completo.';
 
@@ -31,7 +30,6 @@ export function PasoFirma(p: Props) {
   const [errorLocal, setErrorLocal] = useState<string | null>(null);
   const errorRef = useRef<HTMLDivElement>(null);
   const error = errorLocal ?? p.error;
-  const contacto = useContacto();
 
   // Un error del servidor (p. ej. 'Ya tienes 3 citas próximas…') también se enfoca para que no pase desapercibido.
   useEffect(() => {
@@ -55,47 +53,7 @@ export function PasoFirma(p: Props) {
 
   return (
     <div className="rv-paso-cuerpo">
-      <section className="tarjeta-plana rv-final" aria-labelledby="rv-final-titulo">
-        <h3 className="rv-subtitulo" id="rv-final-titulo">
-          Tu cita
-        </h3>
-        <dl className="rv-final-datos">
-          <div>
-            <dt>Día</dt>
-            <dd>{fechaLarga(p.slot.inicio)}</dd>
-          </div>
-          <div>
-            <dt>Hora</dt>
-            <dd>{hora(p.slot.inicio)} (hora de Querétaro)</dd>
-          </div>
-          <div>
-            <dt>Te atiende</dt>
-            <dd>{p.slot.personal_nombre}</dd>
-          </div>
-          <div>
-            <dt>Tiempo estimado</dt>
-            <dd>{p.duracionMin ? duracion(p.duracionMin) : 'Calculando…'}</dd>
-          </div>
-          <div className="rv-final-servicios">
-            <dt>Servicios</dt>
-            <dd>
-              <ul>
-                {p.lineas.map((l) => (
-                  <li key={l.clave}>
-                    <span>{l.nombre}</span>
-                    <span className="num texto-2">{l.prepagado ? 'Prepagado' : l.precio === null ? 'Por confirmar' : null}</span>
-                  </li>
-                ))}
-              </ul>
-            </dd>
-          </div>
-          <div className="rv-final-total">
-            <dt>Total estimado</dt>
-            <dd className="num">{p.total.texto}</dd>
-          </div>
-        </dl>
-        <p className="ayuda">{notaPago(p.total)}</p>
-      </section>
+      <DatosFinales lineas={p.lineas} total={p.total} duracionMin={p.duracionMin} slot={p.slot} />
 
       <div className="campo">
         <label className="etiqueta" htmlFor="rv-notas">
@@ -118,29 +76,7 @@ export function PasoFirma(p: Props) {
         <PanelFirma onCambio={setFirma} requiereTutor={p.requiereTutor} nombreSugerido={p.nombreSugerido} leyenda={leyenda} />
       </section>
 
-      {error && (
-        <div className="aviso aviso-error rv-error" role="alert" tabIndex={-1} ref={errorRef}>
-          <span>
-            {error}
-            {/citas próximas/.test(error) && (
-              <>
-                {' '}
-                <Link to="/cuenta/citas">Ver mis citas</Link>
-              </>
-            )}
-          </span>
-          {/WhatsApp/.test(error) && (
-            <a
-              className="btn btn-secundario btn-sm"
-              href={enlaceWhatsApp(contacto.telefono_whatsapp, 'Hola, Ópalo. Necesito ayuda con mi reserva en línea.')}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Escribir por WhatsApp<span className="sr-only"> (se abre en otra pestaña)</span>
-            </a>
-          )}
-        </div>
-      )}
+      {error && <ErrorReserva error={error} ref={errorRef} />}
 
       <PieAsistente
         onAtras={p.onAtras}

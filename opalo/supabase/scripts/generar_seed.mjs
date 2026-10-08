@@ -5,7 +5,7 @@
 //   node opalo/supabase/scripts/generar_seed.mjs --stdout   → lo imprime (no escribe)
 //
 // Sin dependencias. El SQL que sale es idempotente (se puede correr varias veces):
-//   * configuración (fila 1, incluida fecha_apertura), categorías, servicios, paquetes,
+//   * configuración (fila 1, incluidas fecha_apertura y firma_en_linea), categorías, servicios, paquetes,
 //     contraindicaciones y categorías de gasto: upsert por slug/clave; sólo se tocan las
 //     columnas que vienen en el JSON (lo que el JSON no dice se deja como esté en la base).
 //   * personal, horarios, cabinas y gastos recurrentes: sólo se insertan si no existen
@@ -90,7 +90,13 @@ const colsCfg = [
   'nombre_negocio', 'lema', 'telefono_whatsapp', 'direccion', 'zona_horaria', 'duracion_sesion_min',
   'intervalo_slots_min', 'anticipacion_min_horas', 'ventana_reserva_dias', 'horas_cancelacion',
   'tolerancia_retraso_min', 'edad_minima', 'edad_mayoria', 'vigencia_creditos_dias', 'fecha_apertura',
+  'firma_en_linea',
 ].filter((c) => tiene(cfg, c));
+// firma_en_linea (ESPEC §9): false = el consentimiento se firma en el spa (tablet de cabina);
+// true = se firma al reservar en línea. Debe ser booleano (la columna no acepta null).
+if (tiene(cfg, 'firma_en_linea') && typeof cfg.firma_en_linea !== 'boolean') {
+  falla(`configuracion.firma_en_linea inválida "${cfg.firma_en_linea}" (usa true o false)`);
+}
 // fecha_apertura: 'AAAA-MM-DD' (día de apertura; antes, las clientas no reservan en línea) o null.
 if (cfg.fecha_apertura != null) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(cfg.fecha_apertura));

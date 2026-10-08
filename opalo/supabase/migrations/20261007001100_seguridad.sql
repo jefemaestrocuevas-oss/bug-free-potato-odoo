@@ -151,7 +151,8 @@ create policy consentimientos_leer on public.consentimientos
   for select to authenticated
   using (cliente_id = (select public.mi_cliente_id()) or (select public.es_personal()));
 
--- ventas
+-- ventas. Un pedido de mostrador sin clienta (cliente_id null) sólo lo ve el personal:
+-- null = mi_cliente_id() nunca es verdadero.
 create policy pedidos_leer on public.pedidos
   for select to authenticated
   using (cliente_id = (select public.mi_cliente_id()) or (select public.es_personal()));
@@ -188,6 +189,15 @@ create policy productos_crear on public.productos
   for insert to authenticated with check ((select public.es_personal()));
 create policy productos_editar on public.productos
   for update to authenticated using ((select public.es_personal())) with check ((select public.es_personal()));
+
+-- taller (ESPEC §10.2): el personal lee fórmulas y lotes; los escribe sólo con guardar_formula,
+-- registrar_lote, liberar_lote y descartar_lote.
+create policy formulas_leer on public.formulas
+  for select to authenticated using ((select public.es_personal()));
+create policy formula_items_leer on public.formula_items
+  for select to authenticated using ((select public.es_personal()));
+create policy lotes_produccion_leer on public.lotes_produccion
+  for select to authenticated using ((select public.es_personal()));
 
 -- recetas: el personal las lee; las escribe con guardar_receta (reemplazo atómico).
 create policy recetas_servicio_leer on public.recetas_servicio
@@ -254,15 +264,22 @@ grant update on public.configuracion to authenticated;
 
 grant insert, update, delete on public.bloqueos_agenda to authenticated;
 grant insert, update on public.proveedores to authenticated;
--- productos: todo menos stock_actual (sólo cambia con movimientos) y costo_unitario (calculado)
+-- productos: todo menos stock_actual (sólo cambia con movimientos) y costo_unitario (calculado);
+-- incluye la ficha pública de la tienda (ESPEC §10.1). El visitante no lee la tabla (sólo la vista
+-- productos_tienda, que no expone costos, stock mínimo, proveedor ni notas).
 grant insert (id, nombre, marca, categoria, unidad_medida, presentacion, contenido_presentacion,
               costo_presentacion, stock_minimo, proveedor_id, uso, precio_venta, vendible_en_linea,
-              activo, notas)
+              activo, notas, slug, descripcion, aroma, ingredientes, modo_uso, advertencias,
+              contenido_neto, foto_url, color_hex, destacado, hecho_en_opalo, orden)
   on public.productos to authenticated;
-grant update (id, nombre, marca, categoria, unidad_medida, presentacion, contenido_presentacion,
+-- (sin id: la llave primaria no se cambia; el INSERT sí la acepta)
+grant update (nombre, marca, categoria, unidad_medida, presentacion, contenido_presentacion,
               costo_presentacion, stock_minimo, proveedor_id, uso, precio_venta, vendible_en_linea,
-              activo, notas)
+              activo, notas, slug, descripcion, aroma, ingredientes, modo_uso, advertencias,
+              contenido_neto, foto_url, color_hex, destacado, hecho_en_opalo, orden)
   on public.productos to authenticated;
+-- formulas, formula_items y lotes_produccion: sin escritura directa (sólo SELECT, por RLS del
+-- personal); los lotes mueven inventario y costos, así que sólo cambian con sus RPC.
 -- recetas_servicio, paquetes, paquete_servicios y horarios: sin escritura directa (sólo SELECT);
 -- se escriben con guardar_receta, guardar_paquete y guardar_horarios, que reemplazan el conjunto
 -- completo en una transacción.
@@ -321,15 +338,23 @@ grant execute on function
   public.guardar_paquete(uuid, jsonb, jsonb),
   public.guardar_horarios(uuid, jsonb),
   public.guardar_receta(uuid, jsonb),
+  public.guardar_formula(uuid, jsonb, jsonb),
+  public.registrar_lote(uuid, uuid, numeric, date, date, text, jsonb),
+  public.liberar_lote(uuid, numeric, boolean),
+  public.descartar_lote(uuid, text),
+  public.venta_mostrador(jsonb, public.metodo_pago, uuid, numeric, text),
+  public.marcar_entregado(uuid),
   public.primer_vencimiento(int, date),
   public.avanzar_vencimiento(date, public.frecuencia_gasto, int),
   public.dias_del_mes(date)
 to authenticated;
 
 -- Internas (crear_cita_interna, cancelar_cita_interna, completar_cita_interna,
--- liquidar_pedido_interna, generar_codigo_regalo, personal_puede_hacer, edad_en, ip_solicitud,
--- firma_valida, validar_firma, tg_*): sin EXECUTE para anon/authenticated. Sólo las llaman otras
--- funciones security definer (o triggers / restricciones).
+-- liquidar_pedido_interna, lineas_pedido_interna, validar_existencias_interna,
+-- insertar_pedido_interna, insumos_interna, liberar_lote_interna, generar_codigo_regalo,
+-- personal_puede_hacer, edad_en, ip_solicitud, firma_valida, validar_firma, slug_de, fecha_legible,
+-- cantidad_legible, tg_*): sin EXECUTE para anon/authenticated. Sólo las llaman otras funciones
+-- security definer (o triggers / restricciones).
 
 grant execute on all functions in schema public to service_role;
 

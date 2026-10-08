@@ -14,14 +14,16 @@ begin
                            'public.recetas_servicio', 'public.bloqueos_agenda', 'public.categorias_gasto',
                            'public.v_citas_detalle', 'public.v_pedidos_detalle', 'public.v_creditos',
                            'public.v_clientes_resumen', 'public.v_costo_servicio', 'public.v_reposicion',
-                           'public.v_gastos_por_vencer', 'public.v_resultado_mensual'] loop
+                           'public.v_gastos_por_vencer', 'public.v_resultado_mensual',
+                           'public.formulas', 'public.formula_items', 'public.lotes_produccion',
+                           'public.v_lotes', 'public.v_costo_formulas', 'public.v_margen_productos'] loop
     perform pruebas.igual(pruebas.filas(t), 0, 'el visitante no ve ' || t);
   end loop;
 
   perform pruebas.igual(pruebas.filas('public.servicios'), 29, 'catálogo');
   perform pruebas.igual(pruebas.filas('public.personal_publico'), 1, 'equipo público');
   perform pruebas.igual(pruebas.filas('public.capacitaciones_publicas'), 1, 'capacitaciones públicas');
-  perform pruebas.igual(pruebas.filas('public.productos_tienda'), 1, 'tienda');
+  perform pruebas.igual(pruebas.filas('public.productos_tienda'), 6, 'tienda');
   perform pruebas.igual(pruebas.filas('public.configuracion'), 1, 'configuración');
   perform pruebas.igual(pruebas.filas('public.politicas'), (select count(*)::int from public.politicas where activa), 'políticas activas');
   perform pruebas.igual(pruebas.filas('public.personal'), 0, 'la tabla personal no (usa personal_publico)');
@@ -76,6 +78,11 @@ begin
   perform pruebas.igual(pruebas.filas('public.gastos'), 0, 'no ve gastos');
   perform pruebas.igual(pruebas.filas('public.productos'), 0, 'no ve productos');
   perform pruebas.igual(pruebas.filas('public.movimientos_inventario'), 0, 'no ve movimientos');
+  perform pruebas.igual(pruebas.filas('public.formulas') + pruebas.filas('public.formula_items')
+                        + pruebas.filas('public.lotes_produccion') + pruebas.filas('public.v_lotes')
+                        + pruebas.filas('public.v_costo_formulas') + pruebas.filas('public.v_margen_productos'), 0,
+                        'no ve el taller');
+  perform pruebas.afirma(pruebas.filas('public.productos_tienda') > 0, 'sí ve la tienda');
   perform pruebas.igual(pruebas.filas('public.bloqueos_agenda'), 0, 'no ve bloqueos');
   perform pruebas.igual(pruebas.filas('public.v_clientes_resumen'), 0, 'no ve el resumen de clientas');
   perform pruebas.igual(pruebas.filas('public.v_resultado_mensual'), 0, 'no ve resultados');
@@ -140,9 +147,11 @@ begin
   perform pruebas.afirma(pruebas.filas('public.fichas_salud') >= 2, 'lee fichas de salud');
   perform pruebas.afirma(pruebas.filas('public.consentimientos') >= 6, 'lee consentimientos');
   perform pruebas.afirma(pruebas.filas('public.aceptaciones_politica') >= 6, 'lee aceptaciones');
-  perform pruebas.igual(pruebas.filas('public.productos'), 6, 'lee productos');
+  perform pruebas.igual(pruebas.filas('public.productos'), 23, 'lee productos (insumos, materia prima y de venta)');
+  perform pruebas.igual(pruebas.filas('public.formulas'), 5, 'lee fórmulas');
+  perform pruebas.igual(pruebas.filas('public.v_lotes'), 4, 'lee lotes');
   perform pruebas.afirma(pruebas.filas('public.movimientos_inventario') > 0, 'lee movimientos');
-  perform pruebas.afirma(pruebas.filas('public.compras') = 1, 'lee compras');
+  perform pruebas.afirma(pruebas.filas('public.compras') = 2, 'lee compras (cabina y materia prima del taller)');
   perform pruebas.afirma(pruebas.filas('public.v_clientes_resumen') >= 6, 'resumen de clientas');
   perform pruebas.afirma(pruebas.filas('public.v_citas_detalle') >= 9, 'toda la agenda');
 
@@ -161,6 +170,9 @@ begin
   perform pruebas.espera_rechazo(format('insert into public.gastos (categoria_id, concepto, monto) values (%L, %L, 1)', v_cat_gasto, 'x'));
   perform pruebas.espera_error('select public.publicar_politica(''terminos'', ''x'', ''y'')', 'No tienes permiso para hacer esto.');
   perform pruebas.espera_rechazo('update public.paquetes set precio = 1');
+  -- Productos: edita la ficha, pero no la llave primaria ni las existencias (sólo con movimientos)
+  perform pruebas.espera_rechazo('update public.productos set id = gen_random_uuid() where false');
+  perform pruebas.espera_rechazo('update public.productos set stock_actual = 0 where false');
   perform pruebas.espera_rechazo('delete from public.horarios');
   perform pruebas.espera_rechazo('delete from public.recetas_servicio');
   perform pruebas.espera_error(format('select public.guardar_paquete(null, %L::jsonb, %L::jsonb)',
@@ -311,8 +323,9 @@ declare
     'configuracion_actual', 'crear_pedido', 'duracion_reserva', 'es_admin', 'es_personal', 'firmar_consentimiento_cita',
     'guardar_ficha_salud', 'horarios_disponibles', 'hoy_local', 'mi_cliente_id', 'mi_rol', 'reservar_cita', 'telefono_legible'];
   c_personal constant text[] := array['ajustar_inventario', 'avanzar_vencimiento', 'cambiar_estado_cita', 'completar_cita',
-    'dias_del_mes', 'guardar_horarios', 'guardar_paquete', 'guardar_receta', 'primer_vencimiento', 'publicar_politica',
-    'registrar_compra', 'registrar_pago', 'reservar_cita_staff'];
+    'descartar_lote', 'dias_del_mes', 'guardar_formula', 'guardar_horarios', 'guardar_paquete', 'guardar_receta',
+    'liberar_lote', 'marcar_entregado', 'primer_vencimiento', 'publicar_politica', 'registrar_compra', 'registrar_lote',
+    'registrar_pago', 'reservar_cita_staff', 'venta_mostrador'];
 begin
   select string_agg(c.relname, ', ') into v_lista
     from pg_class c join pg_namespace n on n.oid = c.relnamespace

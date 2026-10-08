@@ -20,7 +20,9 @@
 
 .adm-cabina-documento { background: var(--superficie); border: 1px solid var(--linea-2); border-radius: var(--radio); overflow: hidden; }
 .adm-cabina-documento-titulo { font-size: 1.35rem; margin: 0; padding: 14px 18px; background: var(--fondo-alt); border-bottom: 1px solid var(--linea-2); color: var(--verde); }
-.adm-cabina-texto { padding: 4px 18px 16px; max-height: 50vh; overflow-y: auto; font-size: 1rem; }
+/* El documento completo fluye con la hoja (sin caja con scroll propio): para llegar al recuadro de la
+   firma hay que pasar por todo el texto, riesgos y cuidados incluidos. */
+.adm-cabina-texto { padding: 4px 18px 16px; font-size: 1rem; }
 
 .adm-cabina-firma { background: var(--superficie); border: 1px solid var(--linea-2); border-radius: var(--radio); padding: 18px; display: flex; flex-direction: column; gap: 10px; }
 .adm-cabina-firma .campo { margin-bottom: 8px; }

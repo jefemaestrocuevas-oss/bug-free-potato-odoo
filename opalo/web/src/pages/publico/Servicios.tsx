@@ -57,7 +57,10 @@ export default function Servicios() {
             <IconoRegalo tam={26} />
             <div>
               <h2>¿Quieres regalar o pagar por adelantado?</h2>
-              <p>En la tienda compras servicios y paquetes para usarlos cuando quieras, o para regalarlos.</p>
+              <p>
+                En la tienda compras servicios y paquetes para usarlos cuando quieras o para regalarlos, y encuentras los
+                jabones y velas que hacemos en Ópalo.
+              </p>
               <Link className="btn btn-secundario btn-sm" to="/tienda">
                 Ir a la tienda
               </Link>

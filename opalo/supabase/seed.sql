@@ -9,9 +9,9 @@
 begin;
 
 -- Configuración (fila única)
-insert into public.configuracion (id, nombre_negocio, lema, telefono_whatsapp, direccion, zona_horaria, duracion_sesion_min, intervalo_slots_min, anticipacion_min_horas, ventana_reserva_dias, horas_cancelacion, tolerancia_retraso_min, edad_minima, edad_mayoria, vigencia_creditos_dias, fecha_apertura)
-values (1, 'Ópalo', 'Todo lo que necesitas para consentirte, en un solo lugar', '4421701466', 'Momentum Centro Sur, Torre 2, Int. 207, Querétaro, Qro.', 'America/Mexico_City', 60, 60, 2, 60, 24, 15, 15, 18, 365, '2026-10-31'::date)
-on conflict (id) do update set nombre_negocio = excluded.nombre_negocio, lema = excluded.lema, telefono_whatsapp = excluded.telefono_whatsapp, direccion = excluded.direccion, zona_horaria = excluded.zona_horaria, duracion_sesion_min = excluded.duracion_sesion_min, intervalo_slots_min = excluded.intervalo_slots_min, anticipacion_min_horas = excluded.anticipacion_min_horas, ventana_reserva_dias = excluded.ventana_reserva_dias, horas_cancelacion = excluded.horas_cancelacion, tolerancia_retraso_min = excluded.tolerancia_retraso_min, edad_minima = excluded.edad_minima, edad_mayoria = excluded.edad_mayoria, vigencia_creditos_dias = excluded.vigencia_creditos_dias, fecha_apertura = excluded.fecha_apertura;
+insert into public.configuracion (id, nombre_negocio, lema, telefono_whatsapp, direccion, zona_horaria, duracion_sesion_min, intervalo_slots_min, anticipacion_min_horas, ventana_reserva_dias, horas_cancelacion, tolerancia_retraso_min, edad_minima, edad_mayoria, vigencia_creditos_dias, fecha_apertura, firma_en_linea)
+values (1, 'Ópalo', 'Todo lo que necesitas para consentirte, en un solo lugar', '4421701466', 'Momentum Centro Sur, Torre 2, Int. 207, Querétaro, Qro.', 'America/Mexico_City', 60, 60, 2, 60, 24, 15, 15, 18, 365, '2026-10-31'::date, false)
+on conflict (id) do update set nombre_negocio = excluded.nombre_negocio, lema = excluded.lema, telefono_whatsapp = excluded.telefono_whatsapp, direccion = excluded.direccion, zona_horaria = excluded.zona_horaria, duracion_sesion_min = excluded.duracion_sesion_min, intervalo_slots_min = excluded.intervalo_slots_min, anticipacion_min_horas = excluded.anticipacion_min_horas, ventana_reserva_dias = excluded.ventana_reserva_dias, horas_cancelacion = excluded.horas_cancelacion, tolerancia_retraso_min = excluded.tolerancia_retraso_min, edad_minima = excluded.edad_minima, edad_mayoria = excluded.edad_mayoria, vigencia_creditos_dias = excluded.vigencia_creditos_dias, fecha_apertura = excluded.fecha_apertura, firma_en_linea = excluded.firma_en_linea;
 
 -- Categorías de servicio
 insert into public.categorias_servicio (slug, nombre, descripcion, orden)
@@ -400,7 +400,7 @@ insert into public.politicas (tipo, version, titulo, contenido_md, activa, vigen
 select 'consentimiento_corporal'::public.tipo_politica, 1, 'Consentimiento informado: tratamientos corporales',
 '> **BORRADOR para revisión.** Antes de publicarse, este documento debe revisarlo la especialista de Ópalo (en lo técnico) y un abogado (en lo legal). Los cuidados son una guía general que la especialista debe confirmar. Lo que aparece entre corchetes, [ASÍ], es un dato o una decisión pendiente.
 
-Aquí te explicamos en qué consisten nuestros tratamientos corporales, sus beneficios, riesgos y cuidados, para que decidas con toda la información. Si tienes dudas, pregúntanos antes de firmar o en cabina antes de empezar. Lo firmas en cada reserva que incluya un tratamiento corporal, como el reductivo por zona.
+Aquí te explicamos en qué consisten nuestros tratamientos corporales, sus beneficios, riesgos y cuidados, para que decidas con toda la información. Lo revisamos contigo en el spa y lo firmas en la tablet de la cabina, antes de tu servicio, cada vez que tu cita incluya un tratamiento corporal, como el reductivo por zona. Si tienes dudas, pregúntanos antes de firmar.
 
 ## 1. En qué consiste
 
@@ -475,7 +475,7 @@ Si tienes entre 15 y 17 años, escribe el nombre de tu mamá, papá o tutor: esa
 
 ## 9. Firma electrónica
 
-Firmas con tu nombre completo y tu firma trazada en la pantalla. Guardamos además la fecha y hora, la versión exacta de este documento con su **huella digital** (un código que prueba que el texto no cambió), la referencia a tu ficha de salud vigente, tu dirección IP y tu tipo de dispositivo. Esta firma electrónica vale igual que tu firma autógrafa [CONFIRMAR CON EL ABOGADO]. Puedes consultar el documento firmado en Mi cuenta.
+Firmas en el spa, antes de tu servicio, en la tablet de la cabina: escribes tu nombre completo y trazas tu firma en la pantalla. Guardamos además la fecha y hora, la versión exacta de este documento con su **huella digital** (un código que prueba que el texto no cambió), la referencia a tu ficha de salud vigente, la dirección IP y el tipo de dispositivo. Esta firma electrónica vale igual que tu firma autógrafa [CONFIRMAR CON EL ABOGADO]. Puedes consultar una copia del documento firmado en Mi cuenta.
 ',
   true, now()
  where not exists (select 1 from public.politicas where tipo = 'consentimiento_corporal'::public.tipo_politica);
@@ -484,7 +484,7 @@ insert into public.politicas (tipo, version, titulo, contenido_md, activa, vigen
 select 'consentimiento_depilacion'::public.tipo_politica, 1, 'Consentimiento informado: depilación con cera',
 '> **BORRADOR para revisión.** Antes de publicarse, este documento debe revisarlo la especialista de Ópalo (en lo técnico) y un abogado (en lo legal). Los cuidados son una guía general que la especialista debe confirmar. Lo que aparece entre corchetes, [ASÍ], es un dato o una decisión pendiente.
 
-Aquí te explicamos en qué consiste la depilación con cera, sus beneficios, riesgos y cuidados, para que decidas con toda la información. Si tienes dudas, pregúntanos antes de firmar o en cabina antes de empezar. Lo firmas en cada reserva que incluya depilación o la ampolleta retardadora de vello.
+Aquí te explicamos en qué consiste la depilación con cera, sus beneficios, riesgos y cuidados, para que decidas con toda la información. Lo revisamos contigo en el spa y lo firmas en la tablet de la cabina, antes de tu servicio, cada vez que tu cita incluya depilación o la ampolleta retardadora de vello. Si tienes dudas, pregúntanos antes de firmar.
 
 ## 1. En qué consiste
 
@@ -573,7 +573,7 @@ Si tienes entre 15 y 17 años, escribe el nombre de tu mamá, papá o tutor: esa
 
 ## 9. Firma electrónica
 
-Firmas con tu nombre completo y tu firma trazada en la pantalla. Guardamos además la fecha y hora, la versión exacta de este documento con su **huella digital** (un código que prueba que el texto no cambió), la referencia a tu ficha de salud vigente, tu dirección IP y tu tipo de dispositivo. Esta firma electrónica vale igual que tu firma autógrafa [CONFIRMAR CON EL ABOGADO]. Puedes consultar el documento firmado en Mi cuenta.
+Firmas en el spa, antes de tu servicio, en la tablet de la cabina: escribes tu nombre completo y trazas tu firma en la pantalla. Guardamos además la fecha y hora, la versión exacta de este documento con su **huella digital** (un código que prueba que el texto no cambió), la referencia a tu ficha de salud vigente, la dirección IP y el tipo de dispositivo. Esta firma electrónica vale igual que tu firma autógrafa [CONFIRMAR CON EL ABOGADO]. Puedes consultar una copia del documento firmado en Mi cuenta.
 ',
   true, now()
  where not exists (select 1 from public.politicas where tipo = 'consentimiento_depilacion'::public.tipo_politica);
@@ -582,7 +582,7 @@ insert into public.politicas (tipo, version, titulo, contenido_md, activa, vigen
 select 'consentimiento_facial'::public.tipo_politica, 1, 'Consentimiento informado: tratamientos faciales',
 '> **BORRADOR para revisión.** Antes de publicarse, este documento debe revisarlo la especialista de Ópalo (en lo técnico) y un abogado (en lo legal). Los cuidados son una guía general que la especialista debe confirmar. Lo que aparece entre corchetes, [ASÍ], es un dato o una decisión pendiente.
 
-Aquí te explicamos en qué consisten nuestros faciales, sus beneficios, riesgos y cuidados, para que decidas con toda la información. Si tienes dudas, pregúntanos antes de firmar o en cabina antes de empezar. Lo firmas en cada reserva que incluya un facial o alguno de sus complementos: shot hidratante, ampolleta despigmentante o azuleno.
+Aquí te explicamos en qué consisten nuestros faciales, sus beneficios, riesgos y cuidados, para que decidas con toda la información. Lo revisamos contigo en el spa y lo firmas en la tablet de la cabina, antes de tu servicio, cada vez que tu cita incluya un facial o alguno de sus complementos: shot hidratante, ampolleta despigmentante o azuleno. Si tienes dudas, pregúntanos antes de firmar.
 
 ## 1. En qué consiste
 
@@ -671,7 +671,7 @@ Si tienes entre 15 y 17 años, escribe el nombre de tu mamá, papá o tutor: esa
 
 ## 9. Firma electrónica
 
-Firmas con tu nombre completo y tu firma trazada en la pantalla. Guardamos además la fecha y hora, la versión exacta de este documento con su **huella digital** (un código que prueba que el texto no cambió), la referencia a tu ficha de salud vigente, tu dirección IP y tu tipo de dispositivo. Esta firma electrónica vale igual que tu firma autógrafa [CONFIRMAR CON EL ABOGADO]. Puedes consultar el documento firmado en Mi cuenta.
+Firmas en el spa, antes de tu servicio, en la tablet de la cabina: escribes tu nombre completo y trazas tu firma en la pantalla. Guardamos además la fecha y hora, la versión exacta de este documento con su **huella digital** (un código que prueba que el texto no cambió), la referencia a tu ficha de salud vigente, la dirección IP y el tipo de dispositivo. Esta firma electrónica vale igual que tu firma autógrafa [CONFIRMAR CON EL ABOGADO]. Puedes consultar una copia del documento firmado en Mi cuenta.
 ',
   true, now()
  where not exists (select 1 from public.politicas where tipo = 'consentimiento_facial'::public.tipo_politica);
@@ -688,13 +688,13 @@ En Ópalo cuidamos tu piel y también tu información. Este aviso te explica qu�
 
 ## 2. Datos que recabamos
 
-Los obtenemos directamente de ti cuando creas tu cuenta, reservas, llenas tu ficha, compras, firmas o nos escribes:
+Los obtenemos directamente de ti cuando creas tu cuenta, reservas, llenas tu ficha, compras, firmas tu consentimiento en el spa o nos escribes:
 
 - **Identificación y contacto:** nombre, apellidos, fecha de nacimiento (para confirmar tu edad), teléfono o WhatsApp y correo.
 - **Cuenta:** correo y contraseña; la contraseña se guarda cifrada y nadie en Ópalo puede verla.
 - **Citas, compras y pagos:** servicios reservados, historial de visitas, pedidos, servicios prepagados, códigos de regalo (y el nombre de quien recibe el regalo) y pagos. No guardamos los datos completos de tu tarjeta.
 - **Datos personales sensibles de salud** (tu ficha de salud): condiciones como embarazo o lactancia, diabetes, várices, epilepsia, herpes, marcapasos o implantes; medicamentos, como isotretinoína o anticoagulantes; alergias; tratamientos estéticos recientes y tus observaciones.
-- **Firma y evidencia de tu consentimiento:** nombre de quien firma, trazo de la firma en pantalla, fecha y hora, versión del documento y su huella digital, dirección IP y tipo de navegador o dispositivo. Si eres menor de edad, también el nombre de tu mamá, papá o tutor.
+- **Firma y evidencia de tu consentimiento** (la firma se recaba en el spa, en la tablet de la cabina, antes de tu servicio): nombre de quien firma, trazo de la firma, fecha y hora, versión del documento y su huella digital, dirección IP y tipo de dispositivo. Si eres menor de edad, también el nombre de tu mamá, papá o tutor.
 - **Fotografías de resultados**, sólo con tu permiso expreso (ver el punto 9).
 - Cómo nos conociste, si nos lo cuentas.
 
@@ -719,7 +719,7 @@ Sólo te enviamos promociones si **tú lo autorizas** marcando la casilla corres
 
 ## 4. Consentimiento expreso para tus datos de salud
 
-Tus datos de salud son **datos personales sensibles**. Antes de guardar tu ficha te pedimos tu **consentimiento expreso**, que das marcando una casilla con tu sesión iniciada; además, firmas el consentimiento informado de cada tipo de servicio. Sin ese consentimiento no podemos guardar tu ficha y, por tu seguridad, tampoco realizar el servicio. Tu ficha sólo la ven tú y el personal de Ópalo que te atiende o administra la agenda. Nunca la usamos con fines comerciales.
+Tus datos de salud son **datos personales sensibles**. Antes de guardar tu ficha te pedimos tu **consentimiento expreso**, que das marcando una casilla con tu sesión iniciada; además, en el spa, antes de tu servicio, revisamos contigo y firmas en la tablet de la cabina el consentimiento informado de cada tipo de servicio. Sin ese consentimiento no podemos guardar tu ficha y, por tu seguridad, tampoco realizar el servicio. Tu ficha sólo la ven tú y el personal de Ópalo que te atiende o administra la agenda. Nunca la usamos con fines comerciales.
 
 Si tienes entre 15 y 17 años, tu mamá, papá o tutor también debe autorizar el tratamiento de tus datos [CONFIRMAR CON EL ABOGADO: cómo se recaba ese consentimiento].
 
@@ -788,11 +788,11 @@ Nuestros servicios son **cosméticos, no médicos**: no diagnosticamos ni tratam
 
 - Cada cita es una **sesión de 1 hora**. Si lo que eliges necesita más tiempo, el sistema lo reserva y te lo muestra antes de confirmar.
 - Al reservar ves el día, la hora, **quién te atenderá** y el **tiempo estimado** de tu cita; después lo consultas en Mi cuenta.
-- Para reservar necesitas una cuenta, aceptar estos documentos, llenar tu **ficha de salud** y firmar en pantalla el **consentimiento informado** del tipo de servicio que elegiste.
+- Para reservar necesitas una cuenta, aceptar estos documentos y llenar tu **ficha de salud**. El **consentimiento informado** del tipo de servicio que elegiste lo revisamos contigo en el spa y lo firmas en la tablet de la cabina, antes de tu servicio.
 - Si en tu ficha marcas una condición que la especialista debe revisar, tu cita queda **pendiente de confirmar** y te escribimos por WhatsApp. Si el servicio no es adecuado para ti, cancelamos la cita sin costo.
 - Los servicios con "precio por confirmar" sí se pueden reservar: te confirmamos el precio en cabina antes de empezar y puedes decidir no tomarlo.
 - Si eres clienta nueva y la especialista lo considera necesario, haremos una **prueba de parche** antes del servicio.
-- Si agendas por WhatsApp, firmas tu consentimiento desde Mi cuenta o en la tablet de la cabina. **Sin consentimiento firmado no hay servicio.**
+- Si agendas por WhatsApp es igual: firmas tu consentimiento en la tablet de la cabina antes de empezar. **Sin consentimiento firmado no hay servicio.**
 
 ## 3. Tu ficha de salud
 

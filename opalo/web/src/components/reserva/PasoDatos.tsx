@@ -49,7 +49,9 @@ export function PasoDatos({ config, sesion, refrescar, onAtras, onListo }: Props
         <div className="tarjeta-plana rv-acceso">
           <h3 className="rv-subtitulo">Para reservar necesitas tu cuenta</h3>
           <p className="texto-2">
-            Con tu cuenta guardamos tu ficha de salud y tus firmas de forma segura, y puedes ver o cancelar tus citas cuando quieras.
+            {config.firma_en_linea
+              ? 'Con tu cuenta guardamos tu ficha de salud y tus firmas de forma segura, y puedes ver o cancelar tus citas cuando quieras.'
+              : 'Con tu cuenta guardamos tu ficha de salud de forma segura, y puedes ver o cancelar tus citas cuando quieras.'}{' '}
             Lo que ya elegiste se queda guardado: al terminar regresas justo aquí.
           </p>
           <div className="fila">
@@ -238,7 +240,8 @@ function FormularioDatos({ config, sesion, refrescar, onAtras, onListo }: Props 
               {errorDe('fecha_nacimiento')}
               <span className="ayuda" id="rv-dato-fecha-ayuda">
                 Es obligatoria para reservar: atendemos a partir de los {config.edad_minima} años y, si eres menor de {config.edad_mayoria}, tu
-                mamá, papá o tutor firma contigo. Revísala bien: una vez guardada, sólo el equipo puede corregirla.
+                mamá, papá o tutor {config.firma_en_linea ? 'firma contigo' : 'te acompaña a tu cita'}. Revísala bien: una vez guardada, sólo el
+                equipo puede corregirla.
               </span>
             </div>
           )}
@@ -258,8 +261,10 @@ function FormularioDatos({ config, sesion, refrescar, onAtras, onListo }: Props 
         {menor && (
           <Aviso tipo="info">
             <span>
-              Como tienes menos de {config.edad_mayoria} años, tu mamá, papá o tutor debe acompañarte a la cita y escribir su nombre
-              cuando firmes el consentimiento.
+              Como tienes menos de {config.edad_mayoria} años, tu mamá, papá o tutor debe acompañarte a la cita
+              {config.firma_en_linea
+                ? ' y escribir su nombre cuando firmes el consentimiento.'
+                : '. Antes de confirmar te pedimos su nombre.'}
             </span>
           </Aviso>
         )}

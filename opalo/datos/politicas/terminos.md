@@ -14,11 +14,11 @@ Nuestros servicios son **cosméticos, no médicos**: no diagnosticamos ni tratam
 
 - Cada cita es una **sesión de 1 hora**. Si lo que eliges necesita más tiempo, el sistema lo reserva y te lo muestra antes de confirmar.
 - Al reservar ves el día, la hora, **quién te atenderá** y el **tiempo estimado** de tu cita; después lo consultas en Mi cuenta.
-- Para reservar necesitas una cuenta, aceptar estos documentos, llenar tu **ficha de salud** y firmar en pantalla el **consentimiento informado** del tipo de servicio que elegiste.
+- Para reservar necesitas una cuenta, aceptar estos documentos y llenar tu **ficha de salud**. El **consentimiento informado** del tipo de servicio que elegiste lo revisamos contigo en el spa y lo firmas en la tablet de la cabina, antes de tu servicio.
 - Si en tu ficha marcas una condición que la especialista debe revisar, tu cita queda **pendiente de confirmar** y te escribimos por WhatsApp. Si el servicio no es adecuado para ti, cancelamos la cita sin costo.
 - Los servicios con "precio por confirmar" sí se pueden reservar: te confirmamos el precio en cabina antes de empezar y puedes decidir no tomarlo.
 - Si eres clienta nueva y la especialista lo considera necesario, haremos una **prueba de parche** antes del servicio.
-- Si agendas por WhatsApp, firmas tu consentimiento desde Mi cuenta o en la tablet de la cabina. **Sin consentimiento firmado no hay servicio.**
+- Si agendas por WhatsApp es igual: firmas tu consentimiento en la tablet de la cabina antes de empezar. **Sin consentimiento firmado no hay servicio.**
 
 ## 3. Tu ficha de salud
 

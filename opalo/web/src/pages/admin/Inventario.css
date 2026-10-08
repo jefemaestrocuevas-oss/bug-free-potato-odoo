@@ -8,6 +8,8 @@
 .inv-pagina { min-width: 0; }
 .inv-recargando { opacity: 0.6; transition: opacity 0.2s; }
 .pestanas.inv-pestanas { margin-bottom: 16px; }
+/* Los .sr-only (absolutos) de las pestañas se quedan dentro de su pestaña: si no, en celular se escapan y dan scroll lateral a la página. */
+.inv-pestanas .pestana { position: relative; }
 .inv-aviso-zona { scroll-margin-top: 84px; }
 .inv-aviso-zona .aviso { margin-bottom: 16px; }
 .inv-contador {
@@ -294,3 +296,4 @@
 }
 .inv-total-final strong { font-size: 1.4rem; color: var(--tinta); }
 .input.inv-texto-lista { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.85rem; min-height: 260px; }
+.adm-lista.inv-repo-taller { padding: 4px 16px; }

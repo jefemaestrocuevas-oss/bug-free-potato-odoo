@@ -1,5 +1,8 @@
-// Alta y edición de un producto (insumo de cabina o producto de venta). El stock no se edita aquí.
+// Alta y edición de un producto (insumo de cabina, materia prima del taller o producto de venta).
+// El stock no se edita aquí. Los jabones, velas y sets se manejan por pieza (ESPEC §10.2) y su ficha
+// pública (descripción, aroma, ingredientes…) se edita en el Taller; aquí se conserva tal cual.
 import { useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { api, type CategoriaProducto, type Producto, type ProductoEditable, type Proveedor, type UnidadMedida, type UsoProducto } from '../../lib/api';
 import { useAccion } from '../../lib/useAsync';
 import { MensajeError } from '../ui/Estado';
@@ -7,6 +10,7 @@ import { Modal } from './Modal';
 import { Casilla } from './Piezas';
 import { CATEGORIAS_PRODUCTO, EJEMPLO_PRESENTACION, EntradaConUnidad, UNIDAD_PLURAL, equivalencia, pesos } from './InventarioPiezas';
 import { ETIQUETA_CATEGORIA_PRODUCTO, ETIQUETA_UNIDAD, ETIQUETA_USO, aNumero, aTexto, cantidadConUnidad, dineroUnitario, porTexto, textoONulo } from './util';
+import { esMateriaPrima, esTerminado, fichaDe } from './TallerPiezas';
 
 const UNIDADES = Object.keys(ETIQUETA_UNIDAD) as UnidadMedida[];
 const USOS = Object.keys(ETIQUETA_USO) as UsoProducto[];
@@ -14,34 +18,49 @@ const USOS = Object.keys(ETIQUETA_USO) as UsoProducto[];
 interface Props {
   /** null = producto nuevo */
   producto: Producto | null;
+  /** Categoría inicial de un producto nuevo (p. ej. materia prima desde el filtro del taller). */
+  categoriaInicial?: CategoriaProducto;
   proveedores: Proveedor[];
   onCerrar: () => void;
   onGuardado: (p: Producto, nuevo: boolean) => void;
 }
 
-export function InventarioFormProducto({ producto, proveedores, onCerrar, onGuardado }: Props) {
+export function InventarioFormProducto({ producto, categoriaInicial, proveedores, onCerrar, onGuardado }: Props) {
   const p = producto;
+  const cat0: CategoriaProducto = p?.categoria ?? categoriaInicial ?? 'cera';
   const [nombre, setNombre] = useState(p?.nombre ?? '');
   const [marca, setMarca] = useState(p?.marca ?? '');
-  const [categoria, setCategoria] = useState<CategoriaProducto>(p?.categoria ?? 'cera');
-  const [unidad, setUnidad] = useState<UnidadMedida>(p?.unidad_medida ?? 'g');
+  const [categoria, setCategoriaEstado] = useState<CategoriaProducto>(cat0);
+  const [unidadElegida, setUnidad] = useState<UnidadMedida>(p?.unidad_medida ?? (esTerminado(cat0) ? 'pz' : 'g'));
   const [presentacion, setPresentacion] = useState(p?.presentacion ?? '');
-  const [contenido, setContenido] = useState(aTexto(p?.contenido_presentacion));
+  const [contenidoEscrito, setContenido] = useState(aTexto(p?.contenido_presentacion ?? (esTerminado(cat0) ? 1 : undefined)));
   const [costo, setCosto] = useState(aTexto(p?.costo_presentacion));
   const [minimo, setMinimo] = useState(aTexto(p?.stock_minimo));
   const [proveedorId, setProveedorId] = useState(p?.proveedor_id ?? '');
-  const [uso, setUso] = useState<UsoProducto>(p?.uso ?? 'cabina');
+  const [uso, setUso] = useState<UsoProducto>(p?.uso ?? (esTerminado(cat0) ? 'venta' : esMateriaPrima(cat0) ? 'produccion' : 'cabina'));
   const [precioVenta, setPrecioVenta] = useState(aTexto(p?.precio_venta));
   const [enLinea, setEnLinea] = useState(p?.vendible_en_linea ?? false);
   const [activo, setActivo] = useState(p?.activo ?? true);
   const [notas, setNotas] = useState(p?.notas ?? '');
   const [intentado, setIntentado] = useState(false);
 
+  // Jabón, vela y set: siempre por pieza y de una en una (el costo de una pieza sale de sus lotes).
+  const terminado = esTerminado(categoria);
+  const unidad: UnidadMedida = terminado ? 'pz' : unidadElegida;
+  const contenido = terminado ? '1' : contenidoEscrito;
+  const setCategoria = (c: CategoriaProducto) => {
+    setCategoriaEstado(c);
+    // Sugiere el uso que corresponde a la categoría nueva (se puede cambiar).
+    if (esTerminado(c) && (uso === 'cabina' || uso === 'produccion')) setUso('venta');
+    else if (esMateriaPrima(c) && uso === 'cabina') setUso('produccion');
+    else if (!esTerminado(c) && !esMateriaPrima(c) && uso === 'produccion') setUso('cabina');
+  };
+
   const nContenido = aNumero(contenido);
   const nCosto = costo.trim() === '' ? 0 : aNumero(costo);
   const nMinimo = minimo.trim() === '' ? 0 : aNumero(minimo);
   const nPrecio = aNumero(precioVenta);
-  const seVende = uso !== 'cabina';
+  const seVende = uso === 'venta' || uso === 'ambos';
   const contenidoValido = nContenido !== null && nContenido > 0;
   const costoUnitario = contenidoValido && nCosto !== null && nCosto >= 0 ? nCosto / nContenido! : null;
   const vista = { presentacion: textoONulo(presentacion), contenido_presentacion: nContenido ?? 0, unidad_medida: unidad };
@@ -54,6 +73,7 @@ export function InventarioFormProducto({ producto, proveedores, onCerrar, onGuar
     if (seVende && precioVenta.trim() !== '' && (nPrecio === null || nPrecio < 0)) throw new Error('Revisa el precio de venta.');
     if (seVende && enLinea && (nPrecio === null || nPrecio <= 0)) throw new Error('Para venderlo en línea, escribe su precio de venta.');
     const datos: ProductoEditable = {
+      ...fichaDe(p),
       id: p?.id,
       nombre: nombre.trim(),
       marca: textoONulo(marca),
@@ -152,7 +172,14 @@ export function InventarioFormProducto({ producto, proveedores, onCerrar, onGuar
             <label className="etiqueta" htmlFor="prod-unidad">
               Unidad de medida
             </label>
-            <select id="prod-unidad" className="input" value={unidad} onChange={(e) => setUnidad(e.target.value as UnidadMedida)} aria-describedby="prod-unidad-ayuda">
+            <select
+              id="prod-unidad"
+              className="input"
+              value={unidad}
+              onChange={(e) => setUnidad(e.target.value as UnidadMedida)}
+              aria-describedby="prod-unidad-ayuda"
+              disabled={terminado}
+            >
               {UNIDADES.map((u) => (
                 <option key={u} value={u}>
                   {ETIQUETA_UNIDAD[u]}
@@ -160,7 +187,9 @@ export function InventarioFormProducto({ producto, proveedores, onCerrar, onGuar
               ))}
             </select>
             <span className="ayuda" id="prod-unidad-ayuda">
-              El stock, el mínimo y las recetas se cuentan en esta unidad.
+              {terminado
+                ? 'Los jabones, velas y sets se cuentan por pieza: así el costo es el de una pieza.'
+                : 'El stock, el mínimo y las recetas se cuentan en esta unidad.'}
             </span>
           </div>
         </div>
@@ -192,6 +221,7 @@ export function InventarioFormProducto({ producto, proveedores, onCerrar, onGuar
                 requerido
                 invalido={intentado && !contenidoValido}
                 descrita="prod-contenido-ayuda"
+                deshabilitado={terminado}
               />
             </div>
             <div className="campo">
@@ -202,7 +232,9 @@ export function InventarioFormProducto({ producto, proveedores, onCerrar, onGuar
             </div>
           </div>
           <p className="ayuda adm-sin-margen" id="prod-contenido-ayuda">
-            Contenido: cuántos {UNIDAD_PLURAL[unidad]} trae una presentación; así calculamos el costo por servicio.
+            {terminado
+              ? 'Una pieza por presentación. El costo de una pieza se actualiza solo cada vez que liberas un lote en el Taller.'
+              : `Contenido: cuántos ${UNIDAD_PLURAL[unidad]} trae una presentación; así calculamos el costo por servicio.`}
           </p>
           <p className="inv-calculo" id="prod-costo-ayuda" aria-live="polite">
             {costoUnitario !== null ? (
@@ -276,7 +308,11 @@ export function InventarioFormProducto({ producto, proveedores, onCerrar, onGuar
               </div>
             </div>
           ) : (
-            <p className="ayuda adm-sin-margen">Sólo se usa en cabina: no tiene precio de venta.</p>
+            <p className="ayuda adm-sin-margen">
+              {uso === 'produccion'
+                ? 'Se usa en el taller para hacer jabones y velas (en sus fórmulas): no tiene precio de venta.'
+                : 'Sólo se usa en cabina: no tiene precio de venta.'}
+            </p>
           )}
           {seVende && unidad !== 'pz' && (
             <p className="aviso aviso-alerta inv-aviso-compacto adm-sin-margen">
@@ -284,6 +320,15 @@ export function InventarioFormProducto({ producto, proveedores, onCerrar, onGuar
             </p>
           )}
         </fieldset>
+
+        {terminado && (
+          <p className="aviso aviso-info inv-aviso-compacto adm-margen-arriba">
+            <span>
+              Lo hacemos en Ópalo: su ficha para la tienda (descripción, aroma, ingredientes, foto…), sus fórmulas y sus lotes se manejan en{' '}
+              <Link to="/admin/taller">Taller</Link>.
+            </span>
+          </p>
+        )}
 
         <div className="campo adm-margen-arriba">
           <label className="etiqueta" htmlFor="prod-notas">

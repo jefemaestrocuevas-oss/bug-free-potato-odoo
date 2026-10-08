@@ -56,6 +56,50 @@ export function textoONulo(s: string | null | undefined): string | null {
   return t ? t : null;
 }
 
+/** public.slug_de: 'Jabón de Avena (ejemplo)' → 'jabon-de-avena-ejemplo' ('' si no queda nada). */
+export function slugDe(s: string | null | undefined): string {
+  return (s ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '');
+}
+
+/** Color '#rrggbb' (acepta '#rgb'); cualquier otra cosa → null (como colorHex del adaptador). */
+export function colorHex(v: unknown): string | null {
+  const t = typeof v === 'string' ? v.trim() : '';
+  if (/^#[0-9a-fA-F]{6}$/.test(t)) return t;
+  const corto = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(t);
+  return corto ? `#${corto[1]}${corto[1]}${corto[2]}${corto[2]}${corto[3]}${corto[3]}` : null;
+}
+
+/** Número de un formulario: null si viene vacío; NaN si no es número. */
+export function numeroOpcional(v: unknown): number | null {
+  if (v === null || v === undefined || (typeof v === 'string' && !v.trim())) return null;
+  return typeof v === 'number' ? v : typeof v === 'string' ? Number(v.trim()) : NaN;
+}
+
+/** Como numeroOpcional, pero lo que no es un número finito también es null (como numeroCrudo del adaptador). */
+export function numeroONulo(v: unknown): number | null {
+  const n = numeroOpcional(v);
+  return n !== null && Number.isFinite(n) ? n : null;
+}
+
+/** public.cantidad_legible: 12.500 → '12.5', 300.000 → '300'. */
+export function cantidadLegible(n: number): string {
+  const r = redondear(n, 3);
+  return String(Object.is(r, -0) ? 0 : r);
+}
+
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+/** public.fecha_legible: '2026-11-12' → '12 de noviembre de 2026'. */
+export function fechaLegible(fecha: string): string {
+  const [a, m, d] = fecha.slice(0, 10).split('-').map(Number);
+  return `${d} de ${MESES[m - 1]} de ${a}`;
+}
+
 export function emailValido(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }

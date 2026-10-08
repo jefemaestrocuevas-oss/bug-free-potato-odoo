@@ -1,9 +1,11 @@
 // Utilidades del panel interno (etiquetas, números, fechas y portapapeles).
 import type {
   CategoriaProducto,
+  EstadoLote,
   EtapaServicio,
   FrecuenciaGasto,
   OrigenCita,
+  OrigenPedido,
   Rol,
   TipoCapacitacion,
   TipoMovimiento,
@@ -29,7 +31,15 @@ export const ETIQUETA_CATEGORIA_PRODUCTO: Record<CategoriaProducto, string> = {
   limpieza: 'Limpieza',
   venta: 'Para venta',
   otro: 'Otro',
+  materia_prima: 'Materia prima',
+  envase: 'Envase',
+  jabon: 'Jabón',
+  vela: 'Vela',
+  set: 'Set de regalo',
 };
+
+/** Categorías del taller: lo que se usa para producir (no se vende ni se usa en cabina). */
+export const CATEGORIAS_MATERIA_PRIMA: CategoriaProducto[] = ['materia_prima', 'envase'];
 
 export const ETIQUETA_UNIDAD: Record<UnidadMedida, string> = {
   g: 'Gramos (g)',
@@ -41,6 +51,7 @@ export const ETIQUETA_USO: Record<UsoProducto, string> = {
   cabina: 'Se usa en cabina',
   venta: 'Se vende',
   ambos: 'Cabina y venta',
+  produccion: 'Materia prima del taller',
 };
 
 export const ETIQUETA_MOVIMIENTO: Record<TipoMovimiento, string> = {
@@ -49,6 +60,19 @@ export const ETIQUETA_MOVIMIENTO: Record<TipoMovimiento, string> = {
   venta: 'Venta',
   ajuste: 'Ajuste',
   merma: 'Merma',
+  produccion: 'Producción',
+  insumo_produccion: 'Insumo de producción',
+};
+
+export const ETIQUETA_ESTADO_LOTE: Record<EstadoLote, string> = {
+  en_curado: 'En curado',
+  disponible: 'Disponible',
+  descartado: 'Descartado',
+};
+
+export const ETIQUETA_ORIGEN_PEDIDO: Record<OrigenPedido, string> = {
+  web: 'En línea',
+  mostrador: 'Mostrador',
 };
 
 export const ETIQUETA_FRECUENCIA: Record<FrecuenciaGasto, string> = {

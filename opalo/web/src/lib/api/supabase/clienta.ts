@@ -1,5 +1,5 @@
 // Operaciones de la clienta con sesión iniciada. Escribe sólo por RPC, salvo sus datos básicos.
-import { ErrorOpalo, type OpaloApi } from '../tipos';
+import { ErrorOpalo, type DatosFirma, type ItemPedidoNuevo, type OpaloApi } from '../tipos';
 import {
   aCitaDetalle,
   aCliente,
@@ -60,6 +60,21 @@ export function consultaConsentimientos(ctx: Contexto, clienteId: string) {
     .order('firmado_en', { ascending: false });
 }
 
+/** p_items de pedido (crear_pedido y venta_mostrador): [{tipo, id, cantidad, regalo_para}]. */
+export function itemsPedido(items: ItemPedidoNuevo[]): Record<string, unknown>[] {
+  return (items ?? []).map((it) => ({
+    tipo: it.tipo,
+    id: it.id,
+    cantidad: Math.round(Number(it.cantidad)),
+    regalo_para: limpio(it.regalo_para),
+  }));
+}
+
+/** ¿Trae la reserva una firma? (sólo cuando configuracion.firma_en_linea = true, ESPEC §9). */
+function traeFirma(f: DatosFirma | null | undefined): f is DatosFirma {
+  return !!f && (!!(f.nombre_firmante ?? '').trim() || !!(f.firma_svg ?? '').trim());
+}
+
 export function crearApiClienta(ctx: Contexto): ApiClienta {
   const { sb } = ctx;
 
@@ -114,17 +129,23 @@ export function crearApiClienta(ctx: Contexto): ApiClienta {
     },
 
     async reservarCita(s) {
-      const data = await ctx.rpc('reservar_cita', {
+      // ESPEC §9: la firma es opcional. Sin firma no se mandan p_nombre_firmante ni p_firma_svg
+      // (la base usa su default null y la cita queda "falta firma": se firma en la tablet de cabina).
+      // El nombre de quien acompaña a una menor se manda siempre, haya trazo o no: la base lo exige
+      // igual (R4) y la demo lo lee de firma.tutor_nombre aunque no traiga firma.
+      const args: Record<string, unknown> = {
         p_items: itemsReserva(s.items),
         p_inicio: s.inicio,
-        p_nombre_firmante: (s.firma?.nombre_firmante ?? '').trim(),
-        p_firma_svg: s.firma?.firma_svg ?? '',
         p_personal_id: s.personal_id || null,
         p_notas: limpio(s.notas),
         p_tutor_nombre: limpio(s.firma?.tutor_nombre),
         p_user_agent: ctx.userAgent(),
-      });
-      return aResultadoReserva(data);
+      };
+      if (traeFirma(s.firma)) {
+        args.p_nombre_firmante = (s.firma.nombre_firmante ?? '').trim();
+        args.p_firma_svg = s.firma.firma_svg ?? '';
+      }
+      return aResultadoReserva(await ctx.rpc('reservar_cita', args));
     },
 
     async getMisCitas() {
@@ -151,12 +172,7 @@ export function crearApiClienta(ctx: Contexto): ApiClienta {
 
     async crearPedido(items, metodo_pago, notas) {
       const data = await ctx.rpc('crear_pedido', {
-        p_items: (items ?? []).map((it) => ({
-          tipo: it.tipo,
-          id: it.id,
-          cantidad: Math.round(Number(it.cantidad)),
-          regalo_para: limpio(it.regalo_para),
-        })),
+        p_items: itemsPedido(items),
         p_metodo_pago: metodo_pago,
         p_notas: limpio(notas),
       });

@@ -1,10 +1,15 @@
 // /reservar — asistente por pasos: servicios → día y hora → tus datos → ficha de salud →
-// políticas y consentimiento → firma → confirmación. El estado vive en sessionStorage
-// (salvo la ficha y la firma) para sobrevivir al ir a /entrar y volver.
+// políticas → revisa y confirma → confirmación. El estado vive en sessionStorage (salvo la ficha y
+// las notas) para sobrevivir al ir a /entrar y volver.
+//
+// ESPEC §9: con configuracion.firma_en_linea = false (decisión de Ópalo) la reserva no pide ni menciona
+// la firma: el consentimiento se revisa y se firma en el spa, en la tablet de la cabina, y la cita se
+// crea sin firma. Con true vuelve el flujo anterior: el paso 5 muestra el consentimiento y el 6 lo firma
+// en pantalla (PasoFirma).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
-import type { Catalogo, Configuracion, Credito, DatosFirma, Slot } from '../../lib/api/tipos';
+import type { Catalogo, Configuracion, Credito, DatosFirma, Slot, SolicitudReserva } from '../../lib/api/tipos';
 import { edad, fechaLocal, mensajeError } from '../../lib/format';
 import { useSesion } from '../../lib/sesion';
 import { useAsync } from '../../lib/useAsync';
@@ -16,12 +21,14 @@ import {
   estadoInicial,
   fichaDesdeBorrador,
   guardarEstado,
-  TITULOS_PASOS,
+  nombresPasos,
+  titulosPasos,
   type Confirmacion as DatosConfirmacion,
   type EstadoReserva,
   type FichaBorrador,
   type Paso,
 } from '../../components/reserva/estado';
+import { PasoConfirmar } from '../../components/reserva/PasoConfirmar';
 import { PasoDatos } from '../../components/reserva/PasoDatos';
 import { PasoFicha } from '../../components/reserva/PasoFicha';
 import { PasoFirma } from '../../components/reserva/PasoFirma';
@@ -121,11 +128,12 @@ function Asistente({ config, cat, onReservada }: { config: Configuracion; cat: C
   const [cargandoDuracion, setCargandoDuracion] = useState(false);
   const [creditos, setCreditos] = useState<Credito[]>([]);
   const [enviando, setEnviando] = useState(false);
-  const [errorFirma, setErrorFirma] = useState<string | null>(null);
+  const [errorFinal, setErrorFinal] = useState<string | null>(null);
   const fichaGuardada = useRef<string | null>(null);
   const tituloRef = useRef<HTMLHeadingElement>(null);
   const pasoPrevio = useRef<number | null>(null);
 
+  const firmaEnLinea = config.firma_en_linea === true;
   const porId = useMemo(() => mapaServicios(cat), [cat]);
   const paquetesPorId = useMemo(() => mapaPaquetes(cat), [cat]);
   const usuario = sesion?.user_id ?? null;
@@ -173,7 +181,8 @@ function Asistente({ config, cat, onReservada }: { config: Configuracion; cat: C
   const servicios = useMemo(() => serviciosDeItems(items, cat), [items, cat]);
   const tipos = useMemo(() => tiposConsentimiento(servicios), [servicios]);
   const firmaFicha = `${usuario}|${slugsCategorias.join(',')}`;
-  const firmaPoliticas = `${usuario}|${tipos.join(',')}`;
+  // Sin firma en línea el paso de políticas no depende de los servicios (sólo términos, privacidad y cancelación).
+  const firmaPoliticas = firmaEnLinea ? `${usuario}|${tipos.join(',')}` : `${usuario}|`;
 
   // Preselección desde ?servicio=, ?paquete= o ?credito=.
   useEffect(() => {
@@ -313,7 +322,7 @@ function Asistente({ config, cat, onReservada }: { config: Configuracion; cat: C
   }, [pasoVisible]);
 
   const irA = useCallback((n: Paso) => {
-    setErrorFirma(null);
+    setErrorFinal(null);
     setEstado((e) => ({ ...e, paso: n }));
   }, []);
 
@@ -354,10 +363,17 @@ function Asistente({ config, cat, onReservada }: { config: Configuracion; cat: C
   const anios = sesion?.cliente?.fecha_nacimiento ? edad(sesion.cliente.fecha_nacimiento, fechaLocal()) : null;
   const requiereTutor = anios !== null && anios < config.edad_mayoria;
 
-  async function confirmar(firma: DatosFirma) {
+  /**
+   * Guarda la ficha, acepta las políticas pendientes y crea la cita. Con firma en línea llega la firma del
+   * paso 6; sin ella (ESPEC §9) la cita se crea sin firma y sólo se manda, si es menor de edad, el nombre
+   * de quien la acompaña (la base lo pide igual). Ese nombre viaja en `firma.tutor_nombre`, sin firmante
+   * ni trazo. Como sin firma en línea no se guarda en ningún consentimiento, también va en las notas de la
+   * cita para que el equipo sepa quién la acompaña.
+   */
+  async function confirmar(datos: { firma: DatosFirma } | { tutor: string | null }) {
     if (!estado.slot || !ficha) return;
     setEnviando(true);
-    setErrorFirma(null);
+    setErrorFinal(null);
     try {
       const fichaFinal = fichaDesdeBorrador(ficha);
       const huella = JSON.stringify(fichaFinal);
@@ -367,13 +383,17 @@ function Asistente({ config, cat, onReservada }: { config: Configuracion; cat: C
       }
       if (estado.politicasMarcadas.length) await api.aceptarPoliticas(estado.politicasMarcadas);
       const slot: Slot = estado.slot;
-      const resultado = await api.reservarCita({
+      const tutor = 'tutor' in datos ? datos.tutor?.trim() || null : null;
+      const notas = [estado.notas.trim(), tutor ? `Me acompaña: ${tutor} (mamá, papá o tutor).` : ''].filter(Boolean).join('\n');
+      const solicitud: SolicitudReserva = {
         items: aItemsReserva(items),
         inicio: slot.inicio,
         personal_id: slot.personal_id,
-        notas: estado.notas.trim() || null,
-        firma,
-      });
+        notas: notas || null,
+      };
+      if ('firma' in datos) solicitud.firma = datos.firma;
+      else if (tutor) solicitud.firma = { nombre_firmante: '', firma_svg: '', tutor_nombre: tutor };
+      const resultado = await api.reservarCita(solicitud);
       // Datos definitivos (los calcula el servidor); si no se pueden leer, usamos lo que ya sabemos.
       let cita = null;
       try {
@@ -404,7 +424,7 @@ function Asistente({ config, cat, onReservada }: { config: Configuracion; cat: C
       const msg = mensajeError(e);
       const destino = pasoDelError(msg);
       if (destino === null) {
-        setErrorFirma(msg);
+        setErrorFinal(msg);
       } else {
         const patch: Partial<EstadoReserva> = { paso: destino };
         if (destino === 2) Object.assign(patch, { slot: null, slotPara: null });
@@ -418,7 +438,10 @@ function Asistente({ config, cat, onReservada }: { config: Configuracion; cat: C
         setEstado((x) => ({ ...x, ...patch }));
         setAviso({
           paso: destino,
-          texto: destino === 2 ? `${msg} Conservamos todo lo demás: sólo elige otra hora y vuelve a firmar.` : msg,
+          texto:
+            destino === 2
+              ? `${msg} Conservamos todo lo demás: sólo elige otra hora y vuelve a ${firmaEnLinea ? 'firmar' : 'confirmar'}.`
+              : msg,
           tipo: 'error',
         });
       }
@@ -433,14 +456,14 @@ function Asistente({ config, cat, onReservada }: { config: Configuracion; cat: C
     setEstado(estadoInicial());
   }
 
-  const titulo = confirmacion ? '¡Listo! Tu cita está reservada' : TITULOS_PASOS[paso];
+  const titulo = confirmacion ? '¡Listo! Tu cita está reservada' : titulosPasos(firmaEnLinea)[paso];
   useEffect(() => {
     onReservada?.(!!confirmacion);
   }, [confirmacion, onReservada]);
 
   return (
     <div className="rv-asistente">
-      {!confirmacion && <Progreso paso={paso} maxPaso={maxPaso} onIr={irA} />}
+      {!confirmacion && <Progreso paso={paso} maxPaso={maxPaso} nombres={nombresPasos(firmaEnLinea)} onIr={irA} />}
       <div className={confirmacion ? 'rv-sola' : 'rv-rejilla'}>
         <section className="rv-principal" aria-labelledby="rv-titulo-paso">
           <h2 id="rv-titulo-paso" className="rv-titulo-paso" tabIndex={-1} ref={tituloRef}>
@@ -498,13 +521,14 @@ function Asistente({ config, cat, onReservada }: { config: Configuracion; cat: C
             />
           ) : paso === 5 ? (
             <PasoPoliticas
+              firmaEnLinea={firmaEnLinea}
               tipos={tipos}
               marcadas={estado.politicasMarcadas}
               consentimientoLeido={estado.consentimientoLeido}
               onAtras={() => irA(4)}
               onListo={(r) => avanzar({ politicasMarcadas: r.marcadas, consentimientoLeido: r.consentimientoLeido, politicasPara: firmaPoliticas })}
             />
-          ) : estado.slot ? (
+          ) : !estado.slot ? null : firmaEnLinea ? (
             <PasoFirma
               lineas={lineas}
               total={total}
@@ -516,16 +540,30 @@ function Asistente({ config, cat, onReservada }: { config: Configuracion; cat: C
               notas={estado.notas}
               onNotas={(t) => setEstado((e) => ({ ...e, notas: t }))}
               enviando={enviando}
-              error={errorFirma}
+              error={errorFinal}
               onAtras={() => irA(5)}
-              onConfirmar={confirmar}
+              onConfirmar={(firma) => void confirmar({ firma })}
             />
-          ) : null}
+          ) : (
+            <PasoConfirmar
+              lineas={lineas}
+              total={total}
+              duracionMin={duracionMin}
+              slot={estado.slot}
+              requiereTutor={requiereTutor}
+              notas={estado.notas}
+              onNotas={(t) => setEstado((e) => ({ ...e, notas: t }))}
+              enviando={enviando}
+              error={errorFinal}
+              onAtras={() => irA(5)}
+              onConfirmar={(tutor) => void confirmar({ tutor })}
+            />
+          )}
         </section>
 
         {!confirmacion && (
           // En el paso 6 el resumen ya está dentro del paso: en pantallas chicas no se repite abajo.
-          <aside className={`rv-resumen${paso === 6 ? ' rv-resumen-firma' : ''}`} aria-label="Resumen de tu cita">
+          <aside className={`rv-resumen${paso === 6 ? ' rv-resumen-final' : ''}`} aria-label="Resumen de tu cita">
             <ResumenReserva
               lineas={lineas}
               total={total}

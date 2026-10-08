@@ -1,5 +1,7 @@
-// Mis citas: próximas y pasadas, con quién te atiende, tiempo estimado, firma pendiente,
-// cancelación (con la anticipación de la política) y "Agregar a mi calendario".
+// Mis citas: próximas y pasadas, con quién te atiende, tiempo estimado, cancelación (con la
+// anticipación de la política) y "Agregar a mi calendario". Con configuracion.firma_en_linea = true
+// también avisa de la firma pendiente; con false (decisión de Ópalo, ESPEC §9) la firma se hace en el
+// spa y aquí no se menciona.
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
@@ -7,7 +9,7 @@ import type { CitaDetalle, Configuracion, EstadoCita } from '../../lib/api/tipos
 import { dinero, duracion, enlaceWhatsApp, ETIQUETA_ESTADO_CITA, fechaHora, fechaLarga, hora, telefonoBonito, ZONA } from '../../lib/format';
 import { useAccion, useAsync } from '../../lib/useAsync';
 import { Cargando, MensajeError, Vacio } from '../ui/Estado';
-import { descargarIcs } from '../reserva/ics';
+import { descargarIcs, eventoDeCita } from '../reserva/ics';
 import { horasHasta, totalCita, unirConY } from '../reserva/utilidades';
 import { Modal } from './Modal';
 
@@ -152,7 +154,7 @@ function TarjetaCita({ cita, config, proxima = false, onCancelar }: { cita: Cita
   const faltan = horasHasta(cita.inicio);
   const cancelable = proxima && (cita.estado === 'pendiente' || cita.estado === 'confirmada');
   const aTiempo = faltan >= config.horas_cancelacion;
-  const firmable = proxima && cita.consentimientos_firmados === 0 && ACTIVAS.includes(cita.estado);
+  const firmable = config.firma_en_linea === true && proxima && cita.consentimientos_firmados === 0 && ACTIVAS.includes(cita.estado);
   const servicios = cita.items.map((i) => i.nombre);
   const whatsapp = enlaceWhatsApp(
     config.telefono_whatsapp,
@@ -160,21 +162,7 @@ function TarjetaCita({ cita, config, proxima = false, onCancelar }: { cita: Cita
   );
 
   function agregarCalendario() {
-    descargarIcs(
-      {
-        uid: cita.id,
-        inicio: cita.inicio,
-        fin: cita.fin,
-        titulo: `Cita en ${config.nombre_negocio}: ${unirConY(servicios)}`,
-        descripcion: [
-          `Te atiende ${cita.personal_nombre}.`,
-          `Llega puntual: tienes ${config.tolerancia_retraso_min} minutos de tolerancia.`,
-          `Para cancelar, hazlo con ${config.horas_cancelacion} horas de anticipación o escríbenos por WhatsApp al ${telefonoBonito(config.telefono_whatsapp)}.`,
-        ].join('\n'),
-        lugar: config.direccion,
-      },
-      `cita-opalo-${cita.inicio.slice(0, 10)}.ics`,
-    );
+    descargarIcs(eventoDeCita({ ...cita, servicios }, config), `cita-opalo-${cita.inicio.slice(0, 10)}.ics`);
   }
 
   return (

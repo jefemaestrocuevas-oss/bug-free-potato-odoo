@@ -95,9 +95,10 @@ begin
   perform pruebas.como(v_admin);
   perform public.publicar_politica('consentimiento_depilacion', 'Consentimiento depilación (v2)', 'Texto nuevo.');
   perform pruebas.como(v_ana);
+  -- Ana firmó en la cabina el consentimiento de depilación de sus dos visitas pasadas (cejas y axilas).
   perform pruebas.afirma((select count(*) from public.consentimientos co
                             join public.politicas p on p.id = co.politica_id
-                           where p.tipo = 'consentimiento_depilacion' and p.version = 1) >= 3,
+                           where p.tipo = 'consentimiento_depilacion' and p.version = 1) >= 2,
                          'la clienta ve la versión 1 que firmó aunque ya no esté activa');
   perform pruebas.como_postgres();
   raise notice 'OK - documentos firmados visibles para su dueña';

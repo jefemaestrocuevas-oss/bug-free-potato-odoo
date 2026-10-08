@@ -1,4 +1,7 @@
-// Paso 5: políticas generales pendientes de aceptar + consentimiento(s) informado(s) que se firmarán.
+// Paso 5: políticas generales pendientes de aceptar (términos, aviso de privacidad y cancelación).
+// Con configuracion.firma_en_linea = true también muestra el consentimiento informado que se firma en
+// el paso 6; con false (decisión de Ópalo, ESPEC §9) el consentimiento se revisa en el spa y aquí no
+// aparece.
 import { useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import { POLITICAS_GENERALES, type Politica, type TipoPolitica } from '../../lib/api/tipos';
@@ -12,6 +15,9 @@ import { ORDEN_TIPOS } from './utilidades';
 const MSG_POLITICAS = 'Antes de reservar necesitas aceptar los términos, el aviso de privacidad y la política de cancelación.';
 
 interface Props {
+  /** configuracion.firma_en_linea */
+  firmaEnLinea: boolean;
+  /** Tipos de consentimiento de los servicios (sólo se usan con firma en línea). */
   tipos: TipoPolitica[];
   marcadas: string[];
   consentimientoLeido: boolean;
@@ -19,7 +25,7 @@ interface Props {
   onListo: (r: { marcadas: string[]; consentimientoLeido: boolean }) => void;
 }
 
-export function PasoPoliticas({ tipos, marcadas: marcadasIniciales, consentimientoLeido: leidoInicial, onAtras, onListo }: Props) {
+export function PasoPoliticas({ firmaEnLinea, tipos, marcadas: marcadasIniciales, consentimientoLeido: leidoInicial, onAtras, onListo }: Props) {
   const datos = useAsync(() => Promise.all([api.getPoliticasVigentes(), api.getMisAceptaciones()]), []);
   const [marcadas, setMarcadas] = useState<string[]>(marcadasIniciales);
   const [leido, setLeido] = useState(leidoInicial);
@@ -38,7 +44,7 @@ export function PasoPoliticas({ tipos, marcadas: marcadasIniciales, consentimien
   const [vigentes, aceptadas] = datos.datos;
   const orden = (a: Politica, b: Politica) => ORDEN_TIPOS.indexOf(a.tipo) - ORDEN_TIPOS.indexOf(b.tipo);
   const pendientes = vigentes.filter((p) => POLITICAS_GENERALES.includes(p.tipo) && !aceptadas.includes(p.id)).sort(orden);
-  const consentimientos = vigentes.filter((p) => tipos.includes(p.tipo)).sort(orden);
+  const consentimientos = firmaEnLinea ? vigentes.filter((p) => tipos.includes(p.tipo)).sort(orden) : [];
   const faltanPoliticas = pendientes.filter((p) => !marcadas.includes(p.id));
 
   function alternar(id: string, si: boolean) {
@@ -63,7 +69,8 @@ export function PasoPoliticas({ tipos, marcadas: marcadasIniciales, consentimien
   return (
     <div className="rv-paso-cuerpo">
       <section className="rv-bloque" aria-labelledby="rv-pol-generales">
-        <h3 className="rv-subtitulo" id="rv-pol-generales">
+        {/* Sin firma en línea el título del paso ya dice "Nuestras políticas": no se repite a la vista. */}
+        <h3 className={firmaEnLinea ? 'rv-subtitulo' : 'sr-only'} id="rv-pol-generales">
           Nuestras políticas
         </h3>
         {pendientes.length === 0 ? (
@@ -159,13 +166,13 @@ export function PasoPoliticas({ tipos, marcadas: marcadasIniciales, consentimien
         </section>
       )}
 
-      {consentimientos.length === 0 && tipos.length > 0 && (
+      {firmaEnLinea && consentimientos.length === 0 && tipos.length > 0 && (
         <p className="aviso aviso-info">
           El consentimiento informado de tu servicio aún no está publicado; te lo daremos a firmar en cabina antes de empezar.
         </p>
       )}
 
-      <PieAsistente onAtras={onAtras} onContinuar={continuar} textoContinuar="Continuar a la firma" />
+      <PieAsistente onAtras={onAtras} onContinuar={continuar} textoContinuar={firmaEnLinea ? 'Continuar a la firma' : 'Continuar'} />
     </div>
   );
 }

@@ -39,6 +39,7 @@ const CONFIG: Configuracion = {
   edad_mayoria: 18,
   vigencia_creditos_dias: 365,
   fecha_apertura: '2026-10-31',
+  firma_en_linea: false,
 };
 
 function sesion(extra: Partial<Cliente> = {}): Sesion {
@@ -73,12 +74,12 @@ async function esperar() {
     });
 }
 
-async function montarPaso(s: Sesion) {
+async function montarPaso(s: Sesion | null, config: Configuracion = CONFIG) {
   const onListo = vi.fn();
   await act(async () => {
     raiz.render(
       <MemoryRouter>
-        <PasoDatos config={CONFIG} sesion={s} refrescar={m.refrescar} onAtras={() => {}} onListo={onListo} />
+        <PasoDatos config={config} sesion={s} refrescar={m.refrescar} onAtras={() => {}} onListo={onListo} />
       </MemoryRouter>,
     );
   });
@@ -167,6 +168,32 @@ describe('PasoDatos (reserva)', () => {
     await montarPaso(sesion());
     expect(contenedor.querySelector('[role=alert]')).toBeNull();
     expect(continuar().disabled).toBe(false);
+  });
+
+  // ESPEC §9: con firma_en_linea = false la reserva no menciona la firma (se hace en el spa).
+  // "firm" al inicio de palabra: firma, firmar, firmes… (no "confirmar").
+  const SIN_FIRMA = /\bfirm/i;
+  it('firma_en_linea = false: ni la invitación a crear cuenta ni el aviso de menores hablan de firmar', async () => {
+    await montarPaso(null);
+    expect(contenedor.textContent).toContain('guardamos tu ficha de salud de forma segura');
+    expect(contenedor.textContent).not.toMatch(SIN_FIRMA);
+
+    await montarPaso(sesion({ fecha_nacimiento: null }));
+    await act(async () => escribir(contenedor.querySelector<HTMLInputElement>('#rv-dato-fecha_nacimiento')!, '2010-02-01'));
+    expect(contenedor.textContent).toContain('tu mamá, papá o tutor debe acompañarte a la cita. Antes de confirmar te pedimos su nombre.');
+    expect(contenedor.querySelector('#rv-dato-fecha-ayuda')?.textContent).toContain('te acompaña a tu cita');
+    expect(contenedor.textContent).not.toMatch(SIN_FIRMA);
+  });
+
+  it('firma_en_linea = true: conserva los textos de la firma en pantalla', async () => {
+    const conFirma = { ...CONFIG, firma_en_linea: true };
+    await montarPaso(null, conFirma);
+    expect(contenedor.textContent).toContain('tu ficha de salud y tus firmas de forma segura');
+
+    await montarPaso(sesion({ fecha_nacimiento: null }), conFirma);
+    await act(async () => escribir(contenedor.querySelector<HTMLInputElement>('#rv-dato-fecha_nacimiento')!, '2010-02-01'));
+    expect(contenedor.textContent).toContain('escribir su nombre cuando firmes el consentimiento');
+    expect(contenedor.querySelector('#rv-dato-fecha-ayuda')?.textContent).toContain('firma contigo');
   });
 });
 

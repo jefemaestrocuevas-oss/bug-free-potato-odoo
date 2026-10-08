@@ -1,7 +1,7 @@
 // Botones de acción de una cita según su estado (confirmar, iniciar, completar, pago, firma…).
 import { useState } from 'react';
 import { api, type CitaDetalle, type EstadoCita } from '../../lib/api';
-import { fechaHora } from '../../lib/format';
+import { fechaHora, fechaLarga, fechaLocal } from '../../lib/format';
 import { useAccion } from '../../lib/useAsync';
 import { MensajeError } from '../ui/Estado';
 import { FirmarCabina } from './FirmarCabina';
@@ -104,6 +104,9 @@ export function AccionesCita({ cita, onCambio, onAviso }: Props) {
 
   const firmada = cita.consentimientos_firmados > 0;
   const activa = ACTIVAS.includes(cita.estado);
+  // Una cita de otro día (futuro) no se inicia, completa ni marca como "no asistió" antes de tiempo: los
+  // insumos se descontarían y la cita contaría en el mes equivocado, y la clienta la vería como pasada.
+  const futura = fechaLocal(new Date(cita.inicio)) > fechaLocal();
   const saldo = cita.total - cita.pagado;
   // Ya liquidada (con precio definido): sin botón de pago, para no cobrar dos veces.
   const liquidada = cita.total > 0 && saldo <= 0.005;
@@ -117,7 +120,7 @@ export function AccionesCita({ cita, onCambio, onAviso }: Props) {
             Confirmar
           </button>
         )}
-        {(cita.estado === 'confirmada' || cita.estado === 'pendiente') && (
+        {!futura && (cita.estado === 'confirmada' || cita.estado === 'pendiente') && (
           <button
             type="button"
             className={`${b} ${cita.estado === 'confirmada' ? 'btn-primario' : 'btn-secundario'}`}
@@ -127,7 +130,7 @@ export function AccionesCita({ cita, onCambio, onAviso }: Props) {
             Iniciar
           </button>
         )}
-        {(cita.estado === 'en_curso' || cita.estado === 'confirmada') && (
+        {!futura && (cita.estado === 'en_curso' || cita.estado === 'confirmada') && (
           <button
             type="button"
             className={`${b} ${cita.estado === 'en_curso' ? 'btn-primario' : 'btn-secundario'}`}
@@ -147,7 +150,7 @@ export function AccionesCita({ cita, onCambio, onAviso }: Props) {
             Registrar pago
           </button>
         )}
-        {(cita.estado === 'pendiente' || cita.estado === 'confirmada') && (
+        {!futura && (cita.estado === 'pendiente' || cita.estado === 'confirmada') && (
           <button
             type="button"
             className={`${b} btn-texto`}
@@ -184,6 +187,9 @@ export function AccionesCita({ cita, onCambio, onAviso }: Props) {
           </button>
         )}
       </div>
+      {futura && (cita.estado === 'pendiente' || cita.estado === 'confirmada') && (
+        <p className="ayuda adm-sin-margen">Se inicia y se completa el día de la cita, el {fechaLarga(cita.inicio)}.</p>
+      )}
       <MensajeError error={accion.error} />
 
       {modal === 'pago' && (

@@ -17,12 +17,14 @@ import {
   IconoInventario,
   IconoMenu,
   IconoCerrar,
+  IconoMostrador,
   IconoPedidos,
   IconoPoliticas,
   IconoResultados,
   IconoResumen,
   IconoSalir,
   IconoSitio,
+  IconoTaller,
 } from '../components/admin/Iconos';
 import { useConfirmar } from '../components/admin/Modal';
 import { ModoCabina } from '../components/admin/ModoCabina';
@@ -41,7 +43,9 @@ const OPERACION: Enlace[] = [
   { to: '/admin', texto: 'Resumen', Icono: IconoResumen, fin: true },
   { to: '/admin/agenda', texto: 'Agenda', Icono: IconoAgenda },
   { to: '/admin/clientes', texto: 'Clientas', Icono: IconoClientas },
+  { to: '/admin/mostrador', texto: 'Mostrador', Icono: IconoMostrador },
   { to: '/admin/pedidos', texto: 'Pedidos y pagos', Icono: IconoPedidos },
+  { to: '/admin/taller', texto: 'Taller', Icono: IconoTaller },
   { to: '/admin/inventario', texto: 'Inventario', Icono: IconoInventario },
   { to: '/admin/costos', texto: 'Costos y márgenes', Icono: IconoCostos },
 ];

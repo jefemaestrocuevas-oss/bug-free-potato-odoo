@@ -104,6 +104,25 @@ export const IconoPoliticas = (p: P) => (
   </Svg>
 );
 
+/** Taller: barra de jabón con burbujas. */
+export const IconoTaller = (p: P) => (
+  <Svg {...p}>
+    <rect x="3" y="11.5" width="13.5" height="8.5" rx="2.6" />
+    <path d="M6.2 15h4.5" />
+    <circle cx="18" cy="7.2" r="2.6" />
+    <circle cx="12.6" cy="5.4" r="1.6" />
+    <circle cx="20" cy="13" r="1.3" />
+  </Svg>
+);
+
+/** Mostrador: bolsa de compra. */
+export const IconoMostrador = (p: P) => (
+  <Svg {...p}>
+    <path d="M4.8 8.2h14.4l-1.1 12.3H5.9Z" />
+    <path d="M8.8 10.5V6.8a3.2 3.2 0 0 1 6.4 0v3.7" />
+  </Svg>
+);
+
 export const IconoMenu = (p: P) => (
   <Svg {...p}>
     <path d="M4 7h16M4 12h16M4 17h16" />

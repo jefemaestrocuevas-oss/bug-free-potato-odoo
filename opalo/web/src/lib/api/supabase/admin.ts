@@ -8,31 +8,42 @@ import {
   aCitaDetalle,
   aClienteResumen,
   aConsentimiento,
+  aCostoFormula,
   aCostoServicio,
   aCredito,
   aFichaSalud,
+  aFormula,
   aGasto,
   aGastoPorVencer,
   aGastoRecurrente,
   agrupar,
   aHorario,
+  aLote,
+  aMargenProducto,
   aMovimiento,
   aPedidoDetalle,
   aPolitica,
   aProducto,
   aProductoReposicion,
   aProveedor,
+  aResultadoLote,
   aResultadoMensual,
+  aResultadoPedido,
   aResultadoReserva,
   bool,
+  colorHex,
   COLUMNAS_CAPACITACION,
   COLUMNAS_CITA_DETALLE,
   COLUMNAS_CLIENTE_RESUMEN,
+  COLUMNAS_COSTO_FORMULA,
   COLUMNAS_COSTO_SERVICIO,
   COLUMNAS_CREDITO,
+  COLUMNAS_FORMULA,
   COLUMNAS_GASTO,
   COLUMNAS_GASTO_POR_VENCER,
   COLUMNAS_GASTO_RECURRENTE,
+  COLUMNAS_LOTE,
+  COLUMNAS_MARGEN_PRODUCTO,
   COLUMNAS_PEDIDO_DETALLE,
   COLUMNAS_PERSONAL,
   COLUMNAS_PRODUCTO,
@@ -55,7 +66,7 @@ import {
   type Fila,
 } from './conversion';
 import type { Contexto } from './contexto';
-import { consultaConsentimientos, consultaFichaVigente } from './clienta';
+import { consultaConsentimientos, consultaFichaVigente, itemsPedido } from './clienta';
 import { COLUMNAS_POLITICA, itemsReserva } from './publico';
 import { MSG_SUPABASE } from './errores';
 
@@ -143,6 +154,13 @@ const numeroONulo = (v: unknown): number | null => {
   return Number.isFinite(n) ? Math.max(0, n) : null;
 };
 
+/** Número tal cual (sin recortar a ≥ 0) o null: lo valida la base con su propio mensaje. */
+const numeroCrudo = (v: unknown): number | null => {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
 const porNombre = (a: { nombre: string }, b: { nombre: string }) => a.nombre.localeCompare(b.nombre, 'es');
 
 // ---------------------------------------------------------------------------
@@ -199,7 +217,7 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
       const desde = isoDesdeLocal(hoy, '00:00');
       const hasta = isoDesdeLocal(sumarDias(hoy, 1), '00:00');
       const mes = inicioMes(hoy);
-      const [admin, citas, porRevisar, reposicion, pedidosPendientes, gastos, meses] = await Promise.all([
+      const [admin, citas, porRevisar, reposicion, pedidosPendientes, porEntregar, lotesListos, gastos, meses] = await Promise.all([
         esAdmin(),
         ctx.filas(
           sb
@@ -215,6 +233,25 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
         ),
         ctx.filas(sb.from('v_reposicion').select(COLUMNAS_REPOSICION)),
         ctx.contar(sb.from('pedidos').select('id', { count: 'exact', head: true }).eq('estado', 'pendiente_pago')),
+        // Pagados con productos que falta entregar en el spa (ESPEC §10.3).
+        ctx.contar(
+          sb
+            .from('v_pedidos_detalle')
+            .select('id', { count: 'exact', head: true })
+            .eq('estado', 'pagado')
+            .eq('tiene_productos', true)
+            .is('entregado_en', null),
+        ),
+        // Lotes en curado que ya cumplieron su fecha: listos para liberar (ESPEC §10.2).
+        ctx.filas(
+          sb
+            .from('v_lotes')
+            .select(COLUMNAS_LOTE)
+            .eq('estado', 'en_curado')
+            .lte('dias_para_listo', 0)
+            .order('listo_desde')
+            .order('codigo'),
+        ),
         // Las vistas de admin devuelven vacío para el personal (where es_admin()).
         ctx.filas(sb.from('v_gastos_por_vencer').select(COLUMNAS_GASTO_POR_VENCER).neq('estado', 'al_corriente')),
         ctx.filas(sb.from('v_resultado_mensual').select(COLUMNAS_RESULTADO_MENSUAL).eq('mes', mes)),
@@ -226,6 +263,8 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
         gastos_por_vencer: admin ? gastos.map(aGastoPorVencer) : [],
         mes_actual: admin ? (meses[0] ? aResultadoMensual(meses[0]) : resultadoVacio(mes)) : null,
         pedidos_pendientes: pedidosPendientes,
+        pedidos_por_entregar: porEntregar,
+        lotes_listos: lotesListos.map(aLote),
       };
     },
 
@@ -409,6 +448,21 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
           vendible_en_linea: !!p.vendible_en_linea,
           activo: p.activo !== false,
           notas: limpio(p.notas),
+          // Ficha pública de la tienda (ESPEC §10.1). El slug va tal cual lo escribieron: la base lo
+          // normaliza y, si viene vacío y el producto se vende en línea o es jabón/vela/set, lo arma
+          // con el nombre sin repetir (-2, -3…); también exige pieza (pz, contenido 1) para la tienda.
+          slug: limpio(p.slug),
+          descripcion: limpio(p.descripcion),
+          aroma: limpio(p.aroma),
+          ingredientes: limpio(p.ingredientes),
+          modo_uso: limpio(p.modo_uso),
+          advertencias: limpio(p.advertencias),
+          contenido_neto: limpio(p.contenido_neto),
+          foto_url: limpio(p.foto_url),
+          color_hex: colorHex(p.color_hex),
+          destacado: !!p.destacado,
+          hecho_en_opalo: !!p.hecho_en_opalo,
+          orden: Math.round(Number(p.orden)) || 0,
         },
         p.id,
         'personal',
@@ -756,6 +810,94 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
 
     async publicarPolitica(tipo, titulo, contenido_md) {
       await ctx.rpc('publicar_politica', { p_tipo: tipo, p_titulo: (titulo ?? '').trim(), p_contenido_md: contenido_md ?? '' });
+    },
+
+    // ------------------------------- taller (ESPEC §10.2) -------------------------------
+    async getFormulas() {
+      // Fórmula e insumos en una sola consulta (formula_items embebido).
+      const fs = await ctx.filas(sb.from('formulas').select(COLUMNAS_FORMULA).order('nombre'));
+      return fs.map(aFormula).sort(porNombre);
+    },
+
+    async guardarFormula(f) {
+      // Fórmula y formula_items en una sola transacción (guardar_formula; p_id null = nueva). La base
+      // valida (al menos un insumo, cantidades, rendimiento) y responde con sus textos.
+      const data = await ctx.rpc('guardar_formula', {
+        p_id: f.id || null,
+        p_datos: {
+          producto_id: f.producto_id || null,
+          nombre: (f.nombre ?? '').trim(),
+          rendimiento_piezas: numeroCrudo(f.rendimiento_piezas),
+          dias_curado: numeroCrudo(f.dias_curado) ?? 0,
+          instrucciones: limpio(f.instrucciones),
+          activa: f.activa !== false,
+        },
+        p_items: (f.items ?? []).map((it) => ({ insumo_id: it.insumo_id || null, cantidad: numeroCrudo(it.cantidad) })),
+      });
+      return texto(data);
+    },
+
+    async getCostosFormulas() {
+      const fs = await ctx.filas(sb.from('v_costo_formulas').select(COLUMNAS_COSTO_FORMULA).order('producto_nombre').order('nombre'));
+      return fs
+        .map(aCostoFormula)
+        .sort((a, b) => a.producto_nombre.localeCompare(b.producto_nombre, 'es') || porNombre(a, b));
+    },
+
+    async getLotes(estado) {
+      let q = sb.from('v_lotes').select(COLUMNAS_LOTE);
+      if (estado) q = q.eq('estado', estado);
+      const fs = await ctx.filas(q.order('elaborado_en', { ascending: false }).order('codigo', { ascending: false }));
+      return fs.map(aLote);
+    },
+
+    async registrarLote(l) {
+      const items = (l.items ?? []).filter(Boolean);
+      const data = await ctx.rpc('registrar_lote', {
+        p_producto_id: l.producto_id,
+        p_formula_id: l.formula_id || null,
+        p_piezas: numeroCrudo(l.piezas),
+        p_elaborado_en: l.elaborado_en && esFecha(l.elaborado_en) ? l.elaborado_en : null,
+        p_caduca_en: l.caduca_en && esFecha(l.caduca_en) ? l.caduca_en : null,
+        p_notas: limpio(l.notas),
+        // Lo que realmente se usó; null = la fórmula escalada a las piezas.
+        p_items: items.length ? items.map((it) => ({ insumo_id: it.insumo_id || null, cantidad: numeroCrudo(it.cantidad) })) : null,
+      });
+      return aResultadoLote(data);
+    },
+
+    async liberarLote(lote_id, piezas_obtenidas, forzar) {
+      await ctx.rpc('liberar_lote', {
+        p_lote_id: lote_id,
+        p_piezas_obtenidas: numeroCrudo(piezas_obtenidas),
+        p_forzar: forzar === true,
+      });
+    },
+
+    async descartarLote(lote_id, motivo) {
+      await ctx.rpc('descartar_lote', { p_lote_id: lote_id, p_motivo: limpio(motivo) });
+    },
+
+    async getMargenesProductos() {
+      const fs = await ctx.filas(sb.from('v_margen_productos').select(COLUMNAS_MARGEN_PRODUCTO).order('nombre'));
+      return fs.map(aMargenProducto).sort(porNombre);
+    },
+
+    // ------------------------------- mostrador (ESPEC §10.3) -------------------------------
+    async ventaMostrador(v) {
+      const propina = Number(v.propina);
+      const data = await ctx.rpc('venta_mostrador', {
+        p_items: itemsPedido(v.items),
+        p_metodo: v.metodo,
+        p_cliente_id: v.cliente_id || null,
+        p_propina: Number.isFinite(propina) && propina > 0 ? propina : 0,
+        p_notas: limpio(v.notas),
+      });
+      return aResultadoPedido(data);
+    },
+
+    async marcarEntregado(pedido_id) {
+      await ctx.rpc('marcar_entregado', { p_pedido_id: pedido_id });
     },
   };
 }

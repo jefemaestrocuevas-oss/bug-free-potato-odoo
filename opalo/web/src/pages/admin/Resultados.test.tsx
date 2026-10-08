@@ -21,6 +21,8 @@ function doceMeses(cambios: Record<string, Partial<ResultadoMensual>> = {}): Res
       ingresos: 0,
       propinas: 0,
       costo_insumos: 0,
+      costo_ventas: 0,
+      mermas: 0,
       compras: 0,
       gastos: 0,
       utilidad: 0,
@@ -85,7 +87,7 @@ describe('Resultados', () => {
     const utilidad = kpis.find((k) => k.textContent?.startsWith('Utilidad'))!;
     expect(utilidad.className).toContain('adm-kpi-error');
     expect(utilidad.textContent).toContain('-$700');
-    expect(kpis.find((k) => k.textContent?.startsWith('Gastos + costo de insumos'))!.textContent).toContain('$1,700');
+    expect(kpis.find((k) => k.textContent?.startsWith('Gastos y costos'))!.textContent).toContain('$1,700');
     expect(kpis.find((k) => k.textContent?.startsWith('Propinas'))!.textContent).toContain('Son de quien atiende, no del spa');
 
     const tabla = contenedor.querySelector('#res-tabla')!;
@@ -103,6 +105,31 @@ describe('Resultados', () => {
     // Utilidad también va como segunda columna (la que se ve en pantallas angostas).
     const encabezados = [...tabla.querySelectorAll('thead th')].map((th) => th.textContent?.trim());
     expect(encabezados.slice(0, 2)).toEqual(['Mes', 'Utilidad']);
+  });
+
+  it('la utilidad descuenta el costo de los jabones y velas vendidos y las mermas', async () => {
+    admin.getResultados.mockResolvedValue(
+      doceMeses({
+        [ACTUAL]: { ingresos: 2000, costo_insumos: 100, costo_ventas: 240.5, mermas: 60, gastos: 500, utilidad: 1099.5, flujo: 1500 },
+      }),
+    );
+    await montar();
+    const kpis = [...contenedor.querySelectorAll('.adm-kpi')];
+    const texto = (inicio: string) => kpis.find((k) => k.textContent?.startsWith(inicio))!.textContent;
+    expect(texto('Gastos y costos')).toContain('$900.50');
+    expect(texto('Costo de ventas')).toContain('$240.50');
+    expect(texto('Mermas')).toContain('$60');
+    expect(kpis.find((k) => k.textContent?.startsWith('Mermas'))!.className).toContain('adm-kpi-alerta');
+    expect(contenedor.textContent).toContain('La utilidad descuenta el costo de los jabones y velas vendidos');
+
+    const encabezados = [...contenedor.querySelectorAll('#res-tabla thead th')].map((th) => th.textContent?.trim());
+    expect(encabezados).toContain('Costo de ventas');
+    expect(encabezados).toContain('Mermas');
+    const fila = [...contenedor.querySelectorAll('#res-tabla tbody tr')][0];
+    const celdas = [...fila.querySelectorAll('td')].map((td) => td.textContent);
+    const i = encabezados.indexOf('Costo de ventas') - 1;
+    expect(celdas[i]).toBe('$240.50');
+    expect(celdas[i + 1]).toBe('$60');
   });
 
   it('un mes sin movimientos entre dos con actividad sí se muestra', async () => {

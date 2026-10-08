@@ -105,7 +105,7 @@ export default function PoliticasAdmin() {
             <h2 className="pola-seccion-titulo" id="pola-consentimientos">
               Consentimientos informados
             </h2>
-            <p className="pola-seccion-texto">La clienta firma el que corresponde a sus servicios al reservar (o en cabina). Sin consentimiento firmado, la cita no puede iniciar.</p>
+            <p className="pola-seccion-texto">La clienta firma el que corresponde a sus servicios en la tablet de la cabina, antes del servicio (no se le pide en línea). Sin consentimiento firmado, la cita no puede iniciar.</p>
             <div className="pola-rejilla">
               {[...CONSENTIMIENTOS, ...extras]
                 .map((t) => porTipo.get(t))

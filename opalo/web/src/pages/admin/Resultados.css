@@ -111,3 +111,9 @@
 /* ---------- Sin datos ---------- */
 .res-fuentes { display: inline-block; text-align: left; max-width: 62ch; margin: 0 auto; padding-left: 1.2em; color: var(--tinta-2); }
 .res-fuentes li { margin-bottom: 6px; }
+
+/* ---------- De qué se componen los costos ---------- */
+.res-costos-titulo { font-size: 1.2rem; margin: 18px 0 10px; color: var(--tinta-2); }
+.adm-kpis.res-kpis-costos .adm-kpi { background: var(--fondo); }
+.adm-kpis.res-kpis-costos .adm-kpi-valor { font-size: 1.35rem; }
+.res-costos-nota { margin: 10px 0 0; max-width: 80ch; }

@@ -56,12 +56,14 @@ export function PillEstadoPedido({ estado }: { estado: EstadoPedido }) {
   return <span className={`pill ${CLASE_PEDIDO[estado]}`}>{ETIQUETA_ESTADO_PEDIDO[estado] ?? estado}</span>;
 }
 
-/** Consentimiento firmado (sí/no). */
+/** Consentimiento firmado (sí/no). La firma siempre se hace en la tablet de cabina (ESPEC §9). */
 export function PillFirma({ firmados }: { firmados: number }) {
   return firmados > 0 ? (
     <span className="pill pill-exito">Firmado</span>
   ) : (
-    <span className="pill pill-error">Sin firma</span>
+    <span className="pill pill-error" title="Se firma en la tablet de cabina antes del servicio">
+      Falta firma
+    </span>
   );
 }
 

@@ -1,6 +1,8 @@
 // /cuenta/firmar/:citaId — firmar el consentimiento informado de una cita creada sin firma
-// (p. ej. agendada por WhatsApp o en mostrador).
-import { useEffect, useRef, useState } from 'react';
+// (p. ej. agendada por WhatsApp o en mostrador). Sólo con configuracion.firma_en_linea = true: con
+// false (decisión de Ópalo, ESPEC §9) la firma se hace en el spa, en la tablet de la cabina, y esta
+// página sólo lo explica y regresa a Mis citas.
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import type { DatosFirma, Politica } from '../../lib/api/tipos';
@@ -17,7 +19,69 @@ import './cuenta.css';
 
 const FIRMABLES = ['pendiente', 'confirmada', 'en_curso'];
 
+/** Mismo texto que la base (firmar_consentimiento_cita) cuando la firma no es en línea. */
+export const MSG_FIRMA_EN_SPA = 'La firma se hace en el spa, el día de tu cita.';
+
 export default function FirmarPendiente() {
+  const config = useAsync(() => api.getConfiguracion(), []);
+  const enSpa = !!config.datos && config.datos.firma_en_linea !== true;
+
+  useEffect(() => {
+    const anterior = document.title;
+    document.title = enSpa ? 'Consentimiento informado · Ópalo Spa' : 'Firmar consentimiento · Ópalo Spa';
+    return () => {
+      document.title = anterior;
+    };
+  }, [enSpa]);
+
+  if (config.cargando && !config.datos)
+    return (
+      <Marco titulo="Tu cita">
+        <Cargando texto="Cargando tu cita…" />
+      </Marco>
+    );
+  if (config.error || !config.datos)
+    return (
+      <Marco titulo="Tu cita">
+        <MensajeError error={config.error ?? 'No pudimos cargar tu cita.'} onReintentar={config.recargar} />
+      </Marco>
+    );
+  if (enSpa)
+    return (
+      <Marco titulo="Consentimiento informado">
+        <div className="pila">
+          <p className="aviso aviso-info" role="status">
+            {MSG_FIRMA_EN_SPA}
+          </p>
+          <p className="texto-2 cu-sin-margen">Tu especialista lo revisa contigo en cabina antes de empezar. No necesitas hacer nada más por ahora.</p>
+          <div className="fila">
+            <Link className="btn btn-primario" to="/cuenta/citas">
+              Ir a mis citas
+            </Link>
+          </div>
+        </div>
+      </Marco>
+    );
+  return <FirmarEnLinea />;
+}
+
+function Marco({ titulo, intro, children }: { titulo: string; intro?: string; children: ReactNode }) {
+  return (
+    <div className="cu">
+      <header className="cu-cabeza">
+        <div className="contenedor">
+          <p className="eyebrow">Mi cuenta</p>
+          <h1 className="cu-titulo">{titulo}</h1>
+          {intro && <p className="texto-2 cu-intro">{intro}</p>}
+        </div>
+      </header>
+      <div className="contenedor cu-contenido cu-angosto">{children}</div>
+    </div>
+  );
+}
+
+/** Firma en línea del consentimiento (sólo con configuracion.firma_en_linea = true). */
+function FirmarEnLinea() {
   const { citaId = '' } = useParams();
   const { sesion } = useSesion();
   const navigate = useNavigate();
@@ -32,14 +96,6 @@ export default function FirmarPendiente() {
   const [enviando, setEnviando] = useState(false);
   const errorRef = useRef<HTMLParagraphElement>(null);
   const leidoRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const anterior = document.title;
-    document.title = 'Firmar consentimiento · Ópalo Spa';
-    return () => {
-      document.title = anterior;
-    };
-  }, []);
 
   const volver = (
     <Link className="btn btn-secundario" to="/cuenta/citas">
@@ -269,15 +325,11 @@ export default function FirmarPendiente() {
   }
 
   return (
-    <div className="cu">
-      <header className="cu-cabeza">
-        <div className="contenedor">
-          <p className="eyebrow">Mi cuenta</p>
-          <h1 className="cu-titulo">Firma tu consentimiento</h1>
-          <p className="texto-2 cu-intro">Sin consentimiento firmado no podemos empezar tu servicio. Fírmalo aquí y llega directo a tu cita.</p>
-        </div>
-      </header>
-      <div className="contenedor cu-contenido cu-angosto">{contenido}</div>
-    </div>
+    <Marco
+      titulo="Firma tu consentimiento"
+      intro="Sin consentimiento firmado no podemos empezar tu servicio. Fírmalo aquí y llega directo a tu cita."
+    >
+      {contenido}
+    </Marco>
   );
 }

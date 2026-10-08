@@ -56,3 +56,16 @@
   .adm-pedidos-items-envoltura .adm-pedidos-items td:first-child { grid-column: 1 / -1; }
   .adm-pedidos-items-envoltura .adm-pedidos-items td[data-etiqueta]::before { content: attr(data-etiqueta); display: block; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--tinta-3); }
 }
+.adm-pedidos-estado { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.adm-pedidos-estado .adm-sub { flex-basis: 100%; }
+.adm-pedidos-folio-celda { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 0; }
+.adm-pedidos-origen .pill { font-size: 0.7rem; padding: 0 8px; }
+@container adm-clientas-tabla (max-width: 880px) {
+  .adm-pedidos-folio-celda { flex-direction: row; align-items: center; gap: 10px; }
+}
+.adm-pedidos-acciones { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.adm-pedidos-acciones .btn-secundario { white-space: normal; max-width: 112px; line-height: 1.2; padding-top: 4px; padding-bottom: 4px; text-align: center; }
+.adm-pedidos-tabla .adm-celda-acciones .btn + .btn { margin-left: 0; }
+@container adm-clientas-tabla (max-width: 880px) {
+  .adm-pedidos-acciones { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+}

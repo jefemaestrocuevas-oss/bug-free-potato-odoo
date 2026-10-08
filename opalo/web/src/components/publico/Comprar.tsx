@@ -26,8 +26,8 @@ export function BotonComprar({
       type="button"
       className={className}
       onClick={() => {
-        agregar(item);
-        setListo(true);
+        // Si ya no cabe (máximo por artículo), el aviso del carrito lo explica.
+        if (agregar(item).agregadas > 0) setListo(true);
       }}
       aria-label={`${texto}: agregar ${item.nombre} al carrito`}
     >
@@ -57,9 +57,9 @@ export function ComprarConRegalo({ item, permitirRegalo = true }: { item: NuevoI
       setError('Escribe el nombre de quien recibe el regalo.');
       return;
     }
-    agregar({ ...item, regalo_para: esRegalo ? para.trim() : null });
+    const { agregadas } = agregar({ ...item, regalo_para: esRegalo ? para.trim() : null });
     setError(null);
-    setListo(true);
+    if (agregadas > 0) setListo(true);
     setEsRegalo(false);
     setPara('');
   };

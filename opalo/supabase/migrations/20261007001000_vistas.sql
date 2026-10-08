@@ -21,11 +21,34 @@ select c.id, c.personal_id, c.nombre, c.institucion, c.tipo, c.fecha, c.horas
  where c.mostrar_en_sitio and p.activo and p.mostrar_en_sitio
  order by c.fecha desc nulls last, c.nombre;
 
+-- Tienda (ESPEC §10.1): sólo la ficha pública de lo que se vende en línea; nada de costos, stock
+-- mínimo, proveedor ni notas (el visitante no lee la tabla productos). Existencias en piezas
+-- completas; proximo_lote_listo = cuándo termina de curar el próximo lote (para "agotado").
 create view public.productos_tienda as
-select pr.id, pr.nombre, pr.marca, pr.presentacion, pr.precio_venta, (pr.stock_actual > 0) as hay_stock
+select pr.id,
+       pr.slug,
+       pr.nombre,
+       pr.categoria,
+       pr.marca,
+       pr.presentacion,
+       pr.descripcion,
+       pr.aroma,
+       pr.ingredientes,
+       pr.modo_uso,
+       pr.advertencias,
+       pr.contenido_neto,
+       pr.foto_url,
+       pr.color_hex,
+       pr.destacado,
+       pr.hecho_en_opalo,
+       pr.precio_venta,
+       greatest(floor(pr.stock_actual), 0)::int as stock_disponible,
+       (floor(pr.stock_actual) >= 1) as hay_stock,
+       (select min(l.listo_desde) from public.lotes_produccion l
+         where l.producto_id = pr.id and l.estado = 'en_curado') as proximo_lote_listo
   from public.productos pr
  where pr.activo and pr.vendible_en_linea and pr.precio_venta is not null
- order by pr.nombre;
+ order by pr.destacado desc, pr.categoria, pr.orden, pr.nombre;
 
 -- Notas internas de cada clienta (sólo personal). Personal y clientas comparten el rol
 -- "authenticated", así que la columna clientes.notas_internas no se le concede a ese rol
@@ -75,11 +98,13 @@ select c.id,
   left join public.personal p on p.id = c.personal_id
   left join public.cabinas cb on cb.id = c.cabina_id;
 
+-- La clienta ve los suyos; el personal, todos. Una venta de mostrador sin clienta registrada
+-- (cliente_id null) sale como 'Venta de mostrador' y ninguna clienta la ve.
 create view public.v_pedidos_detalle with (security_invoker = true) as
 select pe.id,
        pe.folio,
        pe.cliente_id,
-       btrim(cl.nombre || ' ' || coalesce(cl.apellidos, '')) as cliente_nombre,
+       coalesce(btrim(cl.nombre || ' ' || coalesce(cl.apellidos, '')), 'Venta de mostrador') as cliente_nombre,
        pe.estado,
        pe.total,
        coalesce((select sum(pg.monto) from public.pagos pg where pg.pedido_id = pe.id), 0)::numeric as pagado,
@@ -87,6 +112,9 @@ select pe.id,
        pe.notas,
        pe.creado_en,
        pe.pagado_en,
+       pe.origen,
+       pe.entregado_en,
+       exists (select 1 from public.pedido_items pi where pi.pedido_id = pe.id and pi.tipo = 'producto') as tiene_productos,
        coalesce((select jsonb_agg(jsonb_build_object(
                           'tipo', pi.tipo,
                           'descripcion', pi.descripcion,
@@ -97,7 +125,7 @@ select pe.id,
                    from public.pedido_items pi
                   where pi.pedido_id = pe.id), '[]'::jsonb) as items
   from public.pedidos pe
-  join public.clientes cl on cl.id = pe.cliente_id;
+  left join public.clientes cl on cl.id = pe.cliente_id;
 
 create view public.v_creditos with (security_invoker = true) as
 select cr.id,
@@ -217,9 +245,13 @@ select gr.id,
 -- ¿Cuánto ganamos? Últimos 12 meses con actividad hasta el mes en curso (un gasto con periodo
 -- futuro, p. ej. renta adelantada, no desplaza a los meses ya vividos), mes en hora local (admin).
 --   ingresos       = pagos sin propina (las cortesías no son ingreso)
---   costo_insumos  = −Σ consumo × costo_unitario
---   utilidad       = ingresos − costo_insumos − gastos
---   flujo          = ingresos − compras − gastos
+--   costo_insumos  = −Σ consumo × costo_unitario                (lo que se gasta en cabina)
+--   costo_ventas   = −Σ venta × costo_unitario                  (costo de los productos vendidos)
+--   mermas         = −Σ merma × costo_unitario + Σ costo_materiales de los lotes descartados en el mes
+--   utilidad       = ingresos − costo_insumos − costo_ventas − mermas − gastos
+--   flujo          = ingresos − compras − gastos                (la materia prima ya está en compras)
+-- La materia prima de un lote (insumo_produccion) no es gasto del mes: se vuelve costo de las
+-- piezas y cuenta al venderlas (costo_ventas) o, si el lote se descarta, como merma.
 create view public.v_resultado_mensual with (security_invoker = true) as
 with zona as (
   select coalesce((select c.zona_horaria from public.configuracion c where c.id = 1), 'America/Mexico_City') as tz
@@ -231,11 +263,20 @@ ing as (
     from public.pagos pg cross join zona z
    group by 1
 ),
-ins as (
+mov as (
   select date_trunc('month', m.creado_en at time zone z.tz)::date as mes,
-         -sum(m.cantidad * coalesce(m.costo_unitario, 0)) as costo
+         -sum(case when m.tipo = 'consumo' then m.cantidad * coalesce(m.costo_unitario, 0) else 0 end) as insumos,
+         -sum(case when m.tipo = 'venta'   then m.cantidad * coalesce(m.costo_unitario, 0) else 0 end) as ventas,
+         -sum(case when m.tipo = 'merma'   then m.cantidad * coalesce(m.costo_unitario, 0) else 0 end) as mermas
     from public.movimientos_inventario m cross join zona z
-   where m.tipo = 'consumo'
+   where m.tipo in ('consumo', 'venta', 'merma')
+   group by 1
+),
+des as (
+  select date_trunc('month', l.descartado_en at time zone z.tz)::date as mes,
+         sum(l.costo_materiales) as total
+    from public.lotes_produccion l cross join zona z
+   where l.estado = 'descartado'
    group by 1
 ),
 com as (
@@ -255,21 +296,25 @@ cit as (
    group by 1
 ),
 meses as (
-  select mes from ing union select mes from ins union select mes from com
+  select mes from ing union select mes from mov union select mes from des union select mes from com
   union select mes from gas union select mes from cit
 )
 select m.mes,
        round(coalesce(ing.ingresos, 0), 2) as ingresos,
        round(coalesce(ing.propinas, 0), 2) as propinas,
-       round(coalesce(ins.costo, 0), 2) as costo_insumos,
+       round(coalesce(mov.insumos, 0), 2) as costo_insumos,
+       round(coalesce(mov.ventas, 0), 2) as costo_ventas,
+       round(coalesce(mov.mermas, 0) + coalesce(des.total, 0), 2) as mermas,
        round(coalesce(com.total, 0), 2) as compras,
        round(coalesce(gas.total, 0), 2) as gastos,
-       round(coalesce(ing.ingresos, 0) - coalesce(ins.costo, 0) - coalesce(gas.total, 0), 2) as utilidad,
+       round(coalesce(ing.ingresos, 0) - coalesce(mov.insumos, 0) - coalesce(mov.ventas, 0)
+             - coalesce(mov.mermas, 0) - coalesce(des.total, 0) - coalesce(gas.total, 0), 2) as utilidad,
        round(coalesce(ing.ingresos, 0) - coalesce(com.total, 0) - coalesce(gas.total, 0), 2) as flujo,
        coalesce(cit.n, 0)::int as citas_completadas
   from meses m
   left join ing on ing.mes = m.mes
-  left join ins on ins.mes = m.mes
+  left join mov on mov.mes = m.mes
+  left join des on des.mes = m.mes
   left join com on com.mes = m.mes
   left join gas on gas.mes = m.mes
   left join cit on cit.mes = m.mes
@@ -277,3 +322,103 @@ select m.mes,
    and m.mes <= date_trunc('month', public.hoy_local())::date
  order by m.mes desc
  limit 12;
+
+-- -----------------------------------------------------------------------------
+-- Taller (ESPEC §10.2, personal)
+-- -----------------------------------------------------------------------------
+
+-- Lotes de producción. dias_para_listo: días que faltan para terminar el curado (≤ 0 = ya está listo).
+create view public.v_lotes with (security_invoker = true) as
+select l.id,
+       l.codigo,
+       l.producto_id,
+       pr.nombre as producto_nombre,
+       pr.categoria,
+       f.nombre as formula_nombre,
+       l.elaborado_en,
+       l.listo_desde,
+       (l.listo_desde - public.hoy_local())::int as dias_para_listo,
+       l.caduca_en,
+       l.piezas_planeadas,
+       l.piezas_obtenidas,
+       l.costo_materiales,
+       l.costo_unitario,
+       l.estado,
+       l.liberado_en,
+       l.notas
+  from public.lotes_produccion l
+  join public.productos pr on pr.id = l.producto_id
+  left join public.formulas f on f.id = l.formula_id
+ where public.es_personal()
+ order by l.elaborado_en desc, l.codigo desc;
+
+-- Costo de cada fórmula con los costos ACTUALES de sus insumos (lo que costaría hacer un lote hoy).
+create view public.v_costo_formulas with (security_invoker = true) as
+select f.id as formula_id,
+       f.producto_id,
+       pr.nombre as producto_nombre,
+       f.nombre,
+       f.rendimiento_piezas,
+       f.dias_curado,
+       round(coalesce(x.costo, 0), 2) as costo_lote,
+       round(coalesce(x.costo, 0) / f.rendimiento_piezas, 2) as costo_pieza,
+       pr.precio_venta,
+       case when pr.precio_venta is null then null
+            else round(pr.precio_venta - coalesce(x.costo, 0) / f.rendimiento_piezas, 2) end as margen_pieza,
+       case when pr.precio_venta is null or pr.precio_venta = 0 then null
+            else round((pr.precio_venta - coalesce(x.costo, 0) / f.rendimiento_piezas) / pr.precio_venta * 100, 1) end
+         as margen_pct,
+       coalesce(x.insumos, '[]'::jsonb) as insumos
+  from public.formulas f
+  join public.productos pr on pr.id = f.producto_id
+  left join lateral (
+         select sum(fi.cantidad * i.costo_unitario) as costo,
+                jsonb_agg(jsonb_build_object(
+                  'insumo_id', fi.insumo_id,
+                  'nombre', i.nombre,
+                  'unidad_medida', i.unidad_medida,
+                  'cantidad', fi.cantidad,
+                  'costo', round(fi.cantidad * i.costo_unitario, 2)) order by i.nombre, fi.insumo_id) as insumos
+           from public.formula_items fi
+           join public.productos i on i.id = fi.insumo_id
+          where fi.formula_id = f.id) x on true
+ where public.es_personal()
+ order by pr.nombre, f.nombre;
+
+-- Margen por pieza de lo que se vende (uso venta o ambos), con lo que hay, lo que está curando y
+-- lo vendido en los últimos 30 días. costo_unitario: el del producto (último lote liberado o
+-- última compra); si todavía no tiene (p. ej. el primer lote sigue en curado), el costo por pieza
+-- de su fórmula activa con los costos actuales de la materia prima.
+create view public.v_margen_productos with (security_invoker = true) as
+select pr.id,
+       pr.nombre,
+       pr.categoria,
+       pr.precio_venta,
+       round(c.costo, 2) as costo_unitario,
+       case when pr.precio_venta is null then null
+            else round(pr.precio_venta - c.costo, 2) end as margen,
+       case when pr.precio_venta is null or pr.precio_venta = 0 then null
+            else round((pr.precio_venta - c.costo) / pr.precio_venta * 100, 1) end as margen_pct,
+       pr.stock_actual,
+       coalesce((select sum(l.piezas_planeadas) from public.lotes_produccion l
+                  where l.producto_id = pr.id and l.estado = 'en_curado'), 0)::numeric as piezas_en_curado,
+       coalesce((select -sum(m.cantidad) from public.movimientos_inventario m
+                  where m.producto_id = pr.id and m.tipo = 'venta' and m.creado_en >= now() - interval '30 days'), 0)::numeric
+         as vendidas_30d
+  from public.productos pr
+  cross join lateral (
+         select coalesce(
+                  nullif(pr.costo_unitario, 0),
+                  (select sum(fi.cantidad * i.costo_unitario) / f.rendimiento_piezas
+                     from public.formulas f
+                     join public.formula_items fi on fi.formula_id = f.id
+                     join public.productos i on i.id = fi.insumo_id
+                    where f.producto_id = pr.id and f.activa
+                    group by f.id, f.rendimiento_piezas, f.actualizado_en
+                    order by f.actualizado_en desc, f.id
+                    limit 1),
+                  0) as costo) c
+ where pr.activo
+   and pr.uso in ('venta', 'ambos')
+   and public.es_personal()
+ order by pr.nombre;

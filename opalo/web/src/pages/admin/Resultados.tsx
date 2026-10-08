@@ -1,5 +1,6 @@
 // /admin/resultados: cómo le va al spa mes con mes (últimos 12 meses, desde el primero con actividad).
-// Las cifras salen de v_resultado_mensual: pagos, gastos, consumos de insumos y compras de inventario.
+// Las cifras salen de v_resultado_mensual: pagos, gastos, consumos de insumos, costo de lo vendido
+// (jabones, velas y productos), mermas y compras de inventario.
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type ResultadoMensual } from '../../lib/api';
@@ -13,7 +14,7 @@ import { mesActual, mesCorto, nombreDeMes, sumarMeses } from '../../components/a
 import './Resultados.css';
 
 type Cifra = Exclude<keyof ResultadoMensual, 'mes'>;
-const CIFRAS: Cifra[] = ['ingresos', 'costo_insumos', 'gastos', 'utilidad', 'flujo', 'compras', 'propinas', 'citas_completadas'];
+const CIFRAS: Cifra[] = ['ingresos', 'costo_insumos', 'costo_ventas', 'mermas', 'gastos', 'utilidad', 'flujo', 'compras', 'propinas', 'citas_completadas'];
 
 const capital = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 const centavos = (n: number) => Math.round(n * 100) / 100;
@@ -22,6 +23,8 @@ const vacio = (mes: string): ResultadoMensual => ({
   ingresos: 0,
   propinas: 0,
   costo_insumos: 0,
+  costo_ventas: 0,
+  mermas: 0,
   compras: 0,
   gastos: 0,
   utilidad: 0,
@@ -55,9 +58,10 @@ function Explicacion() {
       <div className="res-formulas">
         <div className="res-formula">
           <p className="res-formula-nombre">Utilidad: lo que se ganó</p>
-          <p className="res-formula-cuenta">Ingresos − costo de los insumos usados − gastos</p>
+          <p className="res-formula-cuenta">Ingresos − insumos usados − costo de lo vendido − mermas − gastos</p>
           <p className="texto-2 adm-sin-margen">
-            Cuenta el material conforme se usa en cabina, no cuando se compra. Es la mejor medida de si el spa gana dinero.
+            Cuenta el material conforme se usa en cabina y lo que costó hacer cada jabón o vela cuando se vende, no cuando se compra la materia prima. Es la
+            mejor medida de si el spa gana dinero.
           </p>
         </div>
         <div className="res-formula">
@@ -78,6 +82,17 @@ function Explicacion() {
           <dd>Lo que costó el material usado: al completar una cita, se descuenta del inventario según la receta de cada servicio.</dd>
         </div>
         <div>
+          <dt>Costo de ventas</dt>
+          <dd>
+            Lo que costó hacer los jabones y velas vendidos (materia prima de su lote, por pieza) y lo que costaron los productos de reventa. Lo ves por
+            producto en el <Link to="/admin/taller?pestana=margenes">Taller</Link>.
+          </dd>
+        </div>
+        <div>
+          <dt>Mermas</dt>
+          <dd>Lo que se perdió: ajustes por merma en el inventario y el material de los lotes descartados en el taller.</dd>
+        </div>
+        <div>
           <dt>Gastos</dt>
           <dd>
             Renta, recibos, publicidad y todo lo que registras en <Link to="/admin/gastos">Gastos</Link>, en el mes al que corresponden.
@@ -86,7 +101,8 @@ function Explicacion() {
         <div>
           <dt>Compras</dt>
           <dd>
-            Lo que pagaste al surtir el <Link to="/admin/inventario">inventario</Link>. No resta a la utilidad (eso lo hace el consumo), pero sí al flujo.
+            Lo que pagaste al surtir el <Link to="/admin/inventario">inventario</Link>, incluida la materia prima del taller. No resta a la utilidad (eso lo
+            hacen el consumo y el costo de lo vendido), pero sí al flujo.
           </dd>
         </div>
         <div>
@@ -135,13 +151,14 @@ export default function Resultados() {
     (acc, k) => ({ ...acc, [k]: centavos(serie.reduce((s, f) => s + f[k], 0)) }),
     {} as Record<Cifra, number>,
   );
-  const egresos = centavos(delMes.gastos + delMes.costo_insumos);
+  const costos = centavos(delMes.costo_insumos + delMes.costo_ventas + delMes.mermas);
+  const egresos = centavos(delMes.gastos + costos);
 
   return (
     <div className="adm-pagina res-pagina">
       <EncabezadoAdmin
         titulo="Resultados"
-        descripcion="Cómo le va al spa mes con mes: lo que entró, lo que costó y lo que quedó. Se calcula solo con los pagos, gastos y consumos que registras en el panel."
+        descripcion="Cómo le va al spa mes con mes: lo que entró, lo que costó y lo que quedó. Se calcula solo con los pagos, gastos, consumos y ventas que registras en el panel."
       >
         <Link className="btn btn-secundario" to="/admin/gastos">
           Ir a gastos
@@ -167,6 +184,10 @@ export default function Resultados() {
                 Los <strong>consumos</strong> de insumos que se descuentan del inventario al completar cada cita, y las <strong>compras</strong> de{' '}
                 <Link to="/admin/inventario">Inventario</Link>.
               </li>
+              <li>
+                Las <strong>ventas</strong> de jabones y velas (en línea y en el <Link to="/admin/mostrador">Mostrador</Link>), con el costo de su lote del{' '}
+                <Link to="/admin/taller">Taller</Link>.
+              </li>
             </ul>
           </Vacio>
           <Explicacion />
@@ -190,14 +211,14 @@ export default function Resultados() {
                 detalle={mesPasado ? `Mes pasado: ${dineroCentavos(mesPasado.ingresos)}` : 'Pagos registrados, sin propinas'}
               />
               <Kpi
-                etiqueta="Gastos + costo de insumos"
+                etiqueta="Gastos y costos"
                 valor={<span className="num">{dineroCentavos(egresos)}</span>}
-                detalle={`Gastos ${dineroCentavos(delMes.gastos)} · insumos ${dineroCentavos(delMes.costo_insumos)}`}
+                detalle={`Gastos ${dineroCentavos(delMes.gastos)} · costos ${dineroCentavos(costos)}`}
               />
               <Kpi
                 etiqueta="Utilidad"
                 valor={<span className="num">{dineroCentavos(delMes.utilidad)}</span>}
-                detalle="Ingresos − insumos − gastos"
+                detalle="Ingresos − costos − gastos"
                 tono={delMes.utilidad > 0 ? 'exito' : delMes.utilidad < 0 ? 'error' : undefined}
               />
               <Kpi
@@ -206,6 +227,26 @@ export default function Resultados() {
                 detalle={mesPasado ? `Mes pasado: ${numero(mesPasado.citas_completadas)}` : undefined}
               />
             </div>
+            <h3 className="res-costos-titulo">De qué se componen los costos</h3>
+            <div className="adm-kpis res-kpis res-kpis-costos">
+              <Kpi etiqueta="Insumos de cabina" valor={<span className="num">{dineroCentavos(delMes.costo_insumos)}</span>} detalle="Material usado en las citas completadas" />
+              <Kpi
+                etiqueta="Costo de ventas"
+                valor={<span className="num">{dineroCentavos(delMes.costo_ventas)}</span>}
+                detalle="Lo que costó hacer los jabones y velas vendidos"
+              />
+              <Kpi
+                etiqueta="Mermas"
+                valor={<span className="num">{dineroCentavos(delMes.mermas)}</span>}
+                detalle="Inventario perdido y lotes descartados"
+                tono={delMes.mermas > 0 ? 'alerta' : undefined}
+              />
+              <Kpi etiqueta="Gastos" valor={<span className="num">{dineroCentavos(delMes.gastos)}</span>} detalle="Renta, recibos y demás gastos del mes" />
+            </div>
+            <p className="ayuda res-costos-nota">
+              La utilidad descuenta el costo de los jabones y velas vendidos: cada pieza lleva el costo de la materia prima de su lote, y se resta el mes en que
+              se vende (no cuando se compra la materia prima ni cuando se hace el lote).
+            </p>
             <div className="res-aparte">
               <div className="res-kpi-aparte">
                 <Kpi etiqueta="Propinas del mes" valor={<span className="num">{dineroCentavos(delMes.propinas)}</span>} detalle="Son de quien atiende, no del spa" />
@@ -223,8 +264,8 @@ export default function Resultados() {
 
           <Bloque titulo="Mes por mes" id="res-b-tabla">
             <p className="ayuda res-tabla-nota">
-              <strong>Utilidad</strong> = ingresos − costo de insumos − gastos. <strong>Flujo</strong> = ingresos − compras − gastos. Las cifras negativas
-              aparecen en rojo.
+              <strong>Utilidad</strong> = ingresos − costo de insumos − costo de ventas − mermas − gastos. <strong>Flujo</strong> = ingresos − compras −
+              gastos. Las cifras negativas aparecen en rojo.
             </p>
             {desborda && <p className="ayuda res-deslizar">Desliza la tabla hacia los lados para ver todas las columnas.</p>}
             <div ref={envoltura} className="tabla-envoltura res-envoltura" tabIndex={0} role="region" aria-labelledby="res-b-tabla">
@@ -242,6 +283,12 @@ export default function Resultados() {
                     </th>
                     <th scope="col" className="num">
                       Costo de insumos
+                    </th>
+                    <th scope="col" className="num">
+                      Costo de ventas
+                    </th>
+                    <th scope="col" className="num">
+                      Mermas
                     </th>
                     <th scope="col" className="num">
                       Gastos
@@ -279,6 +326,8 @@ export default function Resultados() {
                         <CeldaDinero valor={f.utilidad} signo fuerte extra="res-col-angosta" />
                         <CeldaDinero valor={f.ingresos} />
                         <CeldaDinero valor={f.costo_insumos} />
+                        <CeldaDinero valor={f.costo_ventas} />
+                        <CeldaDinero valor={f.mermas} />
                         <CeldaDinero valor={f.gastos} />
                         <CeldaDinero valor={f.utilidad} signo fuerte extra="res-col-ancha" />
                         <CeldaDinero valor={f.flujo} signo />
@@ -295,6 +344,8 @@ export default function Resultados() {
                     <CeldaDinero valor={totales.utilidad} signo fuerte extra="res-col-angosta" />
                     <CeldaDinero valor={totales.ingresos} fuerte />
                     <CeldaDinero valor={totales.costo_insumos} fuerte />
+                    <CeldaDinero valor={totales.costo_ventas} fuerte />
+                    <CeldaDinero valor={totales.mermas} fuerte />
                     <CeldaDinero valor={totales.gastos} fuerte />
                     <CeldaDinero valor={totales.utilidad} signo fuerte extra="res-col-ancha" />
                     <CeldaDinero valor={totales.flujo} signo fuerte />

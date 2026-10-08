@@ -6,6 +6,7 @@ import type { Configuracion, EstadoPedido, PedidoDetalle } from '../../lib/api/t
 import { dinero, enlaceWhatsApp, ETIQUETA_ESTADO_PEDIDO, ETIQUETA_METODO_PAGO, fechaCorta, telefonoBonito } from '../../lib/format';
 import { useAccion, useAsync } from '../../lib/useAsync';
 import { Cargando, MensajeError, Vacio } from '../ui/Estado';
+import { cuandoAbrimos, direccionCorta } from '../publico/tienda';
 import { Modal } from './Modal';
 
 const PILL_PEDIDO: Record<EstadoPedido, string> = {
@@ -27,6 +28,8 @@ export function SeccionPedidos({ config }: { config: Configuracion }) {
   if (pedidos.cargando && !pedidos.datos) return <Cargando texto="Cargando tus pedidos…" />;
   if (pedidos.error) return <MensajeError error={pedidos.error} onReintentar={pedidos.recargar} />;
   const lista = [...(pedidos.datos ?? [])].sort((a, b) => b.creado_en.localeCompare(a.creado_en));
+  const apertura = cuandoAbrimos(config.fecha_apertura);
+  const direccion = direccionCorta(config.direccion);
 
   async function confirmarCancelacion() {
     if (!aCancelar) return;
@@ -64,6 +67,8 @@ export function SeccionPedidos({ config }: { config: Configuracion }) {
           {lista.map((p) => {
             const falta = Math.max(0, Math.round((p.total - p.pagado) * 100) / 100);
             const mensaje = `Hola, Ópalo. Quiero pagar mi pedido ${p.folio} por ${dinero(p.total)}.`;
+            const conServicios = p.items.some((it) => it.tipo !== 'producto');
+            const porRecoger = p.estado === 'pagado' && p.tiene_productos && !p.entregado_en;
             return (
               <li key={p.id}>
                 <article className="cu-tarjeta" aria-labelledby={`pedido-${p.id}`}>
@@ -71,7 +76,10 @@ export function SeccionPedidos({ config }: { config: Configuracion }) {
                     <h3 className="cu-cita-titulo" id={`pedido-${p.id}`}>
                       Pedido <span className="num">{p.folio}</span>
                     </h3>
-                    <span className={`pill ${PILL_PEDIDO[p.estado] ?? 'pill-gris'}`}>{ETIQUETA_ESTADO_PEDIDO[p.estado] ?? p.estado}</span>
+                    <span className="fila cu-pedido-estados">
+                      <span className={`pill ${PILL_PEDIDO[p.estado] ?? 'pill-gris'}`}>{ETIQUETA_ESTADO_PEDIDO[p.estado] ?? p.estado}</span>
+                      {porRecoger && <span className="pill pill-info">Por recoger</span>}
+                    </span>
                   </div>
                   <p className="ayuda cu-sin-margen">
                     Hecho el {fechaCorta(p.creado_en)}
@@ -114,13 +122,28 @@ export function SeccionPedidos({ config }: { config: Configuracion }) {
                           <strong>¿Cómo pagar?</strong> Todavía no cobramos en línea. Puedes pagar en el spa (efectivo o tarjeta) o por
                           transferencia: escríbenos por WhatsApp y te compartimos los datos. Menciona tu folio <strong>{p.folio}</strong>.
                         </p>
-                        <p className="cu-sin-margen">
-                          En cuanto registremos tu pago, los servicios aparecerán en la pestaña <Link to="/cuenta/servicios">Servicios</Link>.
-                        </p>
+                        {p.tiene_productos && (
+                          <p className="cu-sin-margen">
+                            Recoges tus productos en Ópalo ({direccion}) al pagar{apertura ? `, ${apertura}` : ''}.
+                          </p>
+                        )}
+                        {conServicios && (
+                          <p className="cu-sin-margen">
+                            En cuanto registremos tu pago, los servicios aparecerán en la pestaña <Link to="/cuenta/servicios">Servicios</Link>.
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}
-                  {p.estado === 'pagado' && p.items.some((it) => it.tipo !== 'producto') && (
+                  {porRecoger && (
+                    <p className="ayuda cu-sin-margen">
+                      Tus productos ya están listos; pasa por ellos a Ópalo ({direccion}){apertura ? `, ${apertura}` : ''}.
+                    </p>
+                  )}
+                  {p.estado === 'pagado' && p.tiene_productos && p.entregado_en && (
+                    <p className="ayuda cu-sin-margen">Productos entregados el {fechaCorta(p.entregado_en)}.</p>
+                  )}
+                  {p.estado === 'pagado' && conServicios && (
                     <p className="ayuda cu-sin-margen">
                       Tus servicios ya están en la pestaña <Link to="/cuenta/servicios">Servicios</Link>, listos para reservar o regalar.
                     </p>

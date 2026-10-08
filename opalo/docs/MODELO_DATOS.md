@@ -6,8 +6,8 @@
 
 ## La idea en una frase
 
-Todo lo que pasa en Ópalo deja un registro: **quién vino, qué se hizo, qué se usó, cuánto se
-cobró y cuánto se gastó**. Con esos registros el sistema responde solo preguntas como
+Todo lo que pasa en Ópalo deja un registro: **quién vino, qué se hizo, qué se usó, qué se
+fabricó en el taller, cuánto se cobró y cuánto se gastó**. Con esos registros el sistema responde solo preguntas como
 "¿cuánto ganamos este mes?" o "¿qué hay que reponer?", sin hojas de cálculo aparte.
 
 ## Los módulos
@@ -83,10 +83,17 @@ La fuente de todo esto es el archivo `datos/catalogo.json`; de ahí se carga la 
   guardarlos se pide su consentimiento expreso. Se guarda el historial; la última es la vigente.
 - **Consentimientos firmados**: la firma en pantalla, el nombre de quien firma (y del tutor si es
   menor), la versión exacta del documento, la ficha de salud de ese momento, la fecha, **quién la
-  capturó y dónde** (al reservar, desde la cuenta de la clienta o en la tablet de la cabina) y una
+  capturó y dónde** (en la tablet de la cabina, al reservar o desde la cuenta de la clienta) y una
   huella digital que cubre todo eso, incluida la firma. **No se pueden editar ni borrar.**
   **Sin consentimiento firmado no se puede iniciar ni completar un servicio**; por eso cada
   servicio que se puede agendar debe decir qué consentimiento se firma.
+- **La firma se hace en el spa** (decisión del 8 de octubre de 2026): el consentimiento **no se
+  pide ni se menciona a las clientas en línea**. La clienta reserva sin firmar y la cita aparece en
+  la agenda con **"Falta firma"**; el día de su cita firma en la **tablet de la cabina**, antes del
+  servicio (el equipo abre "Firmar en cabina"). Si intentara firmar desde su cuenta, el sistema le
+  responde "La firma se hace en el spa, el día de tu cita." Después, en su cuenta → Documentos, ve
+  la copia de lo que firmó. Es un interruptor de la configuración (`firma_en_linea`): si algún día
+  se quiere volver a firmar al reservar en línea, se cambia a "sí" y todo regresa como antes.
 
 ### 5. Ventas y pagos
 - **Pedidos** de la tienda en línea (folio OP-00001…): servicios, paquetes o productos, también
@@ -96,6 +103,19 @@ La fuente de todo esto es el archivo `datos/catalogo.json`; de ahí se carga la 
   Mercado Pago, cortesía). La **propina se guarda aparte** (es de quien atiende, no del spa).
   En la tienda la clienta sólo elige efectivo, tarjeta o transferencia (la cortesía la decide el
   equipo al cobrar) y puede tener hasta 5 pedidos por pagar.
+- **Venta en mostrador**: en el spa el equipo vende ahí mismo jabones, velas, sets, servicios
+  prepagados o paquetes. La venta queda como un pedido "de mostrador" con su folio, ya **pagado**
+  (también como cortesía) y, si lleva productos, ya **entregado**. Si sólo son productos no hace
+  falta registrar a la clienta (en la lista sale como "Venta de mostrador"); los servicios
+  prepagados sí piden clienta, porque se vuelven sus créditos. No deja vender más piezas de las que
+  hay.
+- **Entregas**: lo que se compra en la tienda en línea **se recoge en Ópalo** (el envío a domicilio
+  queda para después). Un pedido pagado con productos queda "por entregar" hasta que el equipo lo
+  marca como entregado; el resumen del día dice cuántos hay. La tienda en línea tampoco deja pedir
+  más piezas de las que hay ("Por ahora sólo quedan 3 piezas de…", "Por ahora no tenemos…").
+  Un pedido en línea **no aparta** las piezas: se aseguran cuando se registra el pago. Si mientras
+  tanto se vendieron en el mostrador, el sistema no deja cobrar lo que ya no hay (el inventario nunca
+  queda en negativo) y el equipo ajusta o cancela el pedido con la clienta.
 - **Créditos (servicios prepagados)**: al pagarse un pedido, cada servicio o paquete comprado se
   vuelve un crédito que la clienta usa al reservar (la cita queda en $0). Vencen en 365 días
   (o lo que diga el paquete) y deben estar vigentes **el día de la cita**. Si se compró **para
@@ -104,8 +124,16 @@ La fuente de todo esto es el archivo `datos/catalogo.json`; de ahí se carga la 
   crédito regresa; si la clienta no asistió, no.
 
 ### 6. Inventario y costos
-- **Productos**: insumos de cabina (cera, talco, aceite, guantes…) y productos de venta. Cada uno
-  con su presentación ("Lata 800 g"), su costo y el **stock en gramos, mililitros o piezas**.
+- **Productos**: insumos de cabina (cera, talco, aceite, guantes…), **materia prima y envases del
+  taller** (aceites, manteca, sosa, cera de soya, mechas, frascos, etiquetas…) y productos de venta,
+  incluidos los **jabones, velas y sets hechos en Ópalo**. Cada uno con su presentación ("Lata
+  800 g"), su costo y el **stock en gramos, mililitros o piezas**. Los jabones, velas y sets se
+  cuentan **por pieza** (así su costo es el de una pieza).
+- **Ficha de la tienda**: lo que se vende en línea lleva su ficha pública: descripción, aroma,
+  ingredientes (como en la etiqueta), modo de uso, advertencias (las velas, las de seguridad),
+  contenido neto ("100 g"), foto o color para la ilustración, si es destacado y si está hecho en
+  Ópalo. El sitio sólo ve esa ficha, el precio, cuántas piezas hay y, si está agotado, **cuándo
+  estará listo el próximo lote**; nunca costos, proveedores ni notas.
 - **Recetas**: cuánto se usa de cada producto en cada servicio (ej. cejas: 10 g de cera, 2 guantes).
   El equipo guarda la receta completa de un servicio de una vez (función `guardar_receta`).
 - **Compras**: al registrar una compra sube el stock y se actualiza el costo con el último precio.
@@ -115,6 +143,27 @@ La fuente de todo esto es el archivo `datos/catalogo.json`; de ahí se carga la 
 - **Stock mínimo**: cuando un producto llega a su mínimo aparece en "por reponer", con cuántas
   presentaciones comprar: las suficientes para quedar **por encima** del mínimo (si se compra lo
   sugerido, el producto sale de la lista).
+
+### 6.1 Taller: jabones y velas hechos en Ópalo
+- **Fórmulas** (recetas del taller): qué materia prima lleva un lote completo, cuántas piezas
+  rinde y cuántos días de **curado** necesita (jabón en frío: 4 a 6 semanas; velas: de 0 a 2
+  semanas). Con los costos actuales de la materia prima el sistema calcula cuánto cuesta un lote,
+  cuánto cuesta cada pieza y cuánto deja cada pieza al precio de venta.
+- **Lotes**: cada vez que se hace una tanda se registra un lote con su código (`JAB-261008-01`:
+  jabón, fecha de elaboración y número del día; `VEL-…` velas, `SET-…` sets). Al registrarlo,
+  la materia prima **sale del inventario con su costo** (la de la fórmula ajustada a las piezas
+  que se van a hacer, o lo que realmente se usó si fue distinto). Si no alcanza algo, el sistema lo
+  dice antes de mover nada ("No alcanza el inventario de aceite de oliva: hay 300 ml y se
+  necesitan 450 ml.").
+- **Curado**: el lote queda **"en curado"** hasta su fecha de listo; mientras tanto esas piezas
+  no se pueden vender, y la tienda muestra cuándo estarán listas. Cuando termina, el equipo lo
+  **libera** anotando cuántas piezas salieron de verdad: entran al inventario y su **costo real por
+  pieza** (costo del lote entre piezas obtenidas) pasa a ser el costo del producto. Liberar antes de
+  tiempo se puede, pero hay que confirmarlo. Un lote que no necesita curado se libera al registrarlo.
+  Un **jabón** siempre se registra con su fórmula (de ahí salen sus días de curado): sin ella
+  quedaría a la venta el mismo día, sin curar.
+- **Descartar**: si un lote sale mal se descarta con su motivo; no entra al inventario y lo que
+  costó cuenta como **merma** del mes.
 
 ### 7. Gastos
 - **Categorías**: renta, mantenimiento del edificio, luz, agua, internet, teléfono, sistemas,
@@ -163,13 +212,21 @@ erDiagram
   CITAS ||--o{ CONSENTIMIENTOS : "lo exige"
   FICHAS_SALUD ||--o{ CONSENTIMIENTOS : "respalda"
 
-  CLIENTES ||--o{ PEDIDOS : compra
+  CLIENTES |o--o{ PEDIDOS : "compra (en mostrador puede no haber clienta)"
   PEDIDOS ||--|{ PEDIDO_ITEMS : contiene
   PEDIDOS ||--o{ PAGOS : "se paga con"
   CITAS ||--o{ PAGOS : "se paga con"
   PEDIDO_ITEMS ||--o{ CREDITOS : genera
   CLIENTES ||--o{ CREDITOS : "tiene prepagados"
   CREDITOS ||--o{ CITA_ITEMS : "se usa en"
+
+  PRODUCTOS ||--o{ FORMULAS : "se elabora con"
+  FORMULAS ||--|{ FORMULA_ITEMS : lleva
+  PRODUCTOS ||--o{ FORMULA_ITEMS : "es materia prima de"
+  PRODUCTOS ||--o{ LOTES_PRODUCCION : "se fabrica en"
+  FORMULAS ||--o{ LOTES_PRODUCCION : "se sigue en"
+  LOTES_PRODUCCION ||--o{ MOVIMIENTOS_INVENTARIO : "consume y produce"
+  PEDIDOS ||--o{ MOVIMIENTOS_INVENTARIO : "vende productos"
 
   CATEGORIAS_GASTO ||--o{ GASTOS_RECURRENTES : agrupa
   CATEGORIAS_GASTO ||--o{ GASTOS : agrupa
@@ -180,13 +237,17 @@ erDiagram
 
 | Pregunta del negocio | Dónde se ve | Quién la ve |
 |---|---|---|
-| ¿Cuánto ganamos este mes? ¿Y los meses anteriores? | **Resultados del mes** (`v_resultado_mensual`): ingresos, propinas, costo de insumos, compras, gastos, **utilidad** y **flujo** de los últimos 12 meses con actividad, hasta el mes en curso | Socios |
+| ¿Cuánto ganamos este mes? ¿Y los meses anteriores? | **Resultados del mes** (`v_resultado_mensual`): ingresos, propinas, costo de insumos, **costo de lo vendido**, **mermas**, compras, gastos, **utilidad** y **flujo** de los últimos 12 meses con actividad, hasta el mes en curso | Socios |
 | ¿Qué hay que reponer? ¿Cuánto nos costará? | **Por reponer** (`v_reposicion`): productos en o bajo su mínimo, cuánto falta, cuántas presentaciones comprar (para quedar por encima del mínimo), costo estimado y proveedor | Equipo y socios |
 | ¿Cuánto nos cuesta cada servicio y cuánto nos deja? | **Costo por servicio** (`v_costo_servicio`): costo de material según la receta, margen en pesos y en % | Equipo y socios |
 | ¿Qué gastos fijos vencen pronto? | **Gastos por vencer** (`v_gastos_por_vencer`): vencido / próximo (7 días o menos) / al corriente | Socios |
 | ¿Qué citas hay hoy, con quién, ya firmó, ya pagó? | **Agenda** (`v_citas_detalle`): clienta, hora, duración, quién atiende, cabina, estado, alertas de la ficha, consentimientos firmados, pagado | Equipo (todas) · cada clienta (las suyas) |
 | ¿Quiénes son nuestras clientas y qué tan seguido vienen? | **Clientas** (`v_clientes_resumen`): visitas completadas, última visita, próxima cita, total pagado y si la cuenta es del equipo (para separarla de las clientas) | Equipo y socios |
-| ¿Qué pedidos faltan por cobrar? | **Pedidos** (`v_pedidos_detalle`): folio, estado, total, lo pagado y lo comprado | Equipo · cada clienta (los suyos) |
+| ¿Qué pedidos faltan por cobrar? ¿Y por entregar? | **Pedidos** (`v_pedidos_detalle`): folio, estado, total, lo pagado, lo comprado, si fue en línea o en mostrador, si lleva productos y si ya se entregó | Equipo · cada clienta (los suyos) |
+| ¿Qué hay en la tienda? ¿Cuándo vuelve lo agotado? | **Tienda** (`productos_tienda`): ficha pública, precio, piezas disponibles y fecha del próximo lote en curado | Todos (también el sitio público) |
+| ¿Qué lotes están curando y cuáles ya se pueden liberar? | **Lotes** (`v_lotes`): código, producto, fórmula, elaboración, fecha de listo y días que faltan, piezas, costo y estado | Equipo y socios |
+| ¿Cuánto nos cuesta hacer cada jabón o vela y cuánto nos deja? | **Costo de fórmulas** (`v_costo_formulas`): costo del lote y por pieza con los precios actuales de la materia prima, margen por pieza | Equipo y socios |
+| ¿Qué productos dejan más? ¿Qué se vende? | **Margen por producto** (`v_margen_productos`): precio, costo por pieza, margen, existencias, piezas en curado y vendidas en 30 días | Equipo y socios |
 | ¿Qué servicios prepagados tiene cada clienta? | **Créditos** (`v_creditos`): cuántos le quedan, hasta cuándo, códigos de regalo | Equipo · cada clienta (los suyos) |
 | ¿Qué horarios puedo ofrecer? | **Horarios disponibles** (función `horarios_disponibles`): sólo horas con persona y cabina libres, con 2 horas de anticipación y hasta 60 días adelante; antes de la apertura, sólo para el equipo | Todos (también el sitio público) |
 
@@ -194,34 +255,47 @@ Cómo se calculan los resultados del mes:
 
 - **Ingresos** = lo cobrado (pagos), **sin propinas** y **sin cortesías**.
 - **Costo de insumos** = lo que se gastó de producto en las cabinas (consumo de las recetas ×
-  su costo). Por ahora no incluye el costo de los productos vendidos ni las mermas.
-- **Utilidad** = ingresos − costo de insumos − gastos. *¿El negocio es rentable?*
+  su costo).
+- **Costo de lo vendido** = lo que costaban los productos que se vendieron (jabones, velas,
+  cremas…), también los regalados como cortesía (la cortesía no es ingreso, pero el jabón sí costó).
+- **Mermas** = lo que se rompió, caducó o se tiró del inventario, más lo que costaron los lotes
+  del taller que se descartaron ese mes.
+- **Utilidad** = ingresos − costo de insumos − costo de lo vendido − mermas − gastos.
+  *¿El negocio es rentable?*
 - **Flujo** = ingresos − compras − gastos. *¿Entró más dinero del que salió?* (las compras de
-  inventario salen de la caja aunque los productos se usen después).
+  inventario, también la materia prima del taller, salen de la caja aunque se usen después).
+- La materia prima de un lote **no** se cuenta como gasto el día que se usa: se vuelve el costo de
+  las piezas y cuenta cuando se venden (costo de lo vendido) o, si el lote se descarta, como merma.
 - Los meses se cuentan en **hora de Querétaro**.
 
 ## El día a día
 
 1. **Una clienta reserva en el sitio**: elige servicios → día → hora (sólo ve horarios libres) →
-   inicia sesión → llena su ficha de salud → acepta las políticas → firma el consentimiento →
-   la cita queda **confirmada**. Si en la ficha marcó algo que hay que revisar (embarazo,
-   isotretinoína, diabetes…), queda **pendiente** con la alerta visible para el equipo, que la
-   confirma por WhatsApp.
+   inicia sesión → llena su ficha de salud → acepta las políticas → la cita queda
+   **confirmada** (sin firma: aparece como "Falta firma"). Si en la ficha marcó algo que hay que
+   revisar (embarazo, isotretinoína, diabetes…), queda **pendiente** con la alerta visible para
+   el equipo, que la confirma por WhatsApp.
 2. **Alguien escribe por WhatsApp**: el personal la da de alta (si es nueva) y le agenda la cita
-   desde el panel. Esa cita nace sin firma: la clienta firma desde su cuenta o en la tablet de la
-   cabina **antes** de empezar.
-3. **En cabina**: el personal marca la cita "en curso" (sólo si hay firma), al terminar la marca
-   "completada" (el inventario se descuenta solo) y registra el pago y la propina.
+   desde el panel. También nace "Falta firma".
+3. **En cabina**: la clienta firma el consentimiento en la tablet ("Firmar en cabina"), el personal
+   marca la cita "en curso" (sólo si hay firma), al terminar la marca "completada" (el inventario
+   se descuenta solo) y registra el pago y la propina.
 4. **Cancelaciones**: la clienta puede cancelar desde su cuenta hasta 24 horas antes; después,
    por WhatsApp. El personal puede cancelar siempre. Si la cita usaba un servicio prepagado,
    el crédito regresa.
 5. **Tienda**: la clienta compra (también para regalar), paga en el spa o por transferencia, el
-   personal registra el pago y la clienta recibe sus créditos (o el código de regalo).
-6. **Llega mercancía**: el personal registra la compra (sube el stock y se actualiza el costo).
+   personal registra el pago y la clienta recibe sus créditos (o el código de regalo). Si compró
+   jabones o velas, los recoge en Ópalo y el equipo marca el pedido como entregado.
+6. **Mostrador**: alguien compra una vela en recepción: el equipo registra la venta (cobro,
+   salida del inventario y entrega, todo de una vez).
+7. **Taller**: se hace una tanda de jabón → se registra el lote (la materia prima se descuenta
+   sola) → queda en curado → cuando cumple su fecha aparece en el resumen del día como "listo para
+   liberar" → se libera con las piezas que salieron y ya se puede vender.
+8. **Llega mercancía**: el personal registra la compra (sube el stock y se actualiza el costo).
    Si algo se rompe o se tira, se registra como merma.
-7. **Pagos del local**: los socios registran cada gasto; los fijos avanzan solos a su siguiente
+9. **Pagos del local**: los socios registran cada gasto; los fijos avanzan solos a su siguiente
    vencimiento.
-8. **Fin de mes**: los socios abren "Resultados" y ven ingresos, gastos, utilidad y flujo.
+10. **Fin de mes**: los socios abren "Resultados" y ven ingresos, gastos, utilidad y flujo.
 
 ## Lo que todavía falta definir (con la especialista y los socios)
 
@@ -231,6 +305,10 @@ Cómo se calculan los resultados del mes:
   basta con anotarle su duración y el sistema reservará 2 horas.
 - **Productos, costos y recetas reales**: sin ellos el costo por servicio sale en $0 y no hay
   alertas de reposición. Los de la base de pruebas son de ejemplo.
+- **Taller**: las fórmulas, materias primas, costos y precios reales de los jabones y velas, y sus
+  fichas (ingredientes como en la etiqueta, advertencias de las velas). Los de la base de pruebas
+  (aceite de oliva, cera de soya, "Jabón de avena (ejemplo)"…) son de ejemplo.
+- **Envío a domicilio**: por ahora todo se recoge en Ópalo.
 - **Montos de los gastos fijos** (renta, luz, agua…): se cargan como "por definir".
 - **Textos legales**: las políticas están en borrador hasta que las revisen la especialista y un
   abogado; al publicarlas se crea su versión definitiva.

@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
 import { AVISO_DEMO } from '../lib/api/cuentasDemo';
 import { reiniciarDemo } from '../lib/api/demo';
-import { borrarCarritoGuardado, useCarrito } from '../lib/carrito';
+import { borrarCarritoGuardado, textoAviso, useCarrito } from '../lib/carrito';
 import { enlaceWhatsApp, telefonoBonito } from '../lib/format';
 import { useSesion } from '../lib/sesion';
 import { Marca } from '../components/ui/Gema';
@@ -163,8 +163,9 @@ function AvisoAgregado() {
         <div className="sp-aviso-carrito" key={aviso.n}>
           <IconoBolsa tam={20} />
           <p>
-            Agregaste <strong>{aviso.nombre}</strong>
-            {aviso.regalo_para ? ` (regalo para ${aviso.regalo_para})` : ''} al carrito.
+            {aviso.agregadas > 0 && 'Agregaste '}
+            <strong>{textoAviso(aviso).titulo}</strong>
+            {textoAviso(aviso).resto}
           </p>
           <Link className="btn btn-texto btn-sm" to="/carrito" onClick={cerrarAviso}>
             Ver carrito
@@ -389,7 +390,7 @@ export function LayoutPublico() {
             <h2 className="sp-pie-titulo">Explora</h2>
             <ul className="sp-pie-lista">
               <li><Link to="/servicios">Servicios y paquetes</Link></li>
-              <li><Link to="/tienda">Tienda y regalos</Link></li>
+              <li><Link to="/tienda">Jabones, velas y regalos</Link></li>
               <li><Link to="/equipo">Nosotras</Link></li>
               <li><Link to="/reservar">Reservar</Link></li>
               <li><Link to={cuenta.to}>{cuenta.texto}</Link></li>
@@ -402,7 +403,7 @@ export function LayoutPublico() {
               <li><Link to="/politicas/terminos">Términos y condiciones</Link></li>
               <li><Link to="/politicas/privacidad">Aviso de privacidad</Link></li>
               <li><Link to="/politicas/cancelacion">Política de cancelación</Link></li>
-              <li><Link to="/politicas">Consentimientos informados</Link></li>
+              {contacto.firma_en_linea && <li><Link to="/politicas">Consentimientos informados</Link></li>}
             </ul>
           </nav>
         </div>

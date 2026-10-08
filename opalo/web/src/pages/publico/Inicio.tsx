@@ -1,12 +1,15 @@
 import { Link } from 'react-router-dom';
-import { api, type Catalogo, type Capacitacion, type PersonalPublico } from '../../lib/api';
+import { api, type Catalogo, type Capacitacion, type PersonalPublico, type ProductoTienda } from '../../lib/api';
 import { dinero, enlaceWhatsApp, mesNombre, numero, telefonoBonito } from '../../lib/format';
 import { useAsync } from '../../lib/useAsync';
 import { Cargando, MensajeError } from '../../components/ui/Estado';
 import { Gema } from '../../components/ui/Gema';
+import { IlustracionProducto } from '../../components/ui/IlustracionProducto';
 import { ArteHero, Medallon, SeparadorGema } from '../../components/publico/Decoracion';
 import { useTitulo } from '../../components/publico/EncabezadoPagina';
 import { TarjetaPaquete } from '../../components/publico/TarjetasCatalogo';
+import { TarjetaProducto } from '../../components/publico/Producto';
+import { destacadosHechosEnOpalo } from '../../components/publico/tienda';
 import {
   categoriasOrdenadas,
   ETIQUETA_CAPACITACION,
@@ -24,7 +27,6 @@ import {
   IconoCorazon,
   IconoEscudo,
   IconoFicha,
-  IconoFirma,
   IconoFlecha,
   IconoMensaje,
   IconoReloj,
@@ -37,6 +39,7 @@ export default function Inicio() {
   const contacto = useContacto();
   const catalogo = useAsync(() => api.getCatalogo(), []);
   const equipo = useAsync(() => api.getEquipo(), []);
+  const productos = useAsync(() => api.getProductosTienda(), []);
   // Fecha de apertura de la configuración (mientras carga, la del catálogo); null = ya no se anuncia.
   const apertura = antesDeApertura(contacto.fecha_apertura) ? contacto.fecha_apertura : null;
 
@@ -73,7 +76,7 @@ export default function Inicio() {
                 <IconoReloj tam={18} /> Sesiones de 1 hora
               </li>
               <li>
-                <IconoFirma tam={18} /> Reserva y firma en línea
+                <IconoCalendario tam={18} /> Reserva en línea
               </li>
             </ul>
           </div>
@@ -125,6 +128,27 @@ export default function Inicio() {
         </section>
       )}
 
+      {/* ---------- Hecho a mano en Ópalo (tienda) ---------- */}
+      <section className="seccion ini-taller" aria-labelledby="titulo-taller">
+        <div className="contenedor">
+          <div className="sp-encabezado-seccion sp-entre-alineado">
+            <div>
+              <p className="eyebrow">Tienda · Hecho en Ópalo</p>
+              <h2 id="titulo-taller">Hecho a mano en Ópalo</h2>
+              <p className="subtitulo">
+                Jabones y velas que hacemos aquí, en lotes pequeños. Los jabones se curan varias semanas antes de venderse.
+              </p>
+            </div>
+            <Link className="btn btn-texto" to="/tienda">
+              Ver la tienda <IconoFlecha tam={18} />
+            </Link>
+          </div>
+          {productos.cargando && <Cargando texto="Cargando la tienda…" />}
+          <MensajeError error={productos.error} onReintentar={productos.recargar} />
+          {productos.datos && <HechoEnOpalo productos={productos.datos} />}
+        </div>
+      </section>
+
       {/* ---------- Siempre aprendiendo ---------- */}
       <section className="seccion" aria-labelledby="titulo-aprendiendo">
         <div className="contenedor aprendiendo">
@@ -154,7 +178,7 @@ export default function Inicio() {
           <div className="sp-encabezado-seccion centrado">
             <SeparadorGema />
             <p className="eyebrow">Cómo reservar</p>
-            <h2 id="titulo-pasos">Tu cita en cuatro pasos</h2>
+            <h2 id="titulo-pasos">Tu cita en tres pasos</h2>
             <p className="subtitulo">Todo desde tu celular, en unos minutos.</p>
           </div>
           <ol className="ini-pasos">
@@ -171,13 +195,6 @@ export default function Inicio() {
               </Medallon>
               <h3>Llenas tu ficha de salud</h3>
               <p>Unas preguntas rápidas para saber si el servicio es seguro para ti. Tus respuestas son confidenciales.</p>
-            </li>
-            <li className="ini-paso">
-              <Medallon>
-                <IconoFirma tam={24} />
-              </Medallon>
-              <h3>Firmas tu consentimiento en línea</h3>
-              <p>Lo firmas en la pantalla de tu celular o computadora y queda guardado en tu cuenta para que lo consultes cuando quieras.</p>
             </li>
             <li className="ini-paso">
               <Medallon className="sp-medallon-oro">
@@ -202,7 +219,7 @@ export default function Inicio() {
             <p className="eyebrow">Tu seguridad primero</p>
             <h2 id="titulo-seguridad">Te cuidamos antes, durante y después</h2>
           </div>
-          <div className="grid-3 ini-seguridad">
+          <div className="ini-seguridad">
             <article className="ini-tarjeta-seguridad">
               <Medallon>
                 <IconoFicha tam={24} />
@@ -217,10 +234,10 @@ export default function Inicio() {
               <Medallon>
                 <IconoEscudo tam={24} />
               </Medallon>
-              <h3>Consentimiento informado</h3>
+              <h3>Revisión con tu especialista</h3>
               <p>
-                Te explicamos qué incluye cada servicio, sus cuidados y sus riesgos, y lo firmas en línea. Sin consentimiento
-                firmado no hay servicio.
+                Antes de empezar, tu especialista repasa tu ficha contigo, te explica qué incluye el servicio y sus cuidados,
+                y resuelve tus dudas.
               </p>
             </article>
             <article className="ini-tarjeta-seguridad">
@@ -229,6 +246,15 @@ export default function Inicio() {
               </Medallon>
               <h3>Higiene en cada sesión</h3>
               <p>Cera premium, técnica cuidadosa y protocolos de higiene en cada sesión, en una cabina preparada para ti.</p>
+            </article>
+            <article className="ini-tarjeta-seguridad">
+              <Medallon>
+                <IconoBirrete tam={24} />
+              </Medallon>
+              <h3>Capacitación constante</h3>
+              <p>
+                Quien te atiende se sigue formando en técnica, higiene y cuidado de la piel. <Link to="/equipo">Conoce sus capacitaciones</Link>.
+              </p>
             </article>
           </div>
           <p className="ini-nota-edad">
@@ -282,6 +308,36 @@ export default function Inicio() {
         </div>
       </section>
     </div>
+  );
+}
+
+/** Tres productos hechos en Ópalo; si aún no hay, sólo el aviso (sin inventar productos). */
+function HechoEnOpalo({ productos }: { productos: ProductoTienda[] }) {
+  const destacados = destacadosHechosEnOpalo(productos, 3);
+  if (destacados.length === 0) {
+    return (
+      <div className="ini-taller-pronto">
+        <div className="ini-taller-arte" aria-hidden="true">
+          <IlustracionProducto categoria="jabon" color="#d9ccae" nombre="inicio-jabon" />
+          <IlustracionProducto categoria="vela" color="#efe3cc" nombre="inicio-vela" />
+        </div>
+        <div>
+          <p className="ini-taller-pronto-titulo">Muy pronto: jabones y velas hechos en Ópalo</p>
+          <p className="ini-taller-pronto-texto">
+            Mientras, en la tienda puedes regalar o prepagar servicios y paquetes.
+          </p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <ul className="prod-rejilla prod-carrusel ini-taller-lista" aria-label="Productos hechos en Ópalo">
+      {destacados.map((p) => (
+        <li key={p.id}>
+          <TarjetaProducto producto={p} />
+        </li>
+      ))}
+    </ul>
   );
 }
 

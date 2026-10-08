@@ -191,13 +191,45 @@
 .ini-centrado-boton { display: flex; justify-content: center; margin-top: 28px; }
 
 /* ---------- Seguridad ---------- */
+.ini-seguridad { display: grid; gap: 28px 24px; grid-template-columns: 1fr; }
+@media (min-width: 640px) { .ini-seguridad { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 1040px) { .ini-seguridad { grid-template-columns: repeat(4, 1fr); } }
 .ini-tarjeta-seguridad { padding: 4px 4px 0; }
 .ini-tarjeta-seguridad .sp-medallon { margin-bottom: 14px; }
 .ini-tarjeta-seguridad h3 { color: var(--verde); margin: 0 0 6px; }
 .ini-tarjeta-seguridad p { color: var(--tinta-2); margin: 0; }
-@media (min-width: 760px) {
+@media (min-width: 1040px) {
   .ini-seguridad > .ini-tarjeta-seguridad + .ini-tarjeta-seguridad { border-left: 1px solid var(--linea-2); padding-left: 24px; }
 }
+
+/* ---------- Hecho a mano en Ópalo (tienda) ---------- */
+.ini-taller {
+  position: relative;
+  background: var(--fondo);
+  background:
+    radial-gradient(ellipse 55% 60% at 100% 100%, color-mix(in srgb, var(--oro-suave) 80%, transparent), transparent 70%),
+    radial-gradient(ellipse 45% 55% at 0% 0%, color-mix(in srgb, var(--verde-suave) 70%, transparent), transparent 70%),
+    var(--fondo);
+  border-top: 1px solid var(--linea-2);
+  border-bottom: 1px solid var(--linea-2);
+}
+.ini-taller .sp-encabezado-seccion .subtitulo { max-width: 58ch; }
+.ini-taller-pronto {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  align-items: center;
+  padding: 22px 24px;
+  border-radius: var(--radio-lg);
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  box-shadow: var(--sombra);
+}
+.ini-taller-arte { display: flex; align-items: flex-end; width: 150px; flex: none; }
+.ini-taller-arte .ilustracion-producto { width: 50%; }
+.ini-taller-pronto > div:last-child { flex: 1 1 240px; }
+.ini-taller-pronto-titulo { font-family: var(--display); font-size: 1.6rem; font-weight: 600; line-height: 1.2; color: var(--verde); margin: 0 0 4px; }
+.ini-taller-pronto-texto { margin: 0; color: var(--tinta-2); }
 .ini-nota-edad {
   margin: 28px 0 0;
   padding: 14px 18px;

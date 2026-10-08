@@ -1,0 +1,186 @@
+/*
+  Taller (/admin/taller) y piezas que comparte con el Mostrador. Prefijo de clases: .tal-
+  Reutiliza de Inventario.css las tablas-tarjeta, líneas dinámicas y entradas con unidad, y de
+  Costos.css el resumen de costos. Todo color sale de tokens.css.
+*/
+.tal-pagina { min-width: 0; }
+
+/* Barra con texto y botón arriba de cada pestaña */
+.tal-barra { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px 20px; flex-wrap: wrap; margin-bottom: 16px; }
+.tal-barra > p { flex: 1 1 360px; max-width: 78ch; }
+@media (max-width: 519.98px) { .tal-barra > .btn { flex: 1 1 100%; } }
+
+.tal-casilla { margin: -4px 0 14px; }
+
+/* Chips de filtro */
+.tal-filtros { align-items: flex-end; }
+.tal-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.tal-chip {
+  border: 1px solid var(--linea);
+  background: var(--superficie);
+  color: var(--tinta-2);
+  border-radius: 999px;
+  min-height: 40px;
+  padding: 0 14px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.tal-chip:hover { border-color: var(--verde); color: var(--verde); }
+.tal-chip-activo { background: var(--verde-suave); border-color: var(--verde); color: var(--verde); }
+.tal-filtros .tal-boton-nuevo { margin-left: auto; }
+@media (max-width: 559.98px) {
+  .tal-filtros .campo { flex: 1 1 100%; min-width: 0; }
+  .tal-filtros .tal-boton-nuevo { flex: 1 1 100%; margin-left: 0; }
+}
+
+/* Miniatura: foto o ilustración en un cuadro de proporción fija */
+.tal-miniatura {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 5 / 4;
+  background: var(--fondo-alt);
+  border-radius: var(--radio-sm);
+  overflow: hidden;
+  color: var(--tinta);
+}
+.tal-miniatura img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tal-miniatura .ilustracion-producto { width: 92%; }
+
+/* ---------- Productos de la tienda ---------- */
+.tal-productos { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); }
+.tal-producto {
+  display: grid;
+  grid-template-columns: 124px minmax(0, 1fr);
+  gap: 16px;
+  padding: 14px 16px;
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  border-radius: var(--radio);
+}
+.tal-producto-imagen { align-self: start; }
+.tal-producto-cuerpo { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tal-producto-cabeza { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.tal-producto-nombre { font-family: var(--cuerpo); font-size: 1.02rem; font-weight: 700; margin: 0; overflow-wrap: anywhere; }
+.tal-producto-precio { font-weight: 700; white-space: nowrap; }
+.tal-producto-cifras { display: flex; gap: 6px 18px; flex-wrap: wrap; margin: 2px 0 0; }
+.tal-producto-cifras dt { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tinta-3); }
+.tal-producto-cifras dd { margin: 0; font-weight: 700; }
+.tal-producto-cifras .adm-sub { font-weight: 400; }
+.tal-agotado { color: var(--alerta); }
+.tal-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.tal-producto-acciones { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.tal-inactivo { background: var(--fondo); }
+.tal-inactivo .tal-producto-nombre { color: var(--tinta-3); }
+@media (max-width: 379.98px) { .tal-producto { grid-template-columns: 88px minmax(0, 1fr); gap: 10px; padding: 12px; } }
+
+/* ---------- Ficha (modal) ---------- */
+.adm-modal.adm-modal-completo:has(.tal-ficha) { max-width: 1100px; }
+.tal-ficha { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+@media (min-width: 900px) {
+  .tal-ficha { grid-template-columns: minmax(0, 1fr) 280px; align-items: start; }
+  .tal-ficha-vista { position: sticky; top: 12px; }
+}
+.tal-ficha-vista { background: var(--fondo-alt); border-radius: var(--radio); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.tal-vista-tarjeta { background: var(--superficie); border: 1px solid var(--linea-2); border-radius: var(--radio); overflow: hidden; }
+.tal-vista-imagen { aspect-ratio: 5 / 4; display: flex; align-items: center; justify-content: center; background: var(--fondo); color: var(--tinta); }
+.tal-vista-imagen img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tal-vista-imagen .ilustracion-producto { width: 90%; }
+.tal-vista-texto { padding: 10px 14px 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.tal-vista-nombre { font-family: var(--display); font-size: 1.3rem; font-weight: 600; margin: 0; line-height: 1.2; color: var(--tinta); overflow-wrap: anywhere; }
+.tal-vista-precio { font-weight: 700; margin: 2px 0 0; color: var(--verde); }
+.tal-color { display: flex; gap: 8px; align-items: stretch; }
+.tal-color-muestra {
+  width: 56px;
+  min-height: 44px;
+  padding: 3px;
+  border: 1px solid var(--linea);
+  border-radius: var(--radio-sm);
+  background: var(--superficie);
+  cursor: pointer;
+  flex: none;
+}
+.input.tal-color-hex { max-width: 130px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.tal-enlace-boton { border: 0; background: none; padding: 0; color: var(--verde); font: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+
+/* ---------- Fórmulas ---------- */
+.tal-calculadora { background: var(--oro-suave); border-radius: var(--radio); padding: 12px 16px; margin-bottom: 16px; }
+.tal-calc-titulo { font-size: 1.15rem; margin: 0 0 6px; color: var(--oro-osc); }
+.tal-calc-fila { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.tal-calc-fila .etiqueta { color: var(--tinta); font-size: 0.95rem; }
+.tal-calc-entrada { width: 120px; }
+.tal-calculadora .ayuda { color: var(--tinta-2); }
+.tal-sin-formula { margin-top: 16px; }
+.tal-sin-formula-lista { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.tal-sugerido { display: inline-flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.tabla.tal-tabla-formulas td.tal-celda-sugerido { white-space: nowrap; }
+@container (max-width: 799.98px) {
+  .tabla.tal-tabla-formulas tr:not(.cos-grupo) { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+  .tabla.tal-tabla-formulas .tal-celda-sugerido { grid-column: 1 / -1; }
+  .tal-sugerido { justify-content: flex-start; }
+}
+@container lineas (min-width: 700px) {
+  .inv-linea.tal-linea { grid-template-columns: minmax(0, 2.6fr) minmax(130px, 1.1fr) minmax(96px, 0.8fr) 72px; }
+}
+@container lineas (max-width: 699.98px) {
+  .tal-linea .inv-linea-quitar { grid-column: 1 / -1; }
+}
+
+/* ---------- Lotes ---------- */
+.tal-seccion { margin-bottom: 22px; }
+.tal-seccion-titulo { font-size: 1.35rem; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+.tal-seccion-cuenta { font-family: var(--cuerpo); font-size: 0.8rem; font-weight: 700; background: var(--fondo-alt); color: var(--tinta-2); border-radius: 999px; padding: 0 8px; line-height: 1.7; }
+.tal-seccion-ayuda { margin: 0 0 10px; max-width: 78ch; }
+.tal-lotes { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); }
+.tal-lote {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  border-left: 4px solid var(--info);
+  border-radius: var(--radio-sm);
+  min-width: 0;
+}
+.tal-lote-listo { border-color: var(--alerta); border-left-color: var(--alerta); }
+.tal-lote-disponible { border-left-color: var(--exito); }
+.tal-lote-descartado { border-left-color: var(--linea); background: var(--fondo); color: var(--tinta-2); }
+.tal-lote-cabeza { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.tal-lote-titulo { display: flex; flex-direction: column; min-width: 0; }
+.tal-lote-titulo strong { overflow-wrap: anywhere; }
+.tal-lote-codigo { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.85rem; color: var(--tinta-2); letter-spacing: 0.04em; }
+.tal-lote-curado { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
+.tal-listo-texto { color: var(--alerta); font-weight: 700; }
+.tal-lote-datos { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px 14px; margin: 0; }
+.tal-lote-datos dt { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tinta-3); }
+.tal-lote-datos dd { margin: 0; overflow-wrap: anywhere; }
+.tal-lote-notas { margin: 0; font-size: 0.9rem; font-style: italic; color: var(--tinta-2); overflow-wrap: anywhere; }
+.tal-lote-acciones { display: flex; flex-wrap: wrap; gap: 6px; }
+.tal-ver-todos { margin-top: 8px; }
+
+/* Barra del curado */
+.tal-curado { display: flex; align-items: center; gap: 10px; }
+.tal-curado-barra { flex: 1; height: 8px; background: var(--fondo-alt); border-radius: 999px; overflow: hidden; border: 1px solid var(--linea-2); }
+.tal-curado-relleno { display: block; height: 100%; background: var(--verde); border-radius: 999px; }
+.tal-lote-listo .tal-curado-relleno { background: var(--alerta); }
+.tal-curado-texto { font-size: 0.78rem; color: var(--tinta-3); white-space: nowrap; }
+
+/* Registrar lote */
+.tal-listo-desde { min-height: 44px; display: flex; align-items: center; font-weight: 700; color: var(--verde); }
+.tal-materiales { margin-top: 12px; background: var(--fondo-alt); border-radius: var(--radio-sm); padding: 10px 14px; }
+.tal-materiales-lista { list-style: none; margin: 6px 0 0; padding: 0; }
+.tal-materiales-lista li { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; border-bottom: 1px solid var(--linea-2); font-size: 0.92rem; }
+.tal-materiales-lista li:last-child { border-bottom: 0; }
+.tal-falta, .tal-materiales-lista li.tal-falta { color: var(--error); font-weight: 700; }
+.tal-resultado { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; background: var(--verde-suave); border-radius: var(--radio); padding: 16px; }
+.tal-resultado-etiqueta { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--verde); }
+.tal-resultado-codigo { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 1.8rem; font-weight: 700; color: var(--tinta); letter-spacing: 0.06em; }
+.cos-resumen dd.tal-resultado-fecha { font-size: 1.05rem; }
+
+/* ---------- Márgenes ---------- */
+.tal-celda-alertas { min-width: 130px; }
+@container (max-width: 799.98px) {
+  .tabla.tal-tabla-margenes .tal-celda-alertas { grid-column: 1 / -1; }
+}

@@ -286,7 +286,7 @@ export function CatalogoFormServicio({ servicio, categorias, slugsUsados, catego
                 </span>
               )}
               <span className="ayuda" id="srv-consentimiento-ayuda">
-                Se firma al reservar o en cabina. Sin consentimiento firmado la cita no puede iniciar.
+                Se firma en la tablet de la cabina, antes del servicio. Sin consentimiento firmado la cita no puede iniciar.
                 {pideConsentimiento ? ' Es obligatorio mientras el servicio esté activo y disponible.' : ''}
               </span>
             </div>

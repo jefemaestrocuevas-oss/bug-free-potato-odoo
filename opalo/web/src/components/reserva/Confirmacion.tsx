@@ -2,9 +2,9 @@
 // datos de la cita, recordatorios, calendario y WhatsApp.
 import { Link } from 'react-router-dom';
 import type { Configuracion } from '../../lib/api/tipos';
-import { duracion, enlaceWhatsApp, ETIQUETA_ESTADO_CITA, fechaHora, fechaLarga, hora, telefonoBonito } from '../../lib/format';
+import { duracion, enlaceWhatsApp, ETIQUETA_ESTADO_CITA, fechaHora, fechaLarga, hora } from '../../lib/format';
 import type { Confirmacion as DatosConfirmacion } from './estado';
-import { descargarIcs } from './ics';
+import { descargarIcs, eventoDeCita } from './ics';
 import { unirConY } from './utilidades';
 
 export function Confirmacion({ conf, config, onOtra }: { conf: DatosConfirmacion; config: Configuracion; onOtra: () => void }) {
@@ -14,18 +14,7 @@ export function Confirmacion({ conf, config, onOtra }: { conf: DatosConfirmacion
 
   function agregarCalendario() {
     descargarIcs(
-      {
-        uid: conf.resultado.id,
-        inicio: conf.inicio,
-        fin: conf.fin,
-        titulo: `Cita en ${config.nombre_negocio}: ${servicios}`,
-        descripcion: [
-          `Te atiende ${conf.personal_nombre}.`,
-          `Llega puntual: tienes ${config.tolerancia_retraso_min} minutos de tolerancia.`,
-          `Para cancelar o cambiar tu cita, hazlo con ${config.horas_cancelacion} horas de anticipación desde tu cuenta o por WhatsApp al ${telefonoBonito(config.telefono_whatsapp)}.`,
-        ].join('\n'),
-        lugar: config.direccion,
-      },
+      eventoDeCita({ id: conf.resultado.id, inicio: conf.inicio, fin: conf.fin, servicios: conf.servicios, personal_nombre: conf.personal_nombre }, config),
       'cita-opalo.ics',
     );
   }

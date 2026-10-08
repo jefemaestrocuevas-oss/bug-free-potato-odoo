@@ -100,8 +100,8 @@ begin
   perform pruebas.espera_rechazo(format('insert into public.productos (nombre) values (%L)', 'Producto de clienta'));
   perform pruebas.como_anon();
   perform pruebas.igual(pruebas.filas('public.productos'), 0, 'el visitante no ve productos');
-  perform pruebas.igual(pruebas.filas('public.productos_tienda'), 1, 'pero sí la tienda');
-  perform pruebas.igual((select hay_stock from public.productos_tienda limit 1), true, 'con stock');
+  perform pruebas.igual(pruebas.filas('public.productos_tienda'), 6, 'pero sí la tienda (crema, 3 jabones y 2 velas de ejemplo)');
+  perform pruebas.igual((select hay_stock from public.productos_tienda where nombre like 'Crema corporal%'), true, 'con stock');
   perform pruebas.como_postgres();
   raise notice 'OK - compras, mermas, ajustes y reposición';
 end $$;

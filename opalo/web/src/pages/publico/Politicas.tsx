@@ -5,8 +5,10 @@ import { useAsync } from '../../lib/useAsync';
 import { Cargando, MensajeError, Vacio } from '../../components/ui/Estado';
 import { Markdown } from '../../components/ui/Markdown';
 import { EncabezadoPagina, useTitulo } from '../../components/publico/EncabezadoPagina';
+import { Gema } from '../../components/ui/Gema';
 import { IconoFirma, IconoFlecha, IconoImprimir } from '../../components/publico/Iconos';
 import { useContacto } from '../../components/publico/contacto';
+import { politicasPublicas, seRevisaEnSpa } from '../../components/publico/politicas';
 import './politicas.css';
 
 /** Quita el primer "# Título" del documento: el título ya se muestra arriba. */
@@ -20,12 +22,15 @@ function huella(hash: string | null): string | null {
 
 export default function Politicas() {
   const { tipo } = useParams<{ tipo?: string }>();
-  const politicas = useAsync(() => api.getPoliticasVigentes(), []);
+  const { firma_en_linea } = useContacto();
+  const todas = useAsync(() => api.getPoliticasVigentes(), []);
+  // Con la firma en el spa (ESPEC §9) los consentimientos no se publican en el sitio.
+  const politicas = todas.datos ? politicasPublicas(todas.datos, firma_en_linea) : undefined;
+  const carga = { cargando: todas.cargando, error: todas.error, recargar: todas.recargar, politicas, firmaEnLinea: firma_en_linea };
 
-  if (tipo) {
-    return <Documento tipo={tipo} cargando={politicas.cargando} error={politicas.error} recargar={politicas.recargar} politicas={politicas.datos} />;
-  }
-  return <Indice cargando={politicas.cargando} error={politicas.error} recargar={politicas.recargar} politicas={politicas.datos} />;
+  if (tipo && seRevisaEnSpa(tipo, firma_en_linea)) return <SeRevisaEnElSpa tipo={tipo} politicas={politicas} />;
+  if (tipo) return <Documento tipo={tipo} {...carga} />;
+  return <Indice {...carga} />;
 }
 
 interface PropsCarga {
@@ -33,9 +38,10 @@ interface PropsCarga {
   error: string | null;
   recargar: () => void;
   politicas: Politica[] | undefined;
+  firmaEnLinea: boolean;
 }
 
-function Indice({ cargando, error, recargar, politicas }: PropsCarga) {
+function Indice({ cargando, error, recargar, politicas, firmaEnLinea }: PropsCarga) {
   useTitulo('Políticas');
   const contacto = useContacto();
   const generales = (politicas ?? []).filter((p) => POLITICAS_GENERALES.includes(p.tipo));
@@ -45,7 +51,7 @@ function Indice({ cargando, error, recargar, politicas }: PropsCarga) {
       <EncabezadoPagina eyebrow="Políticas" titulo="Claras desde el principio">
         <p>
           Antes de tu primera reserva te pedimos aceptar los términos, el aviso de privacidad y la política de cancelación.
-          El consentimiento informado de cada servicio lo firmas en línea al reservar.
+          {firmaEnLinea ? ' El consentimiento informado de cada servicio lo firmas en línea al reservar.' : ''}
         </p>
       </EncabezadoPagina>
       <div className="contenedor seccion pol">
@@ -66,7 +72,7 @@ function Indice({ cargando, error, recargar, politicas }: PropsCarga) {
             </ul>
           </section>
         )}
-        {consentimientos.length > 0 && (
+        {firmaEnLinea && consentimientos.length > 0 && (
           <section aria-labelledby="pol-consentimientos" className="pol-grupo">
             <h2 id="pol-consentimientos">Consentimientos informados</h2>
             <p className="pol-grupo-texto">
@@ -109,7 +115,7 @@ function TarjetaPolitica({ politica: p }: { politica: Politica }) {
   );
 }
 
-function Documento({ tipo, cargando, error, recargar, politicas }: PropsCarga & { tipo: string }) {
+function Documento({ tipo, cargando, error, recargar, politicas, firmaEnLinea }: PropsCarga & { tipo: string }) {
   const politica = politicas?.find((p) => p.tipo === tipo);
   useTitulo(politica?.titulo ?? (ETIQUETA_POLITICA[tipo] || 'Políticas'));
   const otras = (politicas ?? []).filter((p) => p.tipo !== tipo);
@@ -160,8 +166,8 @@ function Documento({ tipo, cargando, error, recargar, politicas }: PropsCarga & 
                 </div>
               </dl>
               <p className="pol-huella-ayuda">
-                La huella cambia si cambia una sola letra del documento: así sabes exactamente qué versión aceptaste o
-                firmaste.
+                La huella cambia si cambia una sola letra del documento: así sabes exactamente qué versión aceptaste
+                {firmaEnLinea ? ' o firmaste' : ''}.
               </p>
               <button type="button" className="btn btn-texto btn-sm pol-imprimir" onClick={() => window.print()}>
                 <IconoImprimir tam={18} /> Imprimir o guardar en PDF
@@ -182,6 +188,45 @@ function Documento({ tipo, cargando, error, recargar, politicas }: PropsCarga & 
             </aside>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** /politicas/consentimiento_*: con la firma en el spa, el documento se revisa en persona (ESPEC §9). */
+function SeRevisaEnElSpa({ tipo, politicas }: { tipo: string; politicas: Politica[] | undefined }) {
+  const nombre = ETIQUETA_POLITICA[tipo] || 'Consentimiento informado';
+  useTitulo(nombre);
+  const otras = politicas ?? [];
+  return (
+    <div className="contenedor seccion pol-doc">
+      <nav className="pol-migas" aria-label="Ruta">
+        <Link to="/politicas">Políticas</Link>
+        <span aria-hidden="true"> / </span>
+        <span aria-current="page">{nombre}</span>
+      </nav>
+      <section className="pol-en-spa" aria-labelledby="pol-en-spa-titulo">
+        <Gema tam={36} className="pol-en-spa-gema" />
+        <h1 id="pol-en-spa-titulo">Este documento se revisa contigo en el spa</h1>
+        <p>
+          El día de tu cita, antes de empezar, tu especialista lo revisa contigo: te explica qué incluye el servicio y sus
+          cuidados, y resuelve tus dudas con calma.
+        </p>
+        <Link className="btn btn-primario" to="/politicas">
+          Ver nuestras políticas
+        </Link>
+      </section>
+      {otras.length > 0 && (
+        <aside className="pol-otras pol-en-spa-otras" aria-labelledby="pol-otras-titulo">
+          <h2 id="pol-otras-titulo">Políticas para todas nuestras clientas</h2>
+          <ul>
+            {otras.map((p) => (
+              <li key={p.id}>
+                <Link to={`/politicas/${p.tipo}`}>{p.titulo}</Link>
+              </li>
+            ))}
+          </ul>
+        </aside>
       )}
     </div>
   );
