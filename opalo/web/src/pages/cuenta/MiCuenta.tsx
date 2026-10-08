@@ -13,12 +13,13 @@ import { SeccionServicios } from '../../components/cuenta/SeccionServicios';
 import '../../components/reserva/reserva.css';
 import './cuenta.css';
 
+// Etiquetas cortas y parejas para que las cinco pestañas quepan en el celular.
 const SECCIONES = [
-  { clave: 'citas', texto: 'Mis citas' },
-  { clave: 'pedidos', texto: 'Pedidos' },
-  { clave: 'servicios', texto: 'Mis servicios' },
-  { clave: 'documentos', texto: 'Documentos' },
-  { clave: 'datos', texto: 'Mis datos' },
+  { clave: 'citas', texto: 'Citas', titulo: 'Mis citas' },
+  { clave: 'pedidos', texto: 'Pedidos', titulo: 'Mis pedidos' },
+  { clave: 'servicios', texto: 'Servicios', titulo: 'Mis servicios' },
+  { clave: 'documentos', texto: 'Documentos', titulo: 'Mis documentos' },
+  { clave: 'datos', texto: 'Datos', titulo: 'Mis datos' },
 ] as const;
 
 type Seccion = (typeof SECCIONES)[number]['clave'];
@@ -45,7 +46,7 @@ export default function MiCuenta() {
 
   useEffect(() => {
     const anterior = document.title;
-    const nombre = SECCIONES.find((x) => x.clave === actual)?.texto ?? 'Mi cuenta';
+    const nombre = SECCIONES.find((x) => x.clave === actual)?.titulo ?? 'Mi cuenta';
     document.title = `${nombre} · Ópalo Spa`;
     return () => {
       document.title = anterior;

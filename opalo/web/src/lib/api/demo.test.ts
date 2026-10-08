@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { crearApiDemo } from './demo';
+import { crearApiDemo, FUENTES_DEMO } from './demo';
 import { CUENTAS_DEMO, PASSWORD_DEMO } from './cuentasDemo';
+import type { Ctx } from './demo/permisos';
+import * as R from './demo/reglas';
+import { sembrar } from './demo/sembrado';
 import { sha256 } from './demo/utilidades';
 import { fechaLocal, isoDesdeLocal, sumarDias } from '../format';
 import { POLITICAS_GENERALES, type DatosFirma, type OpaloApi, type Rol } from './tipos';
@@ -299,7 +302,7 @@ describe('R4 reservar', () => {
     const r2 = await api.reservarCita({ items: [{ servicio_id: facial.id }], inicio: a(MARTES, '11:00'), firma: FIRMA });
     expect(r2.estado).toBe('confirmada');
     expect(r2.requiere_revision).toBe(false);
-    expect(r2.alertas).toHaveLength(1);
+    expect(r2.alertas).toEqual([]); // como SQL: "precaución" no entra en las alertas de la cita
   });
 
   it('R13: una política nueva se debe volver a aceptar', async () => {
@@ -845,4 +848,177 @@ describe('persistencia y copias', () => {
 it('fechaLocal y la zona fija de Querétaro', () => {
   expect(fechaLocal(new Date('2026-11-03T05:59:00Z'))).toBe('2026-11-02');
   expect(fechaLocal(new Date('2026-11-03T06:00:00Z'))).toBe(MARTES);
+});
+
+/** Base sembrada (sin ejemplos) con un Ctx por rol, para preparar estados que la API no expone. */
+function baseDirecta(ahora = AHORA) {
+  const db = sembrar(FUENTES_DEMO, ahora, { ejemplos: false });
+  const como = (rol: Rol): Ctx => ({ db, ahora, usuarioId: db.usuarios.find((u) => u.email === emailDe(rol))!.id, userAgent: null });
+  return { db, como };
+}
+
+describe('paridad con SQL (hallazgos de revisión)', () => {
+  it('una cita "no asistió" no se completa: no queda encimada con la que tomó su lugar', async () => {
+    const { api } = entorno();
+    const cejas = await servicio(api, 'cejas');
+    await clientaLista(api);
+    const ausente = await api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), firma: FIRMA });
+    await entrar(api, 'personal');
+    await api.admin.cambiarEstadoCita(ausente.id, 'no_asistio');
+    await otraClienta(api);
+    await expect(
+      api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), firma: FIRMA }),
+    ).resolves.toMatchObject({ estado: 'confirmada' });
+    await entrar(api, 'personal');
+    await expect(api.admin.completarCita(ausente.id)).rejects.toThrow('Esta cita está cancelada');
+    await expect(api.admin.cambiarEstadoCita(ausente.id, 'completada')).rejects.toThrow('Esta cita está cancelada');
+    const agenda = await api.admin.getAgenda(MARTES, MARTES);
+    expect(agenda.map((c) => c.estado).sort()).toEqual(['confirmada', 'no_asistio']);
+  });
+
+  it('una cita completada ya no cambia de estado', async () => {
+    const { api } = entorno();
+    const cejas = await servicio(api, 'cejas');
+    await clientaLista(api);
+    const r = await api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), firma: FIRMA });
+    await entrar(api, 'personal');
+    await api.admin.completarCita(r.id);
+    for (const estado of ['confirmada', 'pendiente', 'en_curso', 'no_asistio', 'cancelada'] as const)
+      await expect(api.admin.cambiarEstadoCita(r.id, estado)).rejects.toThrow('Esta cita ya se completó.');
+    await api.admin.cambiarEstadoCita(r.id, 'completada'); // mismo estado: no hace nada
+    const [cita] = await api.admin.getAgenda(MARTES, MARTES);
+    expect(cita.estado).toBe('completada');
+  });
+
+  it('confirmar una cita pendiente quita "por revisar" y conserva las alertas', async () => {
+    const { api } = entorno();
+    const cejas = await servicio(api, 'cejas');
+    await clientaLista(api, ['diabetes']);
+    const r = await api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), firma: FIRMA });
+    expect(r).toMatchObject({ estado: 'pendiente', requiere_revision: true });
+    await entrar(api, 'personal');
+    await api.admin.cambiarEstadoCita(r.id, 'confirmada');
+    const [cita] = await api.admin.getAgenda(MARTES, MARTES);
+    expect(cita).toMatchObject({ estado: 'confirmada', requiere_revision: false });
+    expect(cita.alertas).toHaveLength(1);
+  });
+
+  it('contraindicación con categorias = [] no aplica a ninguna; null aplica a todas', () => {
+    const { db, como } = baseDirecta();
+    const clienta = como('cliente');
+    R.aceptarPoliticas(clienta, db.politicas.filter((p) => p.activa).map((p) => p.id));
+    R.guardarFicha(clienta, { respuestas: { diabetes: true }, detalles: {}, alergias: null, medicamentos: null, observaciones: null, acepta_datos_sensibles: true });
+    const diabetes = db.contraindicaciones.find((c) => c.clave === 'diabetes')!;
+    const cejas = db.servicios.find((s) => s.slug === 'cejas')!;
+    const pedir = (hhmm: string) => R.reservarCita(clienta, { items: [{ servicio_id: cejas.id }], inicio: a(MARTES, hhmm), firma: FIRMA });
+    diabetes.categorias = [];
+    expect(pedir('10:00')).toMatchObject({ estado: 'confirmada', requiere_revision: false, alertas: [] });
+    diabetes.categorias = null;
+    expect(pedir('11:00')).toMatchObject({ estado: 'pendiente', requiere_revision: true, alertas: [diabetes.pregunta] });
+  });
+
+  it('un crédito de regalo sin canjear no sirve para reservar; ya canjeado, sí', async () => {
+    const { api } = entorno();
+    const cejas = await servicio(api, 'cejas');
+    await clientaLista(api);
+    const ped = await api.crearPedido([{ tipo: 'servicio', id: cejas.id, cantidad: 1, regalo_para: 'Ana' }], 'efectivo');
+    await entrar(api, 'personal');
+    await api.admin.registrarPago({ monto: ped.total, metodo: 'efectivo', pedido_id: ped.id });
+    await entrar(api, 'cliente');
+    const [regalo] = await api.getMisCreditos();
+    expect(regalo.codigo_regalo).not.toBeNull();
+    const pedir = () => api.reservarCita({ items: [{ servicio_id: cejas.id, credito_id: regalo.id }], inicio: a(MARTES, '10:00'), firma: FIRMA });
+    await expect(pedir()).rejects.toThrow(M.credito);
+    expect((await api.getMisCreditos())[0].usados).toBe(0);
+
+    await otraClienta(api);
+    await api.canjearRegalo(regalo.codigo_regalo!);
+    await expect(pedir()).resolves.toMatchObject({ estado: 'confirmada' });
+    expect((await api.getMisCreditos())[0]).toMatchObject({ usados: 1, restantes: 0 });
+  });
+
+  it('edad mínima y tutor se miden el día de la cita, no hoy', async () => {
+    // Hoy es lunes 2 de noviembre de 2026; las citas son el martes 3.
+    const { api } = entorno();
+    const cejas = await servicio(api, 'cejas');
+    const sesion = await entrar(api, 'cliente');
+    await aceptarGenerales(api);
+    await fichaCon(api);
+    const datos = { nombre: 'Mariana', apellidos: 'López', telefono: null, acepta_promociones: false };
+    const nacio = (fecha_nacimiento: string) => api.actualizarMisDatos({ ...datos, fecha_nacimiento });
+    const conTutor: DatosFirma = { ...FIRMA, tutor_nombre: 'Rosa López' };
+    const pedir = (hhmm: string, firma: DatosFirma) => api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, hhmm), firma });
+
+    await nacio('2011-11-04'); // 14 hoy y 14 el martes
+    await expect(pedir('10:00', conTutor)).rejects.toThrow(M.edad);
+    await nacio('2011-11-03'); // 14 hoy, 15 el martes
+    await expect(pedir('10:00', FIRMA)).rejects.toThrow(M.tutor);
+    const quince = await pedir('10:00', conTutor);
+    await nacio('2008-11-03'); // 17 hoy, 18 el martes: ya no necesita tutor
+    const dieciocho = await pedir('11:00', FIRMA);
+    const docs = await api.getMisConsentimientos();
+    expect(docs.find((d) => d.cita_id === quince.id)!.tutor_nombre).toBe('Rosa López');
+    expect(docs.find((d) => d.cita_id === dieciocho.id)!.tutor_nombre).toBeNull();
+
+    // El personal agenda y la clienta firma después: también cuenta la fecha de la cita.
+    await entrar(api, 'personal');
+    const staff = (hhmm: string) =>
+      api.admin.reservarParaCliente({ cliente_id: sesion.cliente!.id, items: [{ servicio_id: cejas.id }], inicio: a(MARTES, hhmm), origen: 'whatsapp' });
+    const porWhatsApp = await staff('12:00');
+    await entrar(api, 'cliente');
+    await api.firmarConsentimientoCita(porWhatsApp.id, conTutor);
+    expect((await api.getMisConsentimientos()).find((d) => d.cita_id === porWhatsApp.id)!.tutor_nombre).toBeNull();
+    await nacio('2011-11-03');
+    await entrar(api, 'personal');
+    await expect(staff('13:00')).resolves.toMatchObject({ estado: 'confirmada' });
+    await entrar(api, 'cliente');
+    await nacio('2011-11-04');
+    await entrar(api, 'personal');
+    await expect(staff('14:00')).rejects.toThrow(M.edad);
+  });
+
+  it('se puede firmar una cita completada y cada versión nueva de la política se firma aparte', async () => {
+    const { api } = entorno();
+    const cejas = await servicio(api, 'cejas');
+    await clientaLista(api);
+    const r = await api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), firma: FIRMA });
+    await entrar(api, 'personal');
+    await api.admin.completarCita(r.id);
+    await entrar(api, 'admin');
+    await api.admin.publicarPolitica('consentimiento_depilacion', 'Consentimiento v2', '# Consentimiento v2\n\nTexto nuevo.');
+    await entrar(api, 'cliente');
+    await api.firmarConsentimientoCita(r.id, FIRMA);
+    await api.firmarConsentimientoCita(r.id, FIRMA); // la misma versión no se firma dos veces
+    const docs = await api.getMisConsentimientos();
+    expect(docs.map((d) => d.politica_version).sort()).toEqual([1, 2]);
+
+    const otra = await api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MIERCOLES, '12:00'), firma: FIRMA });
+    await api.cancelarCita(otra.id);
+    await expect(api.firmarConsentimientoCita(otra.id, FIRMA)).rejects.toThrow('Esta cita ya no admite firmas.');
+  });
+
+  it('no acepta pagos a un pedido reembolsado', () => {
+    const { db, como } = baseDirecta();
+    const express = db.paquetes.find((p) => p.slug === 'express')!;
+    const ped = R.crearPedido(como('cliente'), [{ tipo: 'paquete', id: express.id, cantidad: 1 }], 'efectivo');
+    db.pedidos.find((p) => p.id === ped.id)!.estado = 'reembolsado';
+    expect(() => R.registrarPago(como('personal'), { monto: 100, metodo: 'efectivo', pedido_id: ped.id })).toThrow('Ese pedido está cancelado.');
+    expect(db.pagos).toHaveLength(0);
+  });
+
+  it('las cortesías no cuentan como ingreso ni como total pagado; sus propinas sí', async () => {
+    const { api } = entorno();
+    const cejas = await servicio(api, 'cejas');
+    const sesion = await entrar(api, 'cliente');
+    await entrar(api, 'personal');
+    const r = await api.admin.reservarParaCliente({ cliente_id: sesion.cliente!.id, items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), origen: 'mostrador' });
+    await api.admin.registrarPago({ monto: 500, metodo: 'efectivo', cita_id: r.id });
+    await api.admin.registrarPago({ monto: 200, propina: 50, metodo: 'cortesia', cita_id: r.id });
+    await entrar(api, 'admin');
+    const [mes] = await api.admin.getResultados(1);
+    expect(mes).toMatchObject({ mes: '2026-11-01', ingresos: 500, propinas: 50, utilidad: 500, flujo: 500 });
+    expect((await api.admin.getResumenHoy()).mes_actual).toMatchObject({ ingresos: 500 });
+    const [clienta] = await api.admin.getClientes('mariana');
+    expect(clienta.total_pagado).toBe(500);
+  });
 });

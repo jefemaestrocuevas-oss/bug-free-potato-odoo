@@ -4,7 +4,7 @@ import type { DatosFirma, Slot, TipoPolitica } from '../../lib/api/tipos';
 import { duracion, ETIQUETA_POLITICA, fechaLarga, hora } from '../../lib/format';
 import { PanelFirma } from '../ui/PanelFirma';
 import { PieAsistente, type LineaResumen } from './Piezas';
-import { unirConY, type Total } from './utilidades';
+import { notaPago, unirConY, type Total } from './utilidades';
 
 const MSG_FIRMA = 'Falta tu firma o tu nombre completo.';
 
@@ -86,7 +86,7 @@ export function PasoFirma(p: Props) {
             <dd className="num">{p.total.texto}</dd>
           </div>
         </dl>
-        <p className="ayuda">Pagas en el spa el día de tu cita.</p>
+        <p className="ayuda">{notaPago(p.total)}</p>
       </section>
 
       <div className="campo">

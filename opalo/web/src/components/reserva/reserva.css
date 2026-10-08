@@ -11,7 +11,8 @@
 }
 .rv-titulo { color: var(--verde); font-size: clamp(2rem, 4.5vw, 3rem); margin-bottom: 8px; }
 .rv-intro { margin: 0; max-width: 60ch; }
-.rv-contenido { padding-top: clamp(18px, 3vw, 28px); padding-bottom: clamp(40px, 6vw, 72px); }
+/* .rv delante: base.css (.contenedor { padding: 0 … }) se carga después que este archivo y ganaría. */
+.rv .rv-contenido { padding-top: clamp(18px, 3vw, 28px); padding-bottom: clamp(40px, 6vw, 72px); }
 
 .rv-titulo-paso {
   font-size: clamp(1.6rem, 3.2vw, 2.1rem);
@@ -79,6 +80,10 @@ button.rv-progreso-boton:hover { background: var(--verde-suave); color: var(--ve
   .rv-rejilla { grid-template-columns: minmax(0, 1fr) 320px; align-items: start; gap: 32px; }
   .rv-resumen { position: sticky; top: 96px; }
 }
+/* Paso 6: el resumen ya está dentro del paso; en pantallas chicas no se repite debajo de los botones. */
+@media (max-width: 959px) {
+  .rv-resumen-firma { display: none; }
+}
 .rv-sola { max-width: 760px; }
 .rv-principal { min-width: 0; }
 .rv-paso-cuerpo { display: flex; flex-direction: column; gap: 18px; }
@@ -135,6 +140,9 @@ button.rv-progreso-boton:hover { background: var(--verde-suave); color: var(--ve
 }
 
 /* ---------- Paso 1: servicios ---------- */
+/* "Elegiste: …" arriba del paso; en escritorio ya se ve el resumen a un lado. */
+.rv-elegidos { margin: 0; padding: 10px 14px; border-radius: var(--radio-sm); background: var(--verde-suave); color: var(--tinta); overflow-wrap: anywhere; }
+@media (min-width: 960px) { .rv-elegidos { display: none; } }
 .rv-grupo { border: 0; padding: 0; margin: 0; min-width: 0; }
 .rv-grupo-titulo { font-family: var(--display); font-size: 1.45rem; font-weight: 600; color: var(--verde); padding: 0; margin-bottom: 2px; }
 .rv-grupo > .ayuda { display: block; margin: 0 0 10px; }
@@ -208,27 +216,29 @@ button.rv-progreso-boton:hover { background: var(--verde-suave); color: var(--ve
 .rv-cal-dia-hoy::after { content: ''; position: absolute; left: 50%; bottom: 4px; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: var(--oro); }
 .rv-cal-dia-elegido, .rv-cal-dia-elegido:hover { background: var(--verde); color: var(--fondo); border-color: var(--verde); }
 .rv-cal-dia-elegido.rv-cal-dia-hoy::after { background: var(--fondo); }
+.rv-cal-dia-sin-lugar { text-decoration: line-through; text-decoration-thickness: 1.5px; }
+.rv-cal-leyenda { margin: 8px 0 0; min-height: 1.4em; }
 
-.rv-horas { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); }
+.rv-horas-grupos { display: flex; flex-direction: column; gap: 16px; }
+.rv-horas-grupo { display: flex; flex-direction: column; gap: 8px; }
+.rv-horas-quien { margin: 0; font-size: 0.92rem; color: var(--tinta-2); overflow-wrap: anywhere; }
+.rv-horas-quien strong { color: var(--tinta); }
+.rv-horas { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
 .rv-hora {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  min-height: 56px;
-  padding: 10px 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 6px 10px;
   border: 1.5px solid var(--linea);
-  border-radius: var(--radio-sm);
+  border-radius: 999px;
   background: var(--superficie);
   color: var(--tinta);
-  text-align: left;
   cursor: pointer;
 }
 .rv-hora:hover { border-color: var(--verde); }
-.rv-hora-hora { font-size: 1.15rem; font-weight: 700; }
-.rv-hora-quien { font-size: 0.82rem; color: var(--tinta-2); overflow-wrap: anywhere; }
+.rv-hora-hora { font-size: 1.05rem; font-weight: 700; }
 .rv-hora-elegida { background: var(--verde); border-color: var(--verde); color: var(--fondo); }
-.rv-hora-elegida .rv-hora-quien { color: var(--fondo); }
 .rv-sin-horarios { border: 1px dashed var(--linea); border-radius: var(--radio); padding: 16px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .rv-sin-horarios p { margin: 0; }
 

@@ -41,7 +41,12 @@ export default function Resumen() {
       {r && (
         <>
           <div className="adm-kpis">
-            <Kpi etiqueta="Citas de hoy" valor={citasActivas.length} detalle={sinFirma ? `${sinFirma} sin consentimiento firmado` : 'Todas con firma'} />
+            <Kpi
+              etiqueta="Citas de hoy"
+              valor={citasActivas.length}
+              detalle={citasActivas.length === 0 ? 'Sin citas por ahora' : sinFirma ? `${sinFirma} sin consentimiento firmado` : 'Todas con firma'}
+              tono={sinFirma ? 'alerta' : undefined}
+            />
             <Kpi etiqueta="Por revisar" valor={r.por_revisar} detalle="Citas pendientes por la ficha de salud" tono={r.por_revisar ? 'alerta' : undefined} />
             <Kpi etiqueta="Pedidos por cobrar" valor={r.pedidos_pendientes} detalle="Pendientes de pago" />
             <Kpi etiqueta="Hay que reponer" valor={r.reposicion.length} detalle={r.reposicion.length === 1 ? 'producto' : 'productos'} tono={r.reposicion.length ? 'alerta' : undefined} />
@@ -89,8 +94,10 @@ export default function Resumen() {
                   <tbody>
                     {r.citas_hoy.map((c) => (
                       <tr key={c.id}>
-                        <td className="num adm-nowrap">
-                          {hora(c.inicio)}–{hora(c.fin)}
+                        <td className="adm-nowrap">
+                          <span className="num">
+                            {hora(c.inicio)}–{hora(c.fin)}
+                          </span>
                         </td>
                         <td>
                           <Link to={`/admin/clientes/${c.cliente_id}`}>{c.cliente_nombre}</Link>

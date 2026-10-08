@@ -27,6 +27,15 @@ select pr.id, pr.nombre, pr.marca, pr.presentacion, pr.precio_venta, (pr.stock_a
  where pr.activo and pr.vendible_en_linea and pr.precio_venta is not null
  order by pr.nombre;
 
+-- Notas internas de cada clienta (sólo personal). Personal y clientas comparten el rol
+-- "authenticated", así que la columna clientes.notas_internas no se le concede a ese rol
+-- (1100_seguridad) y el personal la lee aquí. Corre con permisos del dueño y filtra por rol
+-- (security_barrier: los filtros de quien consulta no se evalúan antes que es_personal()).
+create view public.v_clientes_notas with (security_barrier = true) as
+select c.id, c.notas_internas
+  from public.clientes c
+ where public.es_personal();
+
 -- -----------------------------------------------------------------------------
 -- Internas
 -- -----------------------------------------------------------------------------
@@ -200,7 +209,8 @@ select gr.id,
  where gr.activo and public.es_admin()
  order by gr.proximo_vencimiento nulls last, gr.concepto;
 
--- ¿Cuánto ganamos? Últimos 12 meses con actividad, mes en hora local (admin).
+-- ¿Cuánto ganamos? Últimos 12 meses con actividad hasta el mes en curso (un gasto con periodo
+-- futuro, p. ej. renta adelantada, no desplaza a los meses ya vividos), mes en hora local (admin).
 --   ingresos       = pagos sin propina (las cortesías no son ingreso)
 --   costo_insumos  = −Σ consumo × costo_unitario
 --   utilidad       = ingresos − costo_insumos − gastos
@@ -259,5 +269,6 @@ select m.mes,
   left join gas on gas.mes = m.mes
   left join cit on cit.mes = m.mes
  where public.es_admin()
+   and m.mes <= date_trunc('month', public.hoy_local())::date
  order by m.mes desc
  limit 12;

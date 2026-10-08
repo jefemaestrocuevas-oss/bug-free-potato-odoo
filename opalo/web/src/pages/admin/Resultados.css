@@ -1,0 +1,109 @@
+/*
+  Resultados (/admin/resultados). Prefijo de clases: .res-
+  La gráfica usa sus propias clases (.adm-grafica, en componentes.css). Todo color sale de tokens.css.
+*/
+
+.res-pagina { min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+.res-pagina > .adm-encabezado { margin-bottom: 0; }
+.res-pagina .aviso { margin-bottom: 0; }
+
+/* ---------- Este mes ---------- */
+.res-mes { min-width: 0; }
+.res-mes-cabeza { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; }
+.res-subtitulo { margin: 0; font-size: clamp(1.5rem, 2.8vw, 1.9rem); }
+.res-mes-nota { margin: 4px 0 14px; }
+.adm-kpis.res-kpis { margin-bottom: 0; }
+/* 4 indicadores: en fila si caben, si no 2 × 2 (nunca 3 + 1). */
+.res-mes { container: res-mes / inline-size; }
+@container res-mes (min-width: 440px) { .adm-kpis.res-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container res-mes (min-width: 860px) { .adm-kpis.res-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+/* Propinas: aparte de los indicadores del spa, con su explicación al lado. */
+.res-aparte { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; margin-top: 14px; }
+.res-kpi-aparte { display: flex; flex: 0 1 260px; min-width: min(100%, 220px); }
+.res-kpi-aparte .adm-kpi { flex: 1; border-style: dashed; border-color: var(--linea); background: var(--fondo); }
+.res-aparte-texto { flex: 1 1 300px; margin: 0; max-width: 62ch; }
+
+/* ---------- Tabla de 12 meses ---------- */
+/* Selectores con .tabla.res-tabla: base.css se carga después que este archivo. */
+.res-tabla-nota { margin: -4px 0 12px; max-width: 80ch; }
+.res-tabla-nota strong { color: var(--tinta-2); }
+.res-deslizar { margin: -4px 0 10px; }
+.res-envoltura { position: relative; }
+.res-envoltura:focus-visible { outline: 2px solid var(--oro); outline-offset: 2px; }
+.tabla.res-tabla td { white-space: nowrap; padding: 10px; }
+.tabla.res-tabla thead th { white-space: normal; vertical-align: bottom; padding: 10px; line-height: 1.3; }
+/* Encabezado de fila (mes): fijo a la izquierda al desplazar en pantallas angostas. */
+.tabla.res-tabla tbody th,
+.tabla.res-tabla tfoot th {
+  text-align: left;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--tinta);
+  background: var(--superficie);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--linea-2);
+  white-space: nowrap;
+}
+.tabla.res-tabla thead th:first-child,
+.tabla.res-tabla tbody th,
+.tabla.res-tabla tfoot th {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  box-shadow: inset -1px 0 0 var(--linea-2);
+}
+.tabla.res-tabla thead th:first-child { background: var(--fondo-alt); padding-left: 12px; }
+.tabla.res-tabla tbody th .adm-sub { font-weight: 600; }
+.res-mes-corto { display: none; }
+.tabla.res-tabla .res-fila-actual th,
+.tabla.res-tabla .res-fila-actual td { background: var(--fondo); }
+.tabla.res-tabla .res-fila-sin td { color: var(--tinta-3); }
+.tabla.res-tabla .res-fila-sin th { color: var(--tinta-2); font-weight: 600; }
+.tabla.res-tabla .res-fila-total th,
+.tabla.res-tabla .res-fila-total td { background: var(--fondo-alt); border-top: 1px solid var(--linea); border-bottom: 0; }
+.tabla.res-tabla .res-negativo { color: var(--error); }
+
+/*
+  Cuando la tabla tiene poco ancho (teléfono, tablet), el mes corto ("Oct 26") deja más espacio a las
+  cifras; el nombre completo queda para lectores de pantalla.
+*/
+.res-envoltura { container: res-tabla / inline-size; }
+@container res-tabla (max-width: 899.98px) {
+  .res-mes-largo {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .res-mes-corto { display: inline; }
+  .tabla.res-tabla { font-size: 0.86rem; }
+  .tabla.res-tabla td,
+  .tabla.res-tabla thead th { padding: 9px 8px; }
+  .tabla.res-tabla tbody th,
+  .tabla.res-tabla tfoot th,
+  .tabla.res-tabla thead th:first-child { padding-left: 10px; padding-right: 10px; font-size: 0.86rem; }
+  .tabla.res-tabla tfoot th { white-space: normal; min-width: 72px; }
+}
+
+/* ---------- Explicación ---------- */
+.res-formulas { display: grid; gap: 14px; grid-template-columns: 1fr; margin-bottom: 18px; }
+@media (min-width: 760px) { .res-formulas { grid-template-columns: 1fr 1fr; } }
+.res-formula { background: var(--fondo-alt); border-radius: var(--radio-sm); padding: 14px 16px; border-left: 3px solid var(--verde); }
+.res-formula p { margin: 0 0 6px; }
+.res-formula-nombre { font-family: var(--display); font-size: 1.3rem; font-weight: 600; color: var(--verde); line-height: 1.2; }
+.res-formula-cuenta { font-weight: 700; color: var(--tinta); }
+
+.res-glosario { display: grid; gap: 12px 28px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); margin: 0; }
+.res-glosario dt { font-weight: 700; color: var(--tinta); font-size: 0.92rem; }
+.res-glosario dd { margin: 2px 0 0; color: var(--tinta-2); font-size: 0.92rem; }
+
+/* ---------- Sin datos ---------- */
+.res-fuentes { display: inline-block; text-align: left; max-width: 62ch; margin: 0 auto; padding-left: 1.2em; color: var(--tinta-2); }
+.res-fuentes li { margin-bottom: 6px; }

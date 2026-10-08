@@ -1,0 +1,58 @@
+/*
+  Pedidos (.adm-pedidos-*): tabla y detalle en modal. Sólo tokens de color.
+*/
+.adm-pedidos-folio {
+  border: 0;
+  background: none;
+  padding: 6px 0;
+  min-height: 36px;
+  color: var(--verde);
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+.adm-pedidos-folio:hover { color: var(--verde-osc); }
+
+/* Modo tabla: el folio queda fijo al desplazar horizontalmente (ver tablas adaptables en ClientasPiezas.css). */
+@container adm-clientas-tabla (min-width: 881px) {
+  .adm-pedidos-tabla .adm-pedidos-col-folio,
+  .adm-pedidos-tabla th:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+  }
+  .adm-pedidos-tabla td.adm-pedidos-col-folio { background: var(--superficie); box-shadow: 1px 0 0 var(--linea-2); }
+  .adm-pedidos-tabla th:first-child { background: var(--fondo-alt); }
+}
+.adm-pedidos-col-articulos { min-width: 200px; max-width: 360px; }
+.adm-pedidos-pill-junto { margin-left: 6px; }
+
+.adm-pedidos-datos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; margin: 0; }
+@media (min-width: 640px) { .adm-pedidos-datos { grid-template-columns: repeat(3, 1fr); } }
+.adm-pedidos-datos div { min-width: 0; }
+.adm-pedidos-datos dt { font-size: 0.78rem; font-weight: 700; color: var(--tinta-3); }
+.adm-pedidos-datos dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+.adm-capitalizar::first-letter { text-transform: uppercase; }
+
+.adm-pedidos-nota { margin: 0; background: var(--fondo-alt); border-radius: var(--radio-sm); padding: 10px 14px; font-style: italic; color: var(--tinta-2); }
+.adm-pedidos-nota .etiqueta { display: block; font-style: normal; margin-bottom: 2px; }
+.adm-pedidos-articulo { font-weight: 600; }
+.adm-pedidos-regalo { color: var(--oro-osc); }
+.adm-pedidos-totales { justify-content: flex-end; }
+
+/* Artículos del pedido: en ventanas angostas (teléfono) cada artículo es un renglón con cifras abajo. */
+.adm-pedidos-items-envoltura { container: adm-pedidos-items / inline-size; }
+.adm-pedidos-items { position: relative; }
+@container adm-pedidos-items (max-width: 480px) {
+  .adm-pedidos-items-envoltura .adm-pedidos-items,
+  .adm-pedidos-items-envoltura .adm-pedidos-items tbody { display: block; }
+  .adm-pedidos-items-envoltura .adm-pedidos-items thead { display: none; }
+  .adm-pedidos-items-envoltura .adm-pedidos-items tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 12px; padding: 12px 14px; border-bottom: 1px solid var(--linea-2); }
+  .adm-pedidos-items-envoltura .adm-pedidos-items tr:last-child { border-bottom: 0; }
+  .adm-pedidos-items-envoltura .adm-pedidos-items td,
+  .adm-pedidos-items-envoltura .adm-pedidos-items td.num { display: block; padding: 0; border: 0; text-align: left; min-width: 0; }
+  .adm-pedidos-items-envoltura .adm-pedidos-items td:first-child { grid-column: 1 / -1; }
+  .adm-pedidos-items-envoltura .adm-pedidos-items td[data-etiqueta]::before { content: attr(data-etiqueta); display: block; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--tinta-3); }
+}

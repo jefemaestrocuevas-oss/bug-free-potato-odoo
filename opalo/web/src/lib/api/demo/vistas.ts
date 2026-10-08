@@ -492,6 +492,7 @@ export function clienteResumen(db: Db, c: ClienteFila, ahora: Date): ClienteResu
   const citaIds = new Set(citas.map((x) => x.id));
   const pedidoIds = new Set(db.pedidos.filter((p) => p.cliente_id === c.id).map((p) => p.id));
   const total = db.pagos
+    .filter((p) => p.metodo !== 'cortesia') // como v_clientes_resumen: las cortesías no cuentan
     .filter((p) => (p.cita_id && citaIds.has(p.cita_id)) || (p.pedido_id && pedidoIds.has(p.pedido_id)))
     .reduce((s, p) => s + p.monto, 0);
   return {
@@ -563,7 +564,7 @@ export function resultadosMensuales(db: Db, ahora: Date, meses: number): Resulta
   for (const p of db.pagos) {
     const f = filas.get(mesDeInstante(p.pagado_en));
     if (!f) continue;
-    f.ingresos += p.monto;
+    if (p.metodo !== 'cortesia') f.ingresos += p.monto; // las cortesías no son ingreso
     f.propinas += p.propina;
   }
   for (const m of db.movimientos_inventario) {

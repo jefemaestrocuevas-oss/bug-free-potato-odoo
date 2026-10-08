@@ -1,0 +1,72 @@
+/*
+  Expediente de clienta (/admin/clientes/:id). Prefijo .adm-ex-. Sólo tokens de color.
+*/
+.adm-ex { display: flex; flex-direction: column; gap: 18px; }
+.adm-ex > .adm-encabezado, .adm-ex > .adm-kpis, .adm-ex > .aviso { margin-bottom: 0; }
+.adm-ex-recargando { opacity: 0.75; transition: opacity 0.2s; }
+.fila.adm-ex-descripcion { gap: 6px 10px; margin-top: 4px; }
+
+/* Datos de contacto */
+.tarjeta-plana.adm-ex-perfil { padding: 16px 18px; }
+.adm-ex-contacto { display: grid; grid-template-columns: 1fr; gap: 12px 24px; margin: 0; }
+@media (min-width: 560px) { .adm-ex-contacto { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 1100px) { .adm-ex-contacto { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.adm-ex-contacto > div { min-width: 0; }
+.adm-ex-contacto dt { font-size: 0.78rem; font-weight: 700; color: var(--tinta-3); }
+.adm-ex-contacto dd { margin: 2px 0 0; }
+.adm-ex-correo { overflow-wrap: anywhere; }
+.aviso.adm-ex-aviso-edad { margin: 14px 0 0; }
+
+.adm-ex-kpis { grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 12px; }
+.adm-ex-kpi-fecha { font-size: 1.35rem; }
+
+/* Índice de secciones (útil en teléfono, donde el expediente es largo) */
+.adm-ex-indice { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.adm-ex-indice-boton {
+  flex: none;
+  border: 1px solid var(--linea);
+  background: var(--superficie);
+  color: var(--tinta-2);
+  border-radius: 999px;
+  padding: 6px 14px;
+  min-height: 40px;
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.adm-ex-indice-boton:hover { border-color: var(--verde); color: var(--verde); background: var(--verde-suave); }
+.adm-ex .adm-bloque-titulo { scroll-margin-top: 80px; }
+
+/* Rejilla: ficha a la izquierda; notas y servicios prepagados a la derecha */
+.adm-ex-rejilla { display: grid; grid-template-columns: 1fr; gap: 18px; align-items: start; }
+.adm-ex-columna { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+@media (min-width: 1100px) { .adm-ex-rejilla { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); } }
+
+/* Citas */
+.adm-ex-subtitulo { font-family: var(--cuerpo); font-size: 0.8rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--tinta-3); margin: 6px 0 8px; }
+.adm-ex-subtitulo ~ .adm-ex-subtitulo { margin-top: 20px; }
+.adm-ex-nada { margin: 0; }
+.adm-ex-col-fecha a { font-weight: 700; }
+.adm-ex-col-servicios { min-width: 180px; }
+.adm-ex-pill-junto { margin-left: 6px; }
+.adm-ex-saldo { color: var(--alerta); font-weight: 700; }
+.adm-ex-ver-mas { margin-top: 8px; }
+
+/* Consentimientos */
+.adm-ex-consentimientos { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+.adm-ex-consentimiento { border: 1px solid var(--linea-2); border-radius: var(--radio); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; background: var(--fondo); min-width: 0; }
+.adm-ex-consentimiento-cabeza { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.adm-ex-consentimiento-cabeza strong { line-height: 1.35; }
+.adm-ex-consentimiento-datos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin: 0; font-size: 0.9rem; }
+.adm-ex-consentimiento-datos > div { min-width: 0; }
+.adm-ex-consentimiento-datos dt { font-size: 0.74rem; font-weight: 700; color: var(--tinta-3); }
+.adm-ex-consentimiento-datos dd { margin: 1px 0 0; overflow-wrap: anywhere; }
+.adm-ex-capital::first-letter { text-transform: uppercase; }
+.adm-ex-huella { font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 0.82rem; color: var(--tinta-2); }
+.adm-ex-firma { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.adm-ex-firma .ver-firma { max-width: 100%; }
+
+@media print {
+  .adm-ex-indice, .adm-encabezado-acciones { display: none; }
+}

@@ -103,4 +103,50 @@ begin
   raise notice 'OK - documentos firmados visibles para su dueña';
 end $$;
 
+-- Sólo se vincula con el correo confirmado; borrar la cuenta no deja la ficha "reclamable"
+do $$
+declare
+  v_esp uuid := pruebas.usuario('especialista@demo.opalo.mx');
+  v_previa uuid;
+  v_usuario uuid;
+  v_otro uuid;
+begin
+  perform pruebas.como(v_esp);
+  insert into public.clientes (nombre, email, notas_internas)
+  values ('Victoria', 'victoria.prueba@ejemplo.mx', 'Comentó un tratamiento (prueba)') returning id into v_previa;
+  perform public.reservar_cita_staff(v_previa, pruebas.items('cejas'), pruebas.instante(pruebas.proximo_dia(2, 21), '16:00'));
+  perform pruebas.como_postgres();
+
+  -- Alguien se registra con su correo y no lo confirma: no se vincula ni se duplica la ficha
+  v_usuario := pruebas.crear_usuario('VICTORIA.prueba@ejemplo.mx', '{"nombre": "Otra"}', 'cliente', false);
+  perform pruebas.igual((select usuario_id from public.clientes where id = v_previa), null::uuid, 'sin confirmar no se vincula');
+  perform pruebas.igual((select count(*)::int from public.clientes where usuario_id = v_usuario), 0, 'ni se crea otra ficha');
+  perform pruebas.como(v_usuario);
+  perform pruebas.igual(pruebas.filas('public.v_citas_detalle'), 0, 'no ve las citas de la clienta');
+  perform pruebas.igual(public.mi_cliente_id(), null::uuid, 'no tiene ficha todavía');
+  perform pruebas.como_postgres();
+
+  -- Al confirmar el correo (demuestra que es suyo), se vincula
+  update auth.users set email_confirmed_at = now() where id = v_usuario;
+  perform pruebas.igual((select usuario_id from public.clientes where id = v_previa), v_usuario, 'al confirmar se vincula');
+  update auth.users set raw_user_meta_data = '{"nombre": "Victoria"}' where id = v_usuario;
+  perform pruebas.igual((select count(*)::int from public.clientes where usuario_id = v_usuario), 1, 'otros cambios no duplican');
+
+  -- Sin ficha previa: se crea al registrarse y confirmar no la duplica
+  v_otro := pruebas.crear_usuario('sin.confirmar@ejemplo.mx', '{"nombre": "Sin Confirmar"}', 'cliente', false);
+  perform pruebas.igual((select count(*)::int from public.clientes where usuario_id = v_otro), 1, 'ficha nueva al registrarse');
+  update auth.users set email_confirmed_at = now() where id = v_otro;
+  perform pruebas.igual((select count(*)::int from public.clientes where usuario_id = v_otro), 1, 'confirmar no la duplica');
+
+  -- Al borrar la cuenta, la ficha se conserva pero sin correo: nadie la hereda registrándose con él
+  delete from auth.users where id = v_usuario;
+  perform pruebas.igual((select coalesce(usuario_id::text, '') || '/' || coalesce(email, 'sin correo') from public.clientes where id = v_previa),
+                        '/sin correo', 'ficha conservada, sin cuenta ni correo');
+  v_otro := pruebas.crear_usuario('victoria.prueba@ejemplo.mx', '{"nombre": "Alguien"}');
+  perform pruebas.igual((select usuario_id from public.clientes where id = v_previa), null::uuid,
+                        'una cuenta nueva con ese correo no hereda el historial');
+  perform pruebas.afirma((select id from public.clientes where usuario_id = v_otro) <> v_previa, 'recibe su propia ficha');
+  raise notice 'OK - vinculación sólo con correo confirmado; cuentas borradas no se reclaman';
+end $$;
+
 rollback;

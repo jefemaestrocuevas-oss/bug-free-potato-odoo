@@ -81,6 +81,8 @@ create index pagos_fecha_idx on public.pagos (pagado_en);
 alter table public.pagos enable row level security;
 
 -- Servicios prepagados (también regalos con código).
+-- codigo_regalo: un código por regalo (pedido_item). Un bono de varios servicios genera varios
+-- créditos con el MISMO código y se canjean juntos (canjear_regalo).
 create table public.creditos (
   id              uuid primary key default gen_random_uuid(),
   cliente_id      uuid not null references public.clientes (id),
@@ -89,7 +91,7 @@ create table public.creditos (
   cantidad        int not null check (cantidad > 0),
   usados          int not null default 0,
   pedido_item_id  uuid references public.pedido_items (id) on delete set null,
-  codigo_regalo   text unique,
+  codigo_regalo   text,
   regalo_para     text,
   vence_en        date,
   creado_en       timestamptz not null default now(),
@@ -97,6 +99,7 @@ create table public.creditos (
   check (usados between 0 and cantidad)
 );
 create index creditos_cliente_idx on public.creditos (cliente_id);
+create index creditos_codigo_regalo_idx on public.creditos (codigo_regalo) where codigo_regalo is not null;
 alter table public.creditos enable row level security;
 
 alter table public.cita_items

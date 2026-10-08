@@ -1,0 +1,117 @@
+/*
+  Políticas (/admin/politicas). Prefijo de clases: .pola- (el sitio público usa .pol-).
+  También da estilo a PoliticasVer y PoliticasPublicar. Todo color sale de tokens.css.
+*/
+
+.pola-pagina { min-width: 0; }
+.pola-recargando { opacity: 0.6; transition: opacity 0.2s; }
+
+.pola-seccion { margin-bottom: 30px; }
+.pola-seccion-titulo { font-size: 1.6rem; margin: 0 0 4px; color: var(--verde); }
+.pola-seccion-texto { color: var(--tinta-2); margin: 0 0 14px; max-width: 75ch; }
+.pola-rejilla { container: pola-rejilla / inline-size; display: flex; flex-direction: column; gap: 14px; }
+
+/* ---------- Tarjeta por tipo ---------- */
+.pola-tarjeta { display: flex; flex-direction: column; gap: 10px; padding: 18px; min-width: 0; }
+.eyebrow.pola-tipo { margin: 0; color: var(--oro-osc); }
+.pola-cabeza { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px 12px; flex-wrap: wrap; }
+.pola-titulo { font-size: 1.4rem; margin: 0; flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.pola-meta { display: flex; flex-wrap: wrap; gap: 6px 24px; margin: 0; }
+.pola-meta div { display: flex; flex-direction: column; }
+.pola-meta dt { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tinta-3); }
+.pola-meta dd { margin: 0; }
+.pola-hash {
+  font-size: 0.82rem;
+  background: var(--fondo-alt);
+  border: 1px solid var(--linea-2);
+  border-radius: 4px;
+  padding: 0 6px;
+  color: var(--tinta-2);
+  cursor: help;
+}
+.pola-servicios { margin: 0; color: var(--tinta); }
+.pola-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 479.98px) {
+  .pola-acciones .btn { flex: 1 1 100%; }
+}
+
+/* Con espacio, cada política es una fila: datos a la izquierda, acciones a la derecha. */
+@container pola-rejilla (min-width: 680px) {
+  .pola-tarjeta {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'tipo acciones'
+      'cabeza acciones'
+      'meta acciones'
+      'servicios servicios'
+      'historial historial';
+    gap: 6px 28px;
+    padding: 18px 20px;
+  }
+  .pola-tarjeta > .pola-tipo { grid-area: tipo; }
+  .pola-tarjeta > .pola-cabeza { grid-area: cabeza; justify-content: flex-start; }
+  .pola-tarjeta > .pola-cabeza .pola-titulo { flex: 0 1 auto; }
+  .pola-tarjeta > .pola-meta { grid-area: meta; }
+  .pola-tarjeta > .pola-servicios { grid-area: servicios; padding-top: 4px; }
+  .pola-tarjeta > .pola-historial { grid-area: historial; margin-top: 4px; }
+  .pola-tarjeta > .pola-acciones { grid-area: acciones; flex-direction: column; align-items: stretch; align-self: center; min-width: 210px; }
+}
+
+.pola-historial { border-top: 1px solid var(--linea-2); padding-top: 8px; }
+.pola-historial summary { cursor: pointer; font-weight: 700; color: var(--verde); min-height: 36px; display: flex; align-items: center; gap: 6px; }
+.pola-versiones { list-style: none; margin: 4px 0 0; padding: 0; }
+.pola-version { display: flex; justify-content: space-between; align-items: center; gap: 4px 10px; padding: 8px 0; border-bottom: 1px solid var(--linea-2); flex-wrap: wrap; }
+.pola-version:last-child { border-bottom: 0; }
+.pola-version-texto { min-width: 0; flex: 1 1 200px; overflow-wrap: anywhere; }
+
+/* ---------- Leer una versión ---------- */
+.adm-modal.adm-modal-amplio:has(.pola-ver) { max-width: 820px; }
+.pola-ver-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 12px; }
+.pola-huella { display: flex; flex-direction: column; gap: 4px; background: var(--fondo-alt); border-radius: var(--radio-sm); padding: 10px 14px; margin-bottom: 16px; }
+.pola-huella-codigo { font-size: 0.8rem; overflow-wrap: anywhere; word-break: break-all; color: var(--tinta-2); }
+.pola-huella-acciones { gap: 8px; }
+.pola-huella-acciones .btn { padding-left: 0; }
+.pola-documento { font-size: 0.97rem; line-height: 1.6; overflow-wrap: anywhere; }
+.pola-documento .markdown > :first-child { margin-top: 0; }
+.pola-documento .markdown h2 { font-size: 1.7rem; }
+.pola-documento .markdown h3 { font-size: 1.35rem; }
+.pola-documento .markdown h4, .pola-documento .markdown h5 { font-size: 1.12rem; }
+
+/* ---------- Publicar ---------- */
+.adm-modal.adm-modal-completo:has(.pola-publicar) { max-width: 1100px; }
+.pola-publicar { container: pola-publicar / inline-size; }
+.aviso.pola-advertencia { margin-bottom: 16px; }
+.pola-contador { margin-right: auto; align-self: center; }
+
+.pola-editor { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin-bottom: 12px; }
+.pola-editor-texto { margin: 0; min-width: 0; }
+.pola-editor-cabeza { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; }
+.pola-ayuda-formato { font-size: 0.88rem; }
+.pola-ayuda-formato summary { cursor: pointer; color: var(--verde); font-weight: 700; }
+.pola-ayuda-formato ul { margin: 6px 0 4px; padding: 10px 12px 10px 28px; background: var(--fondo-alt); border-radius: var(--radio-sm); }
+.pola-ayuda-formato li { margin-bottom: 3px; }
+.pola-ayuda-formato code { font-size: 0.82rem; }
+textarea.input.pola-textarea {
+  min-height: 300px;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 1rem; /* 16 px: evita el acercamiento automático de iOS al escribir */
+  line-height: 1.55;
+  resize: vertical;
+}
+.pola-vista { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.pola-vista-titulo { margin: 0; }
+.pola-vista-cuerpo {
+  border: 1px solid var(--linea-2);
+  border-radius: var(--radio-sm);
+  background: var(--fondo);
+  padding: 14px 18px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+@container pola-publicar (min-width: 760px) {
+  .pola-editor { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  textarea.input.pola-textarea { min-height: 480px; height: 480px; font-size: 0.9rem; }
+  .pola-vista-cuerpo { height: 480px; max-height: none; }
+}

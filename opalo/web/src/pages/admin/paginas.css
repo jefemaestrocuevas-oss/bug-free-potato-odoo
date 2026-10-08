@@ -1,0 +1,217 @@
+/*
+  Agenda (/admin/agenda) y Resumen (/admin). Prefijo .adm-. Sólo tokens de color.
+  base.css se carga después de este archivo: para cambiar algo de .btn, .aviso, .campo…
+  se usa un selector de dos clases.
+  Cada persona del equipo tiene su color de agenda: llega por estilo en línea
+  como --adm-color-personal (borde izquierdo de sus citas).
+*/
+
+/* ---------- Comunes ---------- */
+.adm-subtitulo { font-size: clamp(1.35rem, 2.4vw, 1.65rem); margin: 0; color: var(--tinta); }
+.adm-capital::first-letter { text-transform: uppercase; }
+.adm-gap-chico { gap: 6px; }
+.adm-pill-junto { margin-left: 8px; }
+.adm-recargando { opacity: 0.6; transition: opacity 0.2s; }
+
+/* ---------- Agenda: barra de navegación ---------- */
+.adm-agenda-barra { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 18px; }
+.adm-agenda-nav { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.adm-agenda-nav .btn-sm { min-height: 40px; }
+.btn.adm-btn-icono { width: 40px; padding: 0; flex: none; }
+.input.adm-input-fecha { width: auto; min-height: 40px; padding: 6px 10px; }
+
+.pestanas.adm-pestanas-mini {
+  margin: 0;
+  border: 1px solid var(--linea-2);
+  border-radius: var(--radio-sm);
+  background: var(--fondo-alt);
+  padding: 3px;
+  gap: 2px;
+  flex: none;
+}
+.adm-pestanas-mini .pestana { border-bottom: 0; border-radius: 4px; padding: 0 16px; min-height: 34px; }
+.adm-pestanas-mini .pestana[aria-selected='true'] { background: var(--superficie); color: var(--verde); box-shadow: 0 1px 2px rgba(42, 46, 34, 0.12); }
+
+.adm-agenda-barra > .campo { margin: 0 0 0 auto; flex: 0 1 240px; min-width: 180px; }
+.adm-agenda-barra > .campo .input { min-height: 40px; padding-top: 6px; padding-bottom: 6px; }
+
+.adm-agenda-titulo { margin-bottom: 14px; }
+
+@media (max-width: 719px) {
+  .adm-agenda-nav { width: 100%; }
+  .adm-agenda-nav .input.adm-input-fecha { flex: 1 1 140px; min-width: 0; }
+  .adm-agenda-barra > .campo { margin-left: 0; flex: 1 1 160px; min-width: 0; }
+}
+
+/* ---------- Agenda: vista de día ---------- */
+.adm-dia > .aviso { margin-bottom: 12px; }
+.adm-horas { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--linea-2); }
+.adm-hora {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--linea-2);
+}
+.adm-hora-etiqueta { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding-top: 10px; font-weight: 700; color: var(--tinta-2); }
+.adm-hora-cerrada .adm-hora-etiqueta { color: var(--tinta-3); font-weight: 600; }
+.adm-hora-contenido { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
+/* La hora en curso: línea dorada y etiqueta «Ahora». */
+.adm-hora-actual { box-shadow: inset 0 2px 0 var(--oro); }
+.adm-ahora {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--oro-osc);
+  background: var(--oro-suave);
+  border-radius: 999px;
+  padding: 0 8px;
+  line-height: 1.8;
+}
+
+.adm-hueco {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 10px;
+  flex-wrap: wrap;
+  min-height: 46px;
+  padding: 4px 6px 4px 14px;
+  border: 1px dashed var(--linea);
+  border-radius: var(--radio-sm);
+  font-size: 0.92rem;
+}
+.adm-hora-cerrada .adm-hueco { border-color: var(--linea-2); background: var(--fondo-alt); }
+.adm-hueco-bloqueado {
+  padding: 10px 14px;
+  border-style: solid;
+  border-color: var(--linea-2);
+  color: var(--tinta-2);
+  background: repeating-linear-gradient(135deg, var(--fondo-alt) 0 10px, var(--superficie) 10px 20px);
+}
+
+/* Tarjeta de cita */
+.adm-cita {
+  --adm-color-personal: var(--verde);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px 14px 14px;
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  border-left: 5px solid var(--adm-color-personal);
+  border-radius: var(--radio-sm);
+  box-shadow: 0 1px 2px rgba(42, 46, 34, 0.05);
+}
+.adm-cita-cabeza { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.adm-cita-hora { font-weight: 700; font-size: 1.05rem; color: var(--tinta); }
+.adm-cita-cuerpo { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.adm-cita-clienta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 16px; }
+.adm-cita-nombre { font-weight: 700; font-size: 1.12rem; color: var(--tinta); text-decoration: none; overflow-wrap: anywhere; }
+.adm-cita-nombre:hover { color: var(--verde); text-decoration: underline; }
+.adm-enlace-wa { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; font-size: 0.9rem; font-weight: 600; text-decoration: none; }
+.adm-enlace-wa:hover { text-decoration: underline; }
+.adm-cita-servicios { margin: 0; color: var(--tinta-2); }
+.adm-cita-meta { display: flex; flex-wrap: wrap; gap: 4px 20px; font-size: 0.88rem; color: var(--tinta-2); }
+.adm-cita-meta > span { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; }
+.adm-saldo { color: var(--alerta); }
+.adm-pagado-de-mas { color: var(--error); }
+.aviso.adm-cita-alertas { margin: 0; }
+.adm-cita-notas { margin: 0; font-style: italic; color: var(--tinta-2); font-size: 0.92rem; overflow-wrap: anywhere; }
+
+.adm-cita-cancelada,
+.adm-cita-no_asistio { background: var(--fondo-alt); border-left-color: var(--linea); }
+.adm-cita-cancelada .adm-cita-hora,
+.adm-cita-cancelada .adm-cita-nombre,
+.adm-cita-no_asistio .adm-cita-hora,
+.adm-cita-no_asistio .adm-cita-nombre { color: var(--tinta-3); }
+
+@media (max-width: 479px) {
+  .adm-hora { grid-template-columns: 1fr; gap: 6px; }
+  .adm-hora-etiqueta { flex-direction: row; align-items: center; padding-top: 0; }
+}
+
+/* ---------- Agenda: vista de semana ---------- */
+/* Lista de días en pantallas angostas; 7 columnas cuando el contenido mide 840 px o más. */
+.adm-semana-marco { container: adm-semana / inline-size; }
+.adm-semana { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+@container adm-semana (min-width: 840px) {
+  .adm-semana { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+  .adm-semana-dia { min-height: 180px; }
+  .adm-semana-cabeza { flex-direction: column; align-items: flex-start; gap: 0; }
+  .adm-semana-cuenta { margin-left: 0; }
+}
+
+.adm-semana-dia {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  border-radius: var(--radio-sm);
+  overflow: hidden;
+}
+.adm-semana-hoy { border-color: var(--oro); box-shadow: inset 0 3px 0 var(--oro); }
+
+.adm-semana-cabeza {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  text-align: left;
+  background: var(--fondo-alt);
+  border: 0;
+  border-bottom: 1px solid var(--linea-2);
+  color: var(--tinta);
+  cursor: pointer;
+}
+.adm-semana-cabeza:hover { background: var(--verde-suave); }
+.adm-semana-dow { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--tinta-3); }
+.adm-semana-num { font-family: var(--display); font-size: 1.6rem; font-weight: 600; line-height: 1; }
+.adm-semana-hoy .adm-semana-num { color: var(--oro-osc); }
+.adm-semana-cuenta { margin-left: auto; font-size: 0.8rem; color: var(--tinta-3); }
+
+.adm-semana-bloqueo { margin: 6px 6px 0; padding: 4px 8px; font-size: 0.78rem; color: var(--tinta-2); background: var(--fondo-alt); border-radius: 4px; }
+.adm-semana-citas { list-style: none; margin: 0; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.adm-semana-citas:empty { display: none; }
+
+.adm-semana-cita {
+  --adm-color-personal: var(--verde);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  text-align: left;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  color: var(--tinta);
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  border-left: 4px solid var(--adm-color-personal);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.adm-semana-cita:hover { background: var(--fondo-alt); }
+.adm-semana-cita-hora { font-weight: 700; }
+.adm-semana-cita-nombre { font-weight: 600; overflow-wrap: anywhere; }
+.adm-semana-cita-detalle { font-size: 0.8rem; color: var(--tinta-3); overflow-wrap: anywhere; }
+.adm-semana-cita-pills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.adm-semana-cita.adm-cita-cancelada,
+.adm-semana-cita.adm-cita-no_asistio { background: var(--fondo-alt); border-left-color: var(--linea); color: var(--tinta-3); }
+
+/* ---------- Resumen ---------- */
+.adm-seccion-mes { margin-bottom: 4px; }
+.adm-seccion-mes > .entre { margin-bottom: 10px; }
+.adm-pagina > .adm-bloque { margin-bottom: 18px; }
+/* Dos columnas cuando caben bloques de 400 px; nunca más de dos. */
+.adm-rejilla-2 { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); align-items: start; }
+.adm-lista-item-arriba { align-items: flex-start; }

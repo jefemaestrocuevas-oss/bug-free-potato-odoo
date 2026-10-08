@@ -132,4 +132,21 @@ begin
   raise notice 'OK - anticipación mínima y ventana de reserva';
 end $$;
 
+-- Rangos del mismo día que se traslapan (p. ej. 10–19 y 12–16): cada inicio sale una sola vez
+do $$
+declare
+  v_martes date := pruebas.proximo_dia(2, 21);
+  v_antes int := (select count(*) from public.horarios_disponibles(pruebas.proximo_dia(2, 21)));
+begin
+  insert into public.horarios (personal_id, dia_semana, hora_inicio, hora_fin)
+  values ((select id from public.personal where slug = 'especialista'), 2, '12:00', '16:00');
+  perform pruebas.igual((select count(*)::int from public.horarios_disponibles(v_martes)), v_antes,
+                        'un rango encimado no agrega horarios');
+  perform pruebas.igual((select count(*)::int from (select h.inicio, h.personal_id
+                                                       from public.horarios_disponibles(v_martes) h
+                                                      group by 1, 2 having count(*) > 1) x), 0,
+                        'ningún inicio repetido para la misma persona');
+  raise notice 'OK - rangos encimados no duplican horarios';
+end $$;
+
 rollback;

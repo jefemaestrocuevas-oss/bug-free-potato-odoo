@@ -84,6 +84,11 @@ $$;
 
 -- -----------------------------------------------------------------------------
 -- R3 · horarios_disponibles (hora local America/Mexico_City)
+-- Limitación conocida: la firma no recibe los servicios, así que no filtra por
+-- personal_servicios (quién puede hacer qué). Con una sola especialista que hace todo no
+-- importa; reservar_cita sí lo revisa y, si nadie de quien puede hacerlos está libre, responde
+-- "Ese horario no está disponible." Al sumar personal con servicios restringidos habrá que
+-- agregar un parámetro p_servicios (cambio de contrato: ESPEC §6 y tipos.ts).
 -- -----------------------------------------------------------------------------
 create or replace function public.horarios_disponibles(
   p_fecha date,
@@ -116,9 +121,10 @@ begin
     return;
   end if;
 
+  -- distinct: si dos rangos del mismo día se traslapan, cada inicio sale una sola vez.
   return query
   with candidatos as (
-    select p.id as pid, p.nombre as pnombre, p.orden as porden, gs.local as ini_local
+    select distinct p.id as pid, p.nombre as pnombre, p.orden as porden, gs.local as ini_local
       from public.personal p
       join public.horarios h
         on h.personal_id = p.id
@@ -193,6 +199,12 @@ begin
       message = 'Para guardar tu ficha de salud necesitamos tu consentimiento expreso para tratar datos de salud.',
       errcode = 'P0001';
   end if;
+  if length(p_alergias) > 2000 or length(p_medicamentos) > 2000 or length(p_observaciones) > 2000
+     or length(p_respuestas::text) > 20000 or length(p_detalles::text) > 20000 then
+    raise exception using
+      message = 'Tu ficha de salud es muy larga; resume cada respuesta en máximo 2000 caracteres.',
+      errcode = 'P0001';
+  end if;
 
   -- clock_timestamp(): la "última ficha" debe ser la última aunque se guarden dos en la misma transacción.
   insert into public.fichas_salud (cliente_id, respuestas, detalles, alergias, medicamentos, observaciones,
@@ -229,10 +241,29 @@ begin
   end if;
 
   insert into public.aceptaciones_politica (cliente_id, politica_id, ip, user_agent)
-  select v_cliente, p.id, public.ip_solicitud(), p_user_agent
+  select v_cliente, p.id, public.ip_solicitud(), left(p_user_agent, 1000)
     from public.politicas p
    where p.id = any (coalesce(p_politica_ids, '{}'::uuid[]))
   on conflict (cliente_id, politica_id) do nothing;
+end;
+$$;
+
+-- Nombre, tutor y trazo de una firma (reservar_cita y firmar_consentimiento_cita).
+create or replace function public.validar_firma(p_nombre_firmante text, p_firma_svg text, p_tutor_nombre text)
+returns void
+language plpgsql
+set search_path = public, extensions, pg_temp
+as $$
+begin
+  if nullif(btrim(p_nombre_firmante), '') is null or nullif(btrim(p_firma_svg), '') is null then
+    raise exception using message = 'Falta tu firma o tu nombre completo.', errcode = 'P0001';
+  end if;
+  if length(btrim(p_nombre_firmante)) > 200 or length(btrim(p_tutor_nombre)) > 200 then
+    raise exception using message = 'El nombre es muy largo; escríbelo en máximo 200 caracteres.', errcode = 'P0001';
+  end if;
+  if not public.firma_valida(p_firma_svg) then
+    raise exception using message = 'No pudimos leer tu firma; bórrala y vuelve a firmar.', errcode = 'P0001';
+  end if;
 end;
 $$;
 
@@ -284,6 +315,8 @@ declare
   v_estado       public.estado_cita;
   v_es_menor     boolean := false;
   v_cita         uuid;
+  -- Un crédito debe estar vigente el día de la cita (no sólo hoy).
+  v_fecha_cita   date := greatest(v_hoy, coalesce((p_inicio at time zone v_tz)::date, v_hoy));
 begin
   select * into v_cliente from public.clientes c where c.id = p_cliente_id;
   if not found then
@@ -292,6 +325,10 @@ begin
 
   if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
     raise exception using message = 'Elige al menos un servicio.', errcode = 'P0001';
+  end if;
+
+  if length(btrim(p_notas)) > 1000 then
+    raise exception using message = 'Las notas son muy largas; escríbelas en máximo 1000 caracteres.', errcode = 'P0001';
   end if;
 
   -- Ítems: validar, tomar precios del servidor, aplicar créditos.
@@ -318,7 +355,7 @@ begin
            or v_cred.servicio_id is distinct from v_serv.id
            or v_cred.codigo_regalo is not null
            or v_cred.usados >= v_cred.cantidad
-           or (v_cred.vence_en is not null and v_cred.vence_en < v_hoy) then
+           or (v_cred.vence_en is not null and v_cred.vence_en < v_fecha_cita) then
           raise exception using message = 'Ese crédito no es válido o ya se usó.', errcode = 'P0001';
         end if;
         update public.creditos set usados = usados + 1 where id = v_cred_id;
@@ -351,7 +388,7 @@ begin
            or v_cred.paquete_id is distinct from v_paq.id
            or v_cred.codigo_regalo is not null
            or v_cred.usados >= v_cred.cantidad
-           or (v_cred.vence_en is not null and v_cred.vence_en < v_hoy) then
+           or (v_cred.vence_en is not null and v_cred.vence_en < v_fecha_cita) then
           raise exception using message = 'Ese crédito no es válido o ya se usó.', errcode = 'P0001';
         end if;
         update public.creditos set usados = usados + 1 where id = v_cred_id;
@@ -388,6 +425,12 @@ begin
       errcode = 'P0001';
   end if;
 
+  -- R6: la cita debe tener al menos un consentimiento que firmar (política activa de algún tipo
+  -- de sus servicios); si no, nunca se podría iniciar ni completar.
+  if not exists (select 1 from public.politicas po where po.activa and po.tipo = any (v_tipos)) then
+    raise exception using message = 'Uno de los servicios elegidos no se puede reservar en línea.', errcode = 'P0001';
+  end if;
+
   if p_inicio is null then
     raise exception using message = 'Ese horario no está disponible.', errcode = 'P0001';
   end if;
@@ -397,9 +440,17 @@ begin
 
   -- Quién atiende
   if p_es_staff then
-    -- El personal puede agendar fuera de la rejilla; sólo se cuida que no se empalme.
+    -- El personal puede agendar fuera de la rejilla; se cuida que no se empalme y que la persona
+    -- (o todo el spa) no tenga un bloqueo (vacaciones, festivo, capacitación).
     if p_personal_id is not null then
-      select p.id into v_personal from public.personal p where p.id = p_personal_id and p.activo;
+      select p.id into v_personal
+        from public.personal p
+       where p.id = p_personal_id
+         and p.activo
+         and public.personal_puede_hacer(p.id, v_servicios)
+         and not exists (select 1 from public.bloqueos_agenda bl
+                          where (bl.personal_id is null or bl.personal_id = p.id)
+                            and tstzrange(bl.inicio, bl.fin) && tstzrange(p_inicio, v_fin));
       if v_personal is null then
         raise exception using message = 'Ese horario no está disponible.', errcode = 'P0001';
       end if;
@@ -408,6 +459,9 @@ begin
         from public.personal p
        where p.activo
          and public.personal_puede_hacer(p.id, v_servicios)
+         and not exists (select 1 from public.bloqueos_agenda bl
+                          where (bl.personal_id is null or bl.personal_id = p.id)
+                            and tstzrange(bl.inicio, bl.fin) && tstzrange(p_inicio, v_fin))
          and not exists (select 1 from public.citas ct
                           where ct.personal_id = p.id
                             and ct.estado not in ('cancelada', 'no_asistio')
@@ -420,6 +474,15 @@ begin
                 p.orden, p.nombre
        limit 1;
       if v_personal is null then
+        -- Nadie que pueda hacerlo está libre de bloqueos → no disponible; si lo hay, está ocupado.
+        if not exists (select 1 from public.personal p
+                        where p.activo
+                          and public.personal_puede_hacer(p.id, v_servicios)
+                          and not exists (select 1 from public.bloqueos_agenda bl
+                                           where (bl.personal_id is null or bl.personal_id = p.id)
+                                             and tstzrange(bl.inicio, bl.fin) && tstzrange(p_inicio, v_fin))) then
+          raise exception using message = 'Ese horario no está disponible.', errcode = 'P0001';
+        end if;
         raise exception using message = 'Ese horario se acaba de ocupar, elige otro.', errcode = 'P0001';
       end if;
     end if;
@@ -433,9 +496,11 @@ begin
      order by p.orden, p.nombre
      limit 1;
     if v_personal is null then
+      -- "Se acaba de ocupar" sólo si lo ocupó alguien que sí puede hacer estos servicios.
       if exists (select 1 from public.citas ct
                   where ct.estado not in ('cancelada', 'no_asistio')
                     and (p_personal_id is null or ct.personal_id = p_personal_id)
+                    and public.personal_puede_hacer(ct.personal_id, v_servicios)
                     and tstzrange(ct.inicio, ct.fin) && tstzrange(p_inicio, v_fin)) then
         raise exception using message = 'Ese horario se acaba de ocupar, elige otro.', errcode = 'P0001';
       end if;
@@ -504,10 +569,12 @@ begin
   -- Un consentimiento por cada tipo distinto (política activa de ese tipo), con la firma recibida.
   if p_firma_svg is not null then
     insert into public.consentimientos (cliente_id, cita_id, politica_id, ficha_salud_id, nombre_firmante,
-                                        firma_svg, es_menor, tutor_nombre, ip, user_agent)
+                                        firma_svg, es_menor, tutor_nombre, ip, user_agent,
+                                        capturado_por, canal)
     select p_cliente_id, v_cita, po.id, v_ficha.id, btrim(p_nombre_firmante), p_firma_svg,
            v_es_menor, case when v_es_menor then nullif(btrim(p_tutor_nombre), '') end,
-           public.ip_solicitud(), p_user_agent
+           public.ip_solicitud(), left(p_user_agent, 1000),
+           auth.uid(), 'reserva_web'
       from public.politicas po
      where po.activa and po.tipo = any (v_tipos);
   end if;
@@ -521,6 +588,9 @@ end;
 $$;
 
 -- R4 · la clienta reserva (con firma del consentimiento)
+-- Además de R4: necesita su fecha de nacimiento (decide edad mínima y tutor) y puede tener a lo
+-- más 3 citas próximas activas (pendiente o confirmada) para que una sola cuenta no acapare la
+-- agenda; para más, el personal le agenda por WhatsApp.
 create or replace function public.reservar_cita(
   p_items jsonb,
   p_inicio timestamptz,
@@ -542,11 +612,13 @@ declare
   v_tz      text := coalesce(v_cfg.zona_horaria, 'America/Mexico_City');
   v_cliente public.clientes;
   v_edad    int;
+  c_max_citas constant int := 3;
 begin
   if auth.uid() is null then
     raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
   end if;
-  select * into v_cliente from public.clientes c where c.usuario_id = auth.uid();
+  -- for update: dos reservas simultáneas de la misma clienta se forman (límite de citas).
+  select * into v_cliente from public.clientes c where c.usuario_id = auth.uid() for update;
   if not found then
     raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
   end if;
@@ -565,23 +637,32 @@ begin
     raise exception using message = 'Antes de reservar necesitas llenar tu ficha de salud.', errcode = 'P0001';
   end if;
 
-  if v_cliente.fecha_nacimiento is not null then
-    v_edad := public.edad_en(v_cliente.fecha_nacimiento,
-                             coalesce((p_inicio at time zone v_tz)::date, public.hoy_local()));
-    if v_edad < coalesce(v_cfg.edad_minima, 15) then
-      raise exception using
-        message = format('Atendemos a partir de los %s años.', coalesce(v_cfg.edad_minima, 15)),
-        errcode = 'P0001';
-    end if;
-    if v_edad < coalesce(v_cfg.edad_mayoria, 18) and nullif(btrim(p_tutor_nombre), '') is null then
-      raise exception using
-        message = 'Por ser menor de edad, escribe el nombre de mamá, papá o tutor que te acompañará.',
-        errcode = 'P0001';
-    end if;
+  if v_cliente.fecha_nacimiento is null then
+    raise exception using message = 'Para reservar necesitamos tu fecha de nacimiento.', errcode = 'P0001';
+  end if;
+  v_edad := public.edad_en(v_cliente.fecha_nacimiento,
+                           coalesce((p_inicio at time zone v_tz)::date, public.hoy_local()));
+  if v_edad < coalesce(v_cfg.edad_minima, 15) then
+    raise exception using
+      message = format('Atendemos a partir de los %s años.', coalesce(v_cfg.edad_minima, 15)),
+      errcode = 'P0001';
+  end if;
+  if v_edad < coalesce(v_cfg.edad_mayoria, 18) and nullif(btrim(p_tutor_nombre), '') is null then
+    raise exception using
+      message = 'Por ser menor de edad, escribe el nombre de mamá, papá o tutor que te acompañará.',
+      errcode = 'P0001';
   end if;
 
-  if nullif(btrim(p_nombre_firmante), '') is null or nullif(btrim(p_firma_svg), '') is null then
-    raise exception using message = 'Falta tu firma o tu nombre completo.', errcode = 'P0001';
+  perform public.validar_firma(p_nombre_firmante, p_firma_svg, p_tutor_nombre);
+
+  if (select count(*) from public.citas c
+       where c.cliente_id = v_cliente.id
+         and c.estado in ('pendiente', 'confirmada')
+         and c.inicio > now()) >= c_max_citas then
+    raise exception using
+      message = format('Ya tienes %s citas próximas; para agendar otra escríbenos por WhatsApp al %s.',
+                       c_max_citas, coalesce(public.telefono_legible(v_cfg.telefono_whatsapp), '442 170 1466')),
+      errcode = 'P0001';
   end if;
 
   return public.crear_cita_interna(v_cliente.id, p_items, p_inicio, p_personal_id, 'web', p_notas, false,
@@ -631,6 +712,8 @@ end;
 $$;
 
 -- R6 · firma posterior (portal de la clienta o tablet de la cabina)
+-- Desde su portal, la clienta necesita su fecha de nacimiento (decide si firma con tutor). En la
+-- tablet de la cabina, el personal verifica la edad en persona.
 create or replace function public.firmar_consentimiento_cita(
   p_cita_id uuid,
   p_nombre_firmante text,
@@ -651,6 +734,7 @@ declare
   v_cliente  public.clientes;
   v_ficha    uuid;
   v_es_menor boolean := false;
+  v_propia   boolean;
 begin
   if auth.uid() is null then
     raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
@@ -660,13 +744,17 @@ begin
     raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
   end if;
   select * into v_cliente from public.clientes c where c.id = v_cita.cliente_id;
-  if not public.es_personal() and v_cliente.usuario_id is distinct from auth.uid() then
+  v_propia := v_cliente.usuario_id is not distinct from auth.uid();
+  if not public.es_personal() and not v_propia then
     raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
   end if;
   if v_cita.estado in ('cancelada', 'no_asistio') then
     raise exception using message = 'Esta cita está cancelada.', errcode = 'P0001';
   end if;
 
+  if v_cliente.fecha_nacimiento is null and v_propia then
+    raise exception using message = 'Para firmar necesitamos tu fecha de nacimiento.', errcode = 'P0001';
+  end if;
   if v_cliente.fecha_nacimiento is not null then
     v_es_menor := public.edad_en(v_cliente.fecha_nacimiento, (v_cita.inicio at time zone v_tz)::date)
                   < coalesce(v_cfg.edad_mayoria, 18);
@@ -677,9 +765,7 @@ begin
     end if;
   end if;
 
-  if nullif(btrim(p_nombre_firmante), '') is null or nullif(btrim(p_firma_svg), '') is null then
-    raise exception using message = 'Falta tu firma o tu nombre completo.', errcode = 'P0001';
-  end if;
+  perform public.validar_firma(p_nombre_firmante, p_firma_svg, p_tutor_nombre);
 
   select f.id into v_ficha
     from public.fichas_salud f
@@ -688,10 +774,12 @@ begin
    limit 1;
 
   insert into public.consentimientos (cliente_id, cita_id, politica_id, ficha_salud_id, nombre_firmante,
-                                      firma_svg, es_menor, tutor_nombre, ip, user_agent)
+                                      firma_svg, es_menor, tutor_nombre, ip, user_agent,
+                                      capturado_por, canal)
   select v_cita.cliente_id, v_cita.id, po.id, v_ficha, btrim(p_nombre_firmante), p_firma_svg,
          v_es_menor, case when v_es_menor then nullif(btrim(p_tutor_nombre), '') end,
-         public.ip_solicitud(), p_user_agent
+         public.ip_solicitud(), left(p_user_agent, 1000),
+         auth.uid(), case when v_propia then 'portal' else 'cabina' end
     from public.politicas po
    where po.activa
      and po.tipo in (
@@ -797,8 +885,11 @@ begin
   if not found then
     raise exception using message = 'No encontramos esa cita.', errcode = 'P0001';
   end if;
-  if v_cita.estado in ('cancelada', 'no_asistio') then
+  if v_cita.estado = 'cancelada' then
     raise exception using message = 'Esta cita está cancelada.', errcode = 'P0001';
+  end if;
+  if v_cita.estado = 'no_asistio' then
+    raise exception using message = 'Esta cita se marcó como no asistió.', errcode = 'P0001';
   end if;
   if not exists (select 1 from public.consentimientos co where co.cita_id = p_cita_id) then
     raise exception using
@@ -888,6 +979,10 @@ begin
     return;
   end if;
   if p_estado = 'cancelada' then
+    -- Misma regla que cancelar_cita: una inasistencia no se cancela (ni devuelve créditos).
+    if v_cita.estado = 'no_asistio' then
+      raise exception using message = 'Esta cita ya no se puede cancelar.', errcode = 'P0001';
+    end if;
     perform public.cancelar_cita_interna(p_cita_id, null);
     return;
   end if;
@@ -911,6 +1006,8 @@ $$;
 
 -- -----------------------------------------------------------------------------
 -- R8 · pedidos (tienda en línea; se paga en el spa o por transferencia)
+-- La clienta elige efectivo, tarjeta o transferencia (cortesía y Mercado Pago los registra el
+-- personal al cobrar). Cantidades enteras de 1 a 99 por línea y a lo más 5 pedidos por pagar.
 -- -----------------------------------------------------------------------------
 create or replace function public.crear_pedido(
   p_items jsonb,
@@ -936,6 +1033,8 @@ declare
   v_folio     text;
   v_total     numeric(10,2) := 0;
   v_lineas    jsonb := '[]'::jsonb;
+  v_cant_num  numeric;
+  c_max_pendientes constant int := 5;
 begin
   if auth.uid() is null then
     raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
@@ -947,17 +1046,54 @@ begin
   if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
     raise exception using message = 'Tu carrito está vacío.', errcode = 'P0001';
   end if;
+  if coalesce(p_metodo_pago, 'efectivo') not in ('efectivo', 'tarjeta', 'transferencia') then
+    raise exception using message = 'Elige efectivo, tarjeta o transferencia.', errcode = 'P0001';
+  end if;
+  if length(btrim(p_notas)) > 1000 then
+    raise exception using message = 'Las notas son muy largas; escríbelas en máximo 1000 caracteres.', errcode = 'P0001';
+  end if;
+
+  -- for update: dos pedidos simultáneos de la misma clienta se forman (límite de pendientes).
+  perform 1 from public.clientes c where c.id = v_cliente for update;
+  if (select count(*) from public.pedidos pe
+       where pe.cliente_id = v_cliente and pe.estado = 'pendiente_pago') >= c_max_pendientes then
+    raise exception using
+      message = format('Tienes %s pedidos por pagar; págalos o cancela alguno antes de hacer otro.', c_max_pendientes),
+      errcode = 'P0001';
+  end if;
 
   for v_item in select e.value from jsonb_array_elements(p_items) as e(value) loop
+    if jsonb_typeof(v_item) <> 'object' then
+      raise exception using message = 'Uno de los productos ya no está disponible para compra en línea.', errcode = 'P0001';
+    end if;
     v_tipo := v_item ->> 'tipo';
-    v_id := nullif(v_item ->> 'id', '')::uuid;
-    v_cantidad := coalesce(nullif(v_item ->> 'cantidad', '')::int, 1);
+    begin
+      v_id := nullif(v_item ->> 'id', '')::uuid;
+    exception when invalid_text_representation then
+      v_id := null;
+    end;
+    -- cantidad: entero (número o texto); falta = 1
+    v_cant_num := null;
+    if nullif(btrim(v_item ->> 'cantidad'), '') is not null then
+      begin
+        v_cant_num := (v_item ->> 'cantidad')::numeric;
+      exception when others then
+        raise exception using message = 'Revisa las cantidades.', errcode = 'P0001';
+      end;
+      if v_cant_num <> trunc(v_cant_num) or v_cant_num > 99 then
+        raise exception using message = 'Revisa las cantidades.', errcode = 'P0001';
+      end if;
+    end if;
+    if v_cant_num < 1 then
+      raise exception using message = 'La cantidad debe ser al menos 1.', errcode = 'P0001';
+    end if;
+    v_cantidad := coalesce(v_cant_num::int, 1);
     v_regalo := nullif(btrim(v_item ->> 'regalo_para'), '');
     v_desc := null;
     v_precio := null;
 
-    if v_cantidad < 1 then
-      raise exception using message = 'La cantidad debe ser al menos 1.', errcode = 'P0001';
+    if length(v_regalo) > 120 then
+      raise exception using message = 'El nombre de quien recibe el regalo es muy largo (máximo 120 caracteres).', errcode = 'P0001';
     end if;
 
     if v_tipo = 'servicio' then
@@ -1047,6 +1183,7 @@ declare
   v_it      record;
   v_ps      record;
   v_regalo  boolean;
+  v_codigo  text;
 begin
   select * into v_pedido from public.pedidos p where p.id = p_pedido_id for update;
   if v_pedido.estado <> 'pendiente_pago' then
@@ -1062,18 +1199,20 @@ begin
      order by pi.id
   loop
     v_regalo := nullif(btrim(v_it.regalo_para), '') is not null;
+    -- Un solo código por regalo (ítem), aunque genere varios créditos (bono de varios servicios).
+    v_codigo := case when v_regalo and v_it.tipo <> 'producto' then public.generar_codigo_regalo() end;
 
     if v_it.tipo = 'servicio' then
       insert into public.creditos (cliente_id, servicio_id, cantidad, pedido_item_id, codigo_regalo, regalo_para, vence_en)
       values (v_pedido.cliente_id, v_it.servicio_id, v_it.cantidad, v_it.id,
-              case when v_regalo then public.generar_codigo_regalo() end,
+              v_codigo,
               case when v_regalo then btrim(v_it.regalo_para) end,
               v_hoy + coalesce(v_cfg.vigencia_creditos_dias, 365));
 
     elsif v_it.tipo = 'paquete' and v_it.paquete_tipo = 'combo' then
       insert into public.creditos (cliente_id, paquete_id, cantidad, pedido_item_id, codigo_regalo, regalo_para, vence_en)
       values (v_pedido.cliente_id, v_it.paquete_id, v_it.cantidad, v_it.id,
-              case when v_regalo then public.generar_codigo_regalo() end,
+              v_codigo,
               case when v_regalo then btrim(v_it.regalo_para) end,
               v_hoy + coalesce(v_it.vigencia_dias, v_cfg.vigencia_creditos_dias, 365));
 
@@ -1081,7 +1220,7 @@ begin
       for v_ps in select ps.servicio_id, ps.cantidad from public.paquete_servicios ps where ps.paquete_id = v_it.paquete_id loop
         insert into public.creditos (cliente_id, servicio_id, cantidad, pedido_item_id, codigo_regalo, regalo_para, vence_en)
         values (v_pedido.cliente_id, v_ps.servicio_id, v_it.cantidad * v_ps.cantidad, v_it.id,
-                case when v_regalo then public.generar_codigo_regalo() end,
+                v_codigo,
                 case when v_regalo then btrim(v_it.regalo_para) end,
                 v_hoy + coalesce(v_it.vigencia_dias, v_cfg.vigencia_creditos_dias, 365));
       end loop;
@@ -1161,7 +1300,8 @@ begin
 end;
 $$;
 
--- R10 · canjear un regalo: el crédito pasa a la clienta que canjea.
+-- R10 · canjear un regalo: los créditos con ese código (uno, o varios si es un bono de varios
+-- servicios) pasan a la clienta que canjea. Devuelve el id de uno de ellos.
 create or replace function public.canjear_regalo(p_codigo text)
 returns uuid
 language plpgsql
@@ -1182,18 +1322,19 @@ begin
     raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
   end if;
 
-  select cr.id into v_credito
-    from public.creditos cr
-   where v_codigo <> '' and cr.codigo_regalo = v_codigo
-   for update;
+  perform 1 from public.creditos cr where v_codigo <> '' and cr.codigo_regalo = v_codigo for update;
+
+  with canjeados as (
+    update public.creditos
+       set cliente_id = v_cliente,
+           codigo_regalo = null
+     where v_codigo <> '' and codigo_regalo = v_codigo
+    returning id, creado_en
+  )
+  select c.id into v_credito from canjeados c order by c.creado_en, c.id limit 1;
   if v_credito is null then
     raise exception using message = 'Ese código de regalo no existe o ya se canjeó.', errcode = 'P0001';
   end if;
-
-  update public.creditos
-     set cliente_id = v_cliente,
-         codigo_regalo = null
-   where id = v_credito;
   return v_credito;
 end;
 $$;

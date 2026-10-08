@@ -144,7 +144,7 @@ function TarjetaCredito({ credito: c, config }: { credito: Credito; config: Conf
   const [copiado, setCopiado] = useState(false);
   const esRegalo = !!c.codigo_regalo;
   const mensajeRegalo = c.codigo_regalo
-    ? `¡Te regalo ${c.nombre} en ${config.nombre_negocio}! Crea tu cuenta en ${sitio()}/entrar y canjea el código ${c.codigo_regalo} en "Mis servicios".`
+    ? `¡Te regalo ${c.nombre} en ${config.nombre_negocio}! Crea tu cuenta en ${sitio()}/entrar y canjea el código ${c.codigo_regalo} en Mi cuenta, en la pestaña "Servicios".`
     : '';
 
   async function copiar() {

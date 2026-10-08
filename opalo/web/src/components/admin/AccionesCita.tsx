@@ -105,6 +105,8 @@ export function AccionesCita({ cita, onCambio, onAviso }: Props) {
   const firmada = cita.consentimientos_firmados > 0;
   const activa = ACTIVAS.includes(cita.estado);
   const saldo = cita.total - cita.pagado;
+  // Ya liquidada (con precio definido): sin botón de pago, para no cobrar dos veces.
+  const liquidada = cita.total > 0 && saldo <= 0.005;
   const b = 'btn btn-sm';
 
   return (
@@ -140,7 +142,7 @@ export function AccionesCita({ cita, onCambio, onAviso }: Props) {
             Firmar en cabina
           </button>
         )}
-        {cita.estado !== 'cancelada' && cita.estado !== 'no_asistio' && (
+        {cita.estado !== 'cancelada' && cita.estado !== 'no_asistio' && !liquidada && (
           <button type="button" className={`${b} ${saldo > 0 && cita.estado === 'completada' ? 'btn-primario' : 'btn-secundario'}`} onClick={() => setModal('pago')}>
             Registrar pago
           </button>

@@ -290,14 +290,17 @@ a.sp-pie-dato:hover { color: var(--verde); }
 .sitio-publico .sp-pie-legal { margin-top: 36px; color: var(--tinta-2); font-size: 0.85rem; }
 .sp-pie-legal p { margin: 0; padding-top: 18px; border-top: 1px solid var(--linea); }
 
-/* ---------- WhatsApp flotante ---------- */
+/* ---------- WhatsApp flotante ----------
+   En celular es más chico y se aparta (.es-apartado, lo pone LayoutPublico) mientras se ve algo que
+   no debe tapar: los botones principales de Inicio o un enlace de WhatsApp de la propia página.
+   Al final de la página no tapa nada: el pie deja espacio abajo (.sp-pie). */
 .sp-whatsapp {
   position: fixed;
-  right: 16px;
-  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   z-index: 60;
-  width: 56px;
-  height: 56px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
@@ -306,26 +309,34 @@ a.sp-pie-dato:hover { color: var(--verde); }
   color: var(--fondo);
   box-shadow: var(--sombra-fuerte);
   text-decoration: none;
-  transition: transform 0.15s, background 0.15s;
+  transition: transform 0.2s, background 0.15s, opacity 0.2s, visibility 0.2s;
 }
+.sp-whatsapp .sp-icono { width: 24px; height: 24px; }
 .sp-whatsapp:hover { background: var(--verde-osc); color: var(--fondo); transform: translateY(-2px); }
 .sp-whatsapp::after {
   content: '';
   position: absolute;
-  inset: -5px;
+  inset: -4px;
   border-radius: 50%;
   border: 1.5px solid var(--oro);
   opacity: 0.6;
   pointer-events: none;
 }
-@media (min-width: 720px) { .sp-whatsapp { right: 24px; bottom: 24px; } }
+@media (max-width: 719.98px) {
+  .sp-whatsapp.es-apartado { opacity: 0; visibility: hidden; transform: translateY(16px); pointer-events: none; }
+}
+@media (min-width: 720px) {
+  .sp-whatsapp { right: 24px; bottom: 24px; width: 56px; height: 56px; }
+  .sp-whatsapp .sp-icono { width: 28px; height: 28px; }
+  .sp-whatsapp::after { inset: -5px; }
+}
 
 /* ---------- Aviso "agregaste al carrito" ---------- */
 .sp-aviso-carrito-region {
   position: fixed;
-  left: 16px;
-  right: 84px;
-  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  left: 12px;
+  right: 72px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   z-index: 70;
   pointer-events: none;
   display: flex;

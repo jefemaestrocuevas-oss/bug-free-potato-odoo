@@ -47,6 +47,7 @@ export const MSG_EXTRA = {
   citaNoExiste: 'No encontramos esa cita.',
   citaNoFirmable: 'Esta cita ya no admite firmas.',
   citaCancelada: 'Esta cita está cancelada; agenda una nueva.',
+  citaCompletada: 'Esta cita ya se completó.',
   clienteNoExiste: 'No encontramos a esa clienta.',
   clienteCorreoUsado: 'Ya hay una clienta registrada con ese correo.',
   pedidoNoExiste: 'No encontramos ese pedido.',

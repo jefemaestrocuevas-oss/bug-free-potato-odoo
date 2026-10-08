@@ -7,6 +7,7 @@ import { useSesion } from '../../lib/sesion';
 import { useAccion, useAsync } from '../../lib/useAsync';
 import { Cargando, MensajeError, Vacio } from '../../components/ui/Estado';
 import { Gema } from '../../components/ui/Gema';
+import { Modal } from '../../components/cuenta/Modal';
 import { EncabezadoPagina, useTitulo } from '../../components/publico/EncabezadoPagina';
 import { paqueteVendible, servicioVendible } from '../../components/publico/catalogo';
 import { textoVigencia, useContacto } from '../../components/publico/contacto';
@@ -39,6 +40,12 @@ export default function Carrito() {
   useTitulo('Tu carrito');
   const carrito = useCarrito();
   const [resultado, setResultado] = useState<{ pedido: ResultadoPedido; metodo: MetodoCarrito; regalos: boolean } | null>(null);
+  // Al vaciar desaparece el botón que tenía el foco: lo llevamos al aviso de carrito vacío.
+  const [recienVaciado, setRecienVaciado] = useState(false);
+  const vacio = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (recienVaciado) vacio.current?.focus();
+  }, [recienVaciado]);
 
   if (resultado) return <PedidoListo {...resultado} />;
 
@@ -49,32 +56,41 @@ export default function Carrito() {
       </EncabezadoPagina>
       <div className="contenedor seccion">
         {carrito.items.length === 0 ? (
-          <Vacio titulo="Tu carrito está vacío">
-            <p>Compra servicios y paquetes para usarlos cuando quieras, o para regalar.</p>
-            <div className="car-vacio-acciones">
-              <Link className="btn btn-primario" to="/tienda">
-                Ir a la tienda
-              </Link>
-              <Link className="btn btn-secundario" to="/servicios">
-                Ver servicios
-              </Link>
-            </div>
-          </Vacio>
+          <div ref={vacio} tabIndex={-1} className="car-vacio">
+            <Vacio titulo="Tu carrito está vacío">
+              <p>Compra servicios y paquetes para usarlos cuando quieras, o para regalar.</p>
+              <div className="car-vacio-acciones">
+                <Link className="btn btn-primario" to="/tienda">
+                  Ir a la tienda
+                </Link>
+                <Link className="btn btn-secundario" to="/servicios">
+                  Ver servicios
+                </Link>
+              </div>
+            </Vacio>
+          </div>
         ) : (
-          <ContenidoCarrito onListo={setResultado} />
+          <ContenidoCarrito onListo={setResultado} onVaciado={() => setRecienVaciado(true)} />
         )}
       </div>
     </>
   );
 }
 
-function ContenidoCarrito({ onListo }: { onListo: (r: { pedido: ResultadoPedido; metodo: MetodoCarrito; regalos: boolean }) => void }) {
+function ContenidoCarrito({
+  onListo,
+  onVaciado,
+}: {
+  onListo: (r: { pedido: ResultadoPedido; metodo: MetodoCarrito; regalos: boolean }) => void;
+  onVaciado: () => void;
+}) {
   const carrito = useCarrito();
   const { sesion, cargando: cargandoSesion } = useSesion();
   const contacto = useContacto();
   const idNotas = useId();
   const [metodo, setMetodo] = useState<MetodoCarrito>('efectivo');
   const [notas, setNotas] = useState('');
+  const [confirmandoVaciar, setConfirmandoVaciar] = useState(false);
 
   // Revisa precios y disponibilidad actuales (el servidor vuelve a validar al confirmar).
   const vigentes = useAsync(() => Promise.all([api.getCatalogo(), api.getProductosTienda()]), []);
@@ -134,16 +150,39 @@ function ContenidoCarrito({ onListo }: { onListo: (r: { pedido: ResultadoPedido;
           <Link className="btn btn-texto" to="/tienda">
             Seguir comprando
           </Link>
-          <button
-            type="button"
-            className="btn btn-texto car-vaciar"
-            onClick={() => {
-              if (window.confirm('¿Quitar todo lo que hay en tu carrito?')) carrito.vaciar();
-            }}
-          >
+          <button type="button" className="btn btn-texto car-vaciar" onClick={() => setConfirmandoVaciar(true)}>
             Vaciar carrito
           </button>
         </div>
+        {confirmandoVaciar && (
+          <Modal
+            titulo="¿Vaciar tu carrito?"
+            onCerrar={() => setConfirmandoVaciar(false)}
+            pie={
+              <>
+                <button type="button" className="btn btn-secundario" onClick={() => setConfirmandoVaciar(false)} data-autofocus>
+                  No, conservarlo
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-peligro"
+                  onClick={() => {
+                    setConfirmandoVaciar(false);
+                    carrito.vaciar();
+                    onVaciado();
+                  }}
+                >
+                  Sí, vaciar
+                </button>
+              </>
+            }
+          >
+            <p>
+              Vas a quitar {carrito.contador === 1 ? 'el artículo' : `los ${carrito.contador} artículos`} de tu carrito. Si
+              cambias de opinión, puedes volver a agregarlos desde la tienda.
+            </p>
+          </Modal>
+        )}
       </section>
 
       <aside className="car-resumen" aria-labelledby="car-titulo-resumen">

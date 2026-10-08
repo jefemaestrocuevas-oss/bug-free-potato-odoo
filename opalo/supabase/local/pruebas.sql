@@ -94,15 +94,18 @@ exception when insufficient_privilege then
 end $$;
 
 -- Crea un usuario en auth.users (dispara tg_nuevo_usuario) y le pone rol. Devuelve su id.
+-- Por defecto con el correo ya confirmado; p_confirmado = false simula un registro sin confirmar.
 create function pruebas.crear_usuario(
   p_email text,
   p_meta jsonb default '{}'::jsonb,
-  p_rol public.rol_usuario default 'cliente'
+  p_rol public.rol_usuario default 'cliente',
+  p_confirmado boolean default true
 ) returns uuid language plpgsql security definer set search_path = public, extensions, pg_temp as $$
 declare
   v_id uuid;
 begin
-  insert into auth.users (email, raw_user_meta_data) values (p_email, p_meta) returning id into v_id;
+  insert into auth.users (email, raw_user_meta_data, email_confirmed_at)
+  values (p_email, p_meta, case when p_confirmado then now() end) returning id into v_id;
   update public.perfiles set rol = p_rol where id = v_id;
   return v_id;
 end $$;

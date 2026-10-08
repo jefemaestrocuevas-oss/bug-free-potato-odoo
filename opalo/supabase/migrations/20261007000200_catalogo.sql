@@ -40,6 +40,28 @@ create trigger servicios_actualizado_en
   for each row execute function public.tg_actualizado_en();
 alter table public.servicios enable row level security;
 
+-- R6: sin consentimiento firmado no hay servicio. Un servicio que se puede agendar (activo y en
+-- etapa disponible) debe decir qué consentimiento firma la clienta; si no, sus citas nunca se
+-- podrían iniciar ni completar.
+create or replace function public.tg_servicios_consentimiento()
+returns trigger
+language plpgsql
+set search_path = public, extensions, pg_temp
+as $$
+begin
+  if new.activo and new.etapa = 'disponible' and new.tipo_consentimiento is null then
+    raise exception using
+      message = 'Elige qué consentimiento firma la clienta para este servicio.',
+      errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger servicios_consentimiento
+  before insert or update on public.servicios
+  for each row execute function public.tg_servicios_consentimiento();
+
 create table public.paquetes (
   id              uuid primary key default gen_random_uuid(),
   slug            text not null unique check (slug ~ '^[a-z0-9][a-z0-9_-]*$'),

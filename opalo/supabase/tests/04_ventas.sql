@@ -188,4 +188,94 @@ begin
   raise notice 'OK - pago de una cita';
 end $$;
 
+-- Validaciones del carrito: cantidades enteras, método de la clienta, textos, pedidos por pagar
+do $$
+declare
+  v_c uuid := pruebas.clienta_lista('compra.c@ejemplo.mx');
+  v_cantidad jsonb;
+  v_ids uuid[] := '{}';
+  r jsonb;
+  i int;
+begin
+  perform pruebas.como(v_c);
+  foreach v_cantidad in array array['1.5', '"dos"', '100', 'true']::jsonb[] loop
+    perform pruebas.espera_error(format('select public.crear_pedido(%L::jsonb)',
+        jsonb_build_array(jsonb_build_object('tipo', 'servicio', 'id', pruebas.servicio('cejas'), 'cantidad', v_cantidad))),
+      'Revisa las cantidades.');
+  end loop;
+  perform pruebas.espera_error(format('select public.crear_pedido(%L::jsonb)',
+      jsonb_build_array(jsonb_build_object('tipo', 'servicio', 'id', pruebas.servicio('cejas'), 'cantidad', 0))),
+    'La cantidad debe ser al menos 1.');
+  perform pruebas.espera_error(format('select public.crear_pedido(%L::jsonb)',
+      jsonb_build_array(jsonb_build_object('tipo', 'servicio', 'id', 'no-es-un-id', 'cantidad', 1))),
+    'Uno de los productos ya no está disponible para compra en línea.');
+  perform pruebas.igual((public.crear_pedido(jsonb_build_array(
+                           jsonb_build_object('tipo', 'servicio', 'id', pruebas.servicio('cejas'), 'cantidad', '2'))) ->> 'total')::numeric,
+                        240::numeric, 'una cantidad entera como texto sí vale');
+
+  perform pruebas.espera_error(format('select public.crear_pedido(%L::jsonb, %L)',
+      jsonb_build_array(jsonb_build_object('tipo', 'servicio', 'id', pruebas.servicio('cejas'))), 'cortesia'),
+    'Elige efectivo, tarjeta o transferencia.');
+  perform pruebas.espera_error(format('select public.crear_pedido(%L::jsonb, %L)',
+      jsonb_build_array(jsonb_build_object('tipo', 'servicio', 'id', pruebas.servicio('cejas'))), 'mercado_pago'),
+    'Elige efectivo, tarjeta o transferencia.');
+  perform pruebas.espera_error(format('select public.crear_pedido(%L::jsonb)',
+      jsonb_build_array(jsonb_build_object('tipo', 'servicio', 'id', pruebas.servicio('cejas'), 'regalo_para', repeat('R', 121)))),
+    'El nombre de quien recibe el regalo es muy largo (máximo 120 caracteres).');
+  perform pruebas.espera_error(format('select public.crear_pedido(%L::jsonb, %L, %L)',
+      jsonb_build_array(jsonb_build_object('tipo', 'servicio', 'id', pruebas.servicio('cejas'))), 'efectivo', repeat('n', 1001)),
+    'Las notas son muy largas; escríbelas en máximo 1000 caracteres.');
+
+  -- A lo más 5 pedidos por pagar (ya tiene 1)
+  for i in 1..4 loop
+    r := public.crear_pedido(jsonb_build_array(jsonb_build_object('tipo', 'servicio', 'id', pruebas.servicio('cejas'))));
+    v_ids := v_ids || (r ->> 'id')::uuid;
+  end loop;
+  perform pruebas.espera_error(format('select public.crear_pedido(%L::jsonb)',
+      jsonb_build_array(jsonb_build_object('tipo', 'servicio', 'id', pruebas.servicio('cejas')))),
+    'Tienes 5 pedidos por pagar; págalos o cancela alguno antes de hacer otro.');
+  perform public.cancelar_pedido(v_ids[1]);
+  perform public.crear_pedido(jsonb_build_array(jsonb_build_object('tipo', 'servicio', 'id', pruebas.servicio('cejas'))));
+  perform pruebas.como_postgres();
+  raise notice 'OK - carrito: cantidades, método, textos y pedidos por pagar';
+end $$;
+
+-- Un bono de varios servicios para regalar lleva UN código y se canjea completo
+do $$
+declare
+  v_d uuid := pruebas.clienta_lista('compra.d@ejemplo.mx');
+  v_e uuid := pruebas.clienta_lista('compra.e@ejemplo.mx');
+  v_esp uuid := pruebas.usuario('especialista@demo.opalo.mx');
+  v_bono uuid;
+  v_codigo text;
+  r jsonb;
+begin
+  insert into public.paquetes (slug, nombre, tipo, precio) values ('bono-mixto-prueba', 'Bono mixto (prueba)', 'bono', 900)
+  returning id into v_bono;
+  insert into public.paquete_servicios (paquete_id, servicio_id, cantidad)
+  values (v_bono, pruebas.servicio('axilas'), 3), (v_bono, pruebas.servicio('cejas'), 2);
+
+  perform pruebas.como(v_d);
+  r := public.crear_pedido(jsonb_build_array(jsonb_build_object('tipo', 'paquete', 'id', v_bono, 'cantidad', 1, 'regalo_para', 'Amiga')));
+  perform pruebas.como(v_esp);
+  perform public.registrar_pago(900, 'efectivo', (r ->> 'id')::uuid);
+  perform pruebas.como_postgres();
+  select min(cr.codigo_regalo) into v_codigo
+    from public.creditos cr join public.pedido_items pi on pi.id = cr.pedido_item_id
+   where pi.pedido_id = (r ->> 'id')::uuid;
+  perform pruebas.igual((select count(*)::int || '/' || count(distinct cr.codigo_regalo)::int
+                           from public.creditos cr join public.pedido_items pi on pi.id = cr.pedido_item_id
+                          where pi.pedido_id = (r ->> 'id')::uuid), '2/1', 'dos créditos con un mismo código');
+
+  perform pruebas.como(v_e);
+  perform public.canjear_regalo(v_codigo);
+  perform pruebas.igual((select string_agg(nombre || ':' || cantidad, ', ' order by nombre) from public.v_creditos),
+                        'Axilas:3, Cejas:2', 'quien canjea recibe el bono completo');
+  perform pruebas.espera_error(format('select public.canjear_regalo(%L)', v_codigo), 'Ese código de regalo no existe o ya se canjeó.');
+  perform pruebas.como(v_d);
+  perform pruebas.igual((select count(*)::int from public.v_creditos), 0, 'a la compradora no le queda parte del regalo');
+  perform pruebas.como_postgres();
+  raise notice 'OK - regalo de un bono de varios servicios: un código, se canjea completo';
+end $$;
+
 rollback;

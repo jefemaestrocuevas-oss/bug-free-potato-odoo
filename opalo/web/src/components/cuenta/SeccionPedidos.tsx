@@ -115,14 +115,14 @@ export function SeccionPedidos({ config }: { config: Configuracion }) {
                           transferencia: escríbenos por WhatsApp y te compartimos los datos. Menciona tu folio <strong>{p.folio}</strong>.
                         </p>
                         <p className="cu-sin-margen">
-                          En cuanto registremos tu pago, los servicios aparecerán en <Link to="/cuenta/servicios">Mis servicios</Link>.
+                          En cuanto registremos tu pago, los servicios aparecerán en la pestaña <Link to="/cuenta/servicios">Servicios</Link>.
                         </p>
                       </div>
                     </div>
                   )}
                   {p.estado === 'pagado' && p.items.some((it) => it.tipo !== 'producto') && (
                     <p className="ayuda cu-sin-margen">
-                      Tus servicios ya están en <Link to="/cuenta/servicios">Mis servicios</Link>, listos para reservar o regalar.
+                      Tus servicios ya están en la pestaña <Link to="/cuenta/servicios">Servicios</Link>, listos para reservar o regalar.
                     </p>
                   )}
 

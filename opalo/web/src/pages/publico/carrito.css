@@ -1,5 +1,6 @@
 /* Carrito. Sólo tokens. */
 
+.car-vacio:focus { outline: none; }
 .car-vacio-acciones { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 16px; }
 
 .car-rejilla { display: grid; gap: 28px; grid-template-columns: 1fr; align-items: start; }

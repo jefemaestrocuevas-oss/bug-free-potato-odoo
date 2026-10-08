@@ -11,7 +11,8 @@
     radial-gradient(ellipse 50% 60% at 0% 100%, var(--oro-suave), transparent 70%),
     var(--fondo);
 }
-.ini-hero-rejilla { display: grid; gap: 28px; align-items: center; grid-template-columns: 1fr; }
+.ini-hero-rejilla { display: grid; gap: 16px; align-items: center; grid-template-columns: 1fr; }
+@media (min-width: 560px) { .ini-hero-rejilla { gap: 28px; } }
 @media (min-width: 900px) { .ini-hero-rejilla { grid-template-columns: 1.15fr 0.85fr; gap: 48px; } }
 .ini-hero-texto { min-width: 0; }
 .ini-hero-titulo {
@@ -41,7 +42,20 @@
   font-weight: 600;
 }
 .ini-hero-datos .sp-icono { color: var(--oro-osc); }
-.ini-hero-arte { order: -1; max-width: 200px; margin: 0 auto; width: 100%; }
+/* La píldora de capacitación lleva a /equipo: toda la píldora es el enlace. */
+.ini-hero-datos li.ini-hero-dato-enlace { padding: 0; border-color: var(--oro); }
+.ini-hero-dato-enlace a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  color: var(--verde);
+  text-decoration: none;
+}
+.ini-hero-dato-enlace a:hover { background: var(--verde-suave); color: var(--verde); text-decoration: underline; }
+/* En celular la ilustración va chica para que el titular y los botones se vean desde el inicio. */
+.ini-hero-arte { order: -1; max-width: 140px; margin: 0 auto; width: 100%; }
 @media (min-width: 560px) { .ini-hero-arte { max-width: 260px; } }
 @media (min-width: 900px) { .ini-hero-arte { order: 0; max-width: none; } }
 

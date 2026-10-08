@@ -1,0 +1,37 @@
+/*
+  Modo cabina (firma de la clienta en la tablet). Prefijo .adm-cabina-. Sólo tokens de color.
+  Cubre toda la pantalla por encima del panel y de cualquier ventana (.modal-fondo usa z-index 100).
+*/
+.adm-cabina {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--fondo);
+  color: var(--tinta);
+  padding: max(16px, env(safe-area-inset-top)) var(--gutter) max(24px, env(safe-area-inset-bottom));
+}
+.adm-cabina-hoja { width: 100%; max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.adm-cabina-cabeza { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--linea-2); }
+.adm-cabina-cabeza .marca-texto { font-size: 1.35rem; }
+.adm-cabina-titulo { font-size: clamp(2rem, 5vw, 2.6rem); margin: 8px 0 0; outline: none; }
+.adm-cabina-hoja > p { margin: 0; font-size: 1.05rem; }
+
+.adm-cabina-documento { background: var(--superficie); border: 1px solid var(--linea-2); border-radius: var(--radio); overflow: hidden; }
+.adm-cabina-documento-titulo { font-size: 1.35rem; margin: 0; padding: 14px 18px; background: var(--fondo-alt); border-bottom: 1px solid var(--linea-2); color: var(--verde); }
+.adm-cabina-texto { padding: 4px 18px 16px; max-height: 50vh; overflow-y: auto; font-size: 1rem; }
+
+.adm-cabina-firma { background: var(--superficie); border: 1px solid var(--linea-2); border-radius: var(--radio); padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+.adm-cabina-firma .campo { margin-bottom: 8px; }
+.adm-cabina-firma .aviso { margin: 0; }
+.btn.adm-cabina-guardar { min-height: 52px; font-size: 1.05rem; }
+
+.adm-cabina-listo { text-align: center; padding: 10vh 0 4vh; }
+.adm-cabina-listo p { font-size: 1.1rem; margin: 10px auto 0; max-width: 44ch; }
+
+.adm-cabina-pie { display: flex; justify-content: center; padding-top: 12px; border-top: 1px solid var(--linea-2); }
+.adm-cabina-listo + .adm-cabina-pie { border-top: 0; }
+.adm-cabina-desbloqueo { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 10px; }
+.adm-cabina-desbloqueo-botones { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.btn.adm-cabina-salir { min-height: 32px; padding: 0 4px; vertical-align: baseline; }

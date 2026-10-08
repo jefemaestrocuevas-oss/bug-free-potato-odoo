@@ -5,7 +5,10 @@ import { dinero, ETIQUETA_METODO_PAGO } from '../../lib/format';
 import { useAccion } from '../../lib/useAsync';
 import { MensajeError } from '../ui/Estado';
 import { Modal } from './Modal';
+import { Casilla } from './Piezas';
 import { aNumero, textoONulo } from './util';
+
+const centavos = (n: number) => Math.round(n * 100) / 100;
 
 const METODOS = Object.keys(ETIQUETA_METODO_PAGO) as MetodoPago[];
 
@@ -19,16 +22,38 @@ interface Props {
 }
 
 export function RegistrarPago({ destino, total, pagado, metodoSugerido, onCerrar, onListo }: Props) {
-  const saldo = Math.max(0, Math.round((total - pagado) * 100) / 100);
+  const saldo = Math.max(0, centavos(total - pagado));
   const [monto, setMonto] = useState(saldo > 0 ? String(saldo) : '');
   const [metodo, setMetodo] = useState<MetodoPago>(metodoSugerido ?? 'efectivo');
   const [referencia, setReferencia] = useState('');
   const [propina, setPropina] = useState('');
+  const [confirmaExceso, setConfirmaExceso] = useState(false);
+
+  // Más que el saldo (sólo si el total ya tiene precio): un cero de más infla los ingresos del mes.
+  const montoNum = aNumero(monto);
+  const exceso = total > 0 && montoNum !== null && montoNum > 0 ? centavos(montoNum - saldo) : 0;
+  const hayExceso = exceso > 0.005;
+  const puedePasarAPropina = hayExceso && destino.tipo === 'cita' && saldo > 0;
+
+  const cambiarMonto = (v: string) => {
+    setMonto(v);
+    setConfirmaExceso(false);
+  };
+  const pasarAPropina = () => {
+    setMonto(String(saldo));
+    setPropina(String(centavos((aNumero(propina) ?? 0) + exceso)));
+    setConfirmaExceso(false);
+  };
+
   const { ejecutar, enviando, error, setError } = useAccion(async () => {
     const m = aNumero(monto);
     const p = aNumero(propina) ?? 0;
     if (m === null || m <= 0) throw new Error('Escribe un monto mayor a cero.');
     if (p < 0) throw new Error('La propina no puede ser negativa.');
+    if (hayExceso && !confirmaExceso)
+      throw new Error(
+        `El monto es ${dinero(exceso)} mayor que el saldo. Corrígelo${puedePasarAPropina ? ', pasa la diferencia a propina' : ''} o confirma que de verdad lo recibiste.`,
+      );
     await api.admin.registrarPago({
       monto: m,
       metodo,
@@ -46,7 +71,7 @@ export function RegistrarPago({ destino, total, pagado, metodoSugerido, onCerrar
     const r = await ejecutar();
     if (!r) return;
     const cubre = pagado + r.m >= total - 0.005;
-    let mensaje = `Pago de ${dinero(r.m)} registrado.`;
+    let mensaje = `Pago de ${dinero(r.m)} registrado${hayExceso ? ` (${dinero(exceso)} más que el saldo)` : ''}.`;
     if (r.p > 0) mensaje += ` Propina de ${dinero(r.p)} registrada aparte.`;
     if (destino.tipo === 'pedido' && cubre) mensaje += ' El pedido quedó pagado y sus servicios ya están disponibles como créditos de la clienta.';
     onListo(mensaje);
@@ -93,7 +118,16 @@ export function RegistrarPago({ destino, total, pagado, metodoSugerido, onCerrar
             <label className="etiqueta" htmlFor="pago-monto">
               Monto que recibes
             </label>
-            <input id="pago-monto" className="input num" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} required />
+            <input
+              id="pago-monto"
+              className="input num"
+              inputMode="decimal"
+              value={monto}
+              onChange={(e) => cambiarMonto(e.target.value)}
+              required
+              aria-invalid={hayExceso && !confirmaExceso ? true : undefined}
+              aria-describedby={hayExceso ? 'pago-exceso' : undefined}
+            />
             {saldo > 0 && <span className="ayuda">Sugerido: el saldo pendiente ({dinero(saldo)}).</span>}
           </div>
           <div className="campo">
@@ -109,6 +143,29 @@ export function RegistrarPago({ destino, total, pagado, metodoSugerido, onCerrar
             </select>
           </div>
         </div>
+        {hayExceso && montoNum !== null && (
+          <div className="aviso aviso-alerta adm-sin-margen" id="pago-exceso">
+            <div className="pila">
+              <p className="adm-sin-margen">
+                <strong>
+                  {saldo > 0
+                    ? `Es ${dinero(exceso)} más que el saldo (${dinero(saldo)}).`
+                    : `${destino.tipo === 'cita' ? 'Esta cita ya está pagada' : 'Este pedido ya está pagado'}: los ${dinero(montoNum)} serían un pago de más.`}
+                </strong>{' '}
+                Revisa que el monto esté bien escrito: lo que registres aquí cuenta como ingreso del spa.
+                {puedePasarAPropina && ' Si la diferencia es propina, pásala a «Propina».'}
+              </p>
+              {puedePasarAPropina && (
+                <div>
+                  <button type="button" className="btn btn-secundario btn-sm" onClick={pasarAPropina}>
+                    Cobrar {dinero(saldo)} y dejar {dinero(exceso)} de propina
+                  </button>
+                </div>
+              )}
+              <Casilla etiqueta={`Sí, recibí ${dinero(montoNum)} como pago`} checked={confirmaExceso} onChange={setConfirmaExceso} />
+            </div>
+          </div>
+        )}
         <div className="campo">
           <label className="etiqueta" htmlFor="pago-ref">
             Referencia {pideReferencia ? '' : '(opcional)'}

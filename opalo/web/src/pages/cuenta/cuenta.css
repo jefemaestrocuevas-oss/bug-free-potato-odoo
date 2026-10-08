@@ -11,8 +11,10 @@
 .cu-cabeza-fila { align-items: flex-end; }
 .cu-titulo { color: var(--verde); font-size: clamp(2rem, 4.5vw, 3rem); margin: 0 0 8px; overflow-wrap: anywhere; }
 .cu-intro { margin: 0; max-width: 60ch; }
-.cu-contenido { padding-top: clamp(18px, 3vw, 28px); padding-bottom: clamp(40px, 6vw, 72px); }
-.cu-angosto { max-width: 820px; }
+/* .cu delante: base.css (.contenedor { padding: 0 …; max-width … }) se carga después que este archivo y
+   ganaría; sin esto el contenido queda pegado a la banda del encabezado. */
+.cu .cu-contenido { padding-top: clamp(18px, 3vw, 28px); padding-bottom: clamp(40px, 6vw, 72px); }
+.cu .cu-angosto { max-width: 820px; }
 .cu-h2 { font-size: clamp(1.5rem, 3vw, 1.9rem); color: var(--tinta); margin: 0; }
 .cu-h2:focus { outline: none; }
 .cu-sin-margen { margin: 0; }
@@ -20,10 +22,24 @@
 .cu-mayuscula::first-letter { text-transform: uppercase; }
 
 /* Pestañas como enlaces (cambian la URL) */
-.cu-pestanas { margin-bottom: 24px; scrollbar-width: thin; }
+.cu .cu-pestanas { margin-bottom: 24px; scrollbar-width: thin; }
 .cu-pestana { text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }
 .cu-pestana:hover { color: var(--verde); }
 .cu-pestana[aria-current='page'] { color: var(--verde); border-bottom-color: var(--verde); }
+/* En el celular no caben en una fila: rejilla de 3 columnas para que se vean todas, sin cortarse. */
+@media (max-width: 639px) {
+  .cu .cu-pestanas { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; border-bottom: 0; overflow: visible; }
+  .cu .cu-pestana {
+    justify-content: center;
+    text-align: center;
+    white-space: normal;
+    padding: 8px 6px;
+    border: 1.5px solid var(--linea-2);
+    border-radius: var(--radio-sm);
+    background: var(--superficie);
+  }
+  .cu .cu-pestana[aria-current='page'] { border-color: var(--verde); background: var(--verde-suave); }
+}
 
 /* Secciones */
 .cu-seccion { display: flex; flex-direction: column; gap: 16px; }
@@ -129,6 +145,8 @@
   padding: 2px 6px;
   color: var(--tinta-2);
 }
+.cu-huella-fila { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 100%; }
+.cu-documento-cita { margin: 0; color: var(--tinta-2); overflow-wrap: anywhere; }
 .cu-firma { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
 
 /* Datos */

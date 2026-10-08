@@ -49,7 +49,7 @@ import {
 import type { Contexto } from './contexto';
 import { consultaConsentimientos, consultaFichaVigente } from './clienta';
 import { COLUMNAS_POLITICA, itemsReserva } from './publico';
-import { MSG_SUPABASE } from './errores';
+import { aErrorOpalo, MSG_SUPABASE } from './errores';
 
 type ApiAdmin = OpaloApi['admin'];
 type Nivel = 'personal' | 'admin';
@@ -61,6 +61,8 @@ const MSG_ADMIN = {
   cantidad: 'Revisa las cantidades.',
   rangoHorario: 'La hora de salida debe ser después de la de entrada.',
   rangoBloqueo: 'El fin del bloqueo debe ser después del inicio.',
+  aMedias: 'Solo se guardó una parte de los cambios: vuelve a guardar para completarlos.',
+  paqueteSinServicios: 'El paquete se creó sin sus servicios: cierra este formulario, ábrelo desde la lista y vuelve a guardar.',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -139,6 +141,12 @@ const numeroONulo = (v: unknown): number | null => {
 
 const porNombre = (a: { nombre: string }, b: { nombre: string }) => a.nombre.localeCompare(b.nombre, 'es');
 
+/** Error de un paso que falló cuando otra petición ya había escrito: lo dice y pide volver a guardar. */
+function errorAMedias(e: unknown, aviso: string = MSG_ADMIN.aMedias): ErrorOpalo {
+  const err = aErrorOpalo(e);
+  return new ErrorOpalo(`${err.message} ${aviso}`, err.codigo);
+}
+
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
@@ -164,6 +172,19 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
     if (fs.length) return;
     const e = await ctx.errorSinFilas(nivel);
     if (e.codigo !== 'sin_filas') throw e;
+  }
+
+  /**
+   * Paso de un guardado de varias peticiones (PostgREST no abre una transacción entre ellas).
+   * Si falla cuando otra petición ya escribió, el error lo dice y pide volver a guardar:
+   * cada guardado de varios pasos es idempotente, así que repetirlo deja todo completo.
+   */
+  async function pasoSiguiente<T>(yaHuboEscritura: boolean, paso: () => Promise<T>): Promise<T> {
+    try {
+      return await paso();
+    } catch (e) {
+      throw yaHuboEscritura ? errorAMedias(e) : e;
+    }
   }
 
   async function esAdmin(): Promise<boolean> {
@@ -471,7 +492,7 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
       if (filas.length) await ctx.ejecutar(sb.from('recetas_servicio').upsert(filas, { onConflict: 'servicio_id,producto_id' }));
       let borrar = sb.from('recetas_servicio').delete().eq('servicio_id', servicio_id);
       if (filas.length) borrar = borrar.not('producto_id', 'in', `(${filas.map((f) => f.producto_id).join(',')})`);
-      await ctx.ejecutar(borrar);
+      await pasoSiguiente(filas.length > 0, () => ctx.ejecutar(borrar));
     },
 
     async getCostosServicios() {
@@ -611,6 +632,7 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
         if (!it.servicio_id || !(cant >= 1)) throw new ErrorOpalo(MSG_ADMIN.cantidad);
         items.set(it.servicio_id, (items.get(it.servicio_id) ?? 0) + cant);
       }
+      const nuevo = !p.id;
       const f = await guardarFila(
         'paquetes',
         {
@@ -630,10 +652,25 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
       const paquete_id = texto(f.id);
       const filas = [...items].map(([servicio_id, cantidad]) => ({ paquete_id, servicio_id, cantidad }));
       // Reemplazo de paquete_servicios: primero las filas nuevas, después se quitan las que sobran.
-      if (filas.length) await ctx.ejecutar(sb.from('paquete_servicios').upsert(filas, { onConflict: 'paquete_id,servicio_id' }));
+      if (filas.length) {
+        try {
+          await ctx.ejecutar(sb.from('paquete_servicios').upsert(filas, { onConflict: 'paquete_id,servicio_id' }));
+        } catch (e) {
+          if (!nuevo) throw errorAMedias(e);
+          // Paquete recién creado: se quita para no dejarlo sin servicios (el formulario no conoce su id
+          // y volver a guardar chocaría con el slug). Si tampoco se puede quitar, se avisa.
+          const quitado = await ctx.ejecutar(sb.from('paquetes').delete().eq('id', paquete_id)).then(
+            () => true,
+            () => false,
+          );
+          throw quitado ? e : errorAMedias(e, MSG_ADMIN.paqueteSinServicios);
+        }
+      }
+      // Un paquete nuevo no tiene filas anteriores que quitar.
+      if (nuevo) return;
       let borrar = sb.from('paquete_servicios').delete().eq('paquete_id', paquete_id);
       if (filas.length) borrar = borrar.not('servicio_id', 'in', `(${filas.map((x) => x.servicio_id).join(',')})`);
-      await ctx.ejecutar(borrar);
+      await pasoSiguiente(true, () => ctx.ejecutar(borrar));
     },
 
     // ------------------------------- equipo -------------------------------
@@ -705,19 +742,28 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
         if (fin <= ini) throw new ErrorOpalo(MSG_ADMIN.rangoHorario);
         return { personal_id, dia_semana: dia, hora_inicio: ini, hora_fin: fin };
       });
-      const previos = await ctx.filas(sb.from('horarios').select('id').eq('personal_id', personal_id));
-      // Se insertan los nuevos y luego se borran los anteriores (si algo falla, no se pierde el horario).
-      if (nuevos.length) await ctx.ejecutar(sb.from('horarios').insert(nuevos));
-      if (previos.length)
-        await ctx.ejecutar(
-          sb
-            .from('horarios')
-            .delete()
-            .in(
-              'id',
-              previos.map((f) => texto(f.id)),
-            ),
-        );
+      const previos = await ctx.filas(sb.from('horarios').select('id, dia_semana, hora_inicio, hora_fin').eq('personal_id', personal_id));
+      // Sólo se tocan los rangos que cambiaron: los iguales se conservan (y sus copias repetidas se quitan).
+      const clave = (dia: unknown, ini: unknown, fin: unknown) => `${Number(dia)}|${texto(ini).slice(0, 5)}|${texto(fin).slice(0, 5)}`;
+      const previosPorClave = new Map<string, string>();
+      const borrar: string[] = [];
+      for (const f of previos) {
+        const k = clave(f.dia_semana, f.hora_inicio, f.hora_fin);
+        if (previosPorClave.has(k)) borrar.push(texto(f.id));
+        else previosPorClave.set(k, texto(f.id));
+      }
+      const insertar: typeof nuevos = [];
+      const vistos = new Set<string>();
+      for (const h of nuevos) {
+        const k = clave(h.dia_semana, h.hora_inicio, h.hora_fin);
+        if (vistos.has(k)) continue;
+        vistos.add(k);
+        if (!previosPorClave.delete(k)) insertar.push(h);
+      }
+      borrar.push(...previosPorClave.values());
+      // Primero se insertan los nuevos y luego se borran los que sobran (si algo falla, no se pierde el horario).
+      if (insertar.length) await ctx.ejecutar(sb.from('horarios').insert(insertar));
+      if (borrar.length) await pasoSiguiente(insertar.length > 0, () => ctx.ejecutar(sb.from('horarios').delete().in('id', borrar)));
     },
 
     async guardarCapacitacion(c) {

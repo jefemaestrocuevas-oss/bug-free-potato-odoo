@@ -1,0 +1,112 @@
+/*
+  Piezas del área de clientas (.adm-clientas-*): WhatsApp, ficha de salud, notas y créditos.
+  Sólo tokens de color.
+*/
+/* base.css se carga después: las reglas sobre clases base llevan doble clase. */
+.fila.adm-clientas-gap { gap: 8px; }
+
+/* WhatsApp */
+.adm-clientas-wa {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.adm-clientas-wa:hover span { text-decoration: underline; }
+.adm-clientas-wa .adm-icono { color: var(--exito); flex: none; }
+.adm-clientas-wa-compacto { min-height: 0; font-size: 0.92rem; }
+
+/* Notas internas */
+.adm-clientas-notas { display: flex; flex-direction: column; gap: 10px; }
+.adm-clientas-notas textarea.input { min-height: 120px; }
+.fila.adm-gap-notas { gap: 6px; }
+
+/* Ficha de salud */
+.fila.adm-clientas-ficha-meta { gap: 8px 12px; margin-bottom: 12px; }
+.aviso.adm-clientas-ficha-aviso { flex-direction: column; align-items: flex-start; gap: 2px; margin-bottom: 14px; }
+.adm-clientas-preguntas { list-style: none; margin: 0 0 16px; padding: 0; border: 1px solid var(--linea-2); border-radius: var(--radio-sm); overflow: hidden; }
+.adm-clientas-pregunta { padding: 10px 14px; border-bottom: 1px solid var(--linea-2); }
+.adm-clientas-pregunta:last-child { border-bottom: 0; }
+.adm-clientas-pregunta-fila { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.adm-clientas-pregunta-texto { font-size: 0.95rem; line-height: 1.4; min-width: 0; }
+.adm-clientas-pregunta-fila .pill { flex: none; margin-top: 1px; }
+.adm-clientas-pregunta-si { background: var(--alerta-suave); border-left: 4px solid var(--alerta); }
+.adm-clientas-pregunta-si .adm-clientas-pregunta-texto { font-weight: 700; color: var(--tinta); }
+.adm-clientas-detalle { margin: 6px 0 8px; font-size: 0.95rem; color: var(--tinta); }
+.adm-clientas-pregunta code { font-size: 0.82rem; color: var(--tinta-3); }
+
+.adm-clientas-datos { display: grid; grid-template-columns: 1fr; gap: 10px; margin: 0; }
+@media (min-width: 640px) { .adm-clientas-datos { grid-template-columns: repeat(3, 1fr); } }
+.adm-clientas-dato { background: var(--fondo-alt); border-radius: var(--radio-sm); padding: 10px 12px; min-width: 0; }
+.adm-clientas-dato dt { font-size: 0.78rem; font-weight: 700; color: var(--tinta-3); }
+.adm-clientas-dato dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+
+/* Créditos */
+.adm-clientas-credito { align-items: flex-start; }
+.adm-clientas-credito-texto { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 220px; }
+.adm-clientas-regalo { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: 0.88rem; color: var(--tinta-2); margin-top: 2px; }
+.adm-clientas-codigo {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+  background: var(--oro-suave);
+  color: var(--oro-osc);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+/*
+  Tablas adaptables (clientas, citas del expediente y pedidos): tabla normal cuando hay
+  espacio; cuando su contenedor mide 880 px o menos (teléfono, tablet con barra lateral),
+  cada fila se vuelve una tarjeta con etiquetas (td[data-etiqueta]).
+  Uso: div.tabla-envoltura.adm-clientas-envoltura > table.tabla.adm-clientas-adaptable
+  Celdas: .adm-clientas-celda-titulo (encabeza la tarjeta), .adm-clientas-celda-ancha (renglón completo).
+  Lo que sólo aplica en modo tabla (columnas fijas, hover) va en @container (min-width: 881px).
+*/
+.adm-clientas-envoltura { container: adm-clientas-tabla / inline-size; }
+.adm-clientas-adaptable { position: relative; }
+
+@container adm-clientas-tabla (max-width: 880px) {
+  .adm-clientas-envoltura .adm-clientas-adaptable,
+  .adm-clientas-envoltura .adm-clientas-adaptable tbody { display: block; }
+  .adm-clientas-envoltura .adm-clientas-adaptable thead { display: none; }
+  .adm-clientas-envoltura .adm-clientas-adaptable tr {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 10px 16px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--linea-2);
+  }
+  .adm-clientas-envoltura .adm-clientas-adaptable tr:last-child { border-bottom: 0; }
+  .adm-clientas-envoltura .adm-clientas-adaptable tr:hover td { background: none; }
+  .adm-clientas-envoltura .adm-clientas-adaptable td,
+  .adm-clientas-envoltura .adm-clientas-adaptable td.num {
+    display: block;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+    max-width: none;
+    text-align: left;
+    white-space: normal;
+    position: static;
+    background: none;
+    box-shadow: none;
+  }
+  .adm-clientas-envoltura .adm-clientas-adaptable td[data-etiqueta]::before {
+    content: attr(data-etiqueta);
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--tinta-3);
+    margin-bottom: 2px;
+  }
+  .adm-clientas-envoltura .adm-clientas-adaptable .adm-clientas-celda-titulo,
+  .adm-clientas-envoltura .adm-clientas-adaptable .adm-clientas-celda-ancha { grid-column: 1 / -1; }
+  .adm-clientas-envoltura .adm-clientas-adaptable .adm-clientas-celda-titulo { font-size: 1.02rem; }
+  .adm-clientas-envoltura .adm-clientas-adaptable .adm-celda-acciones { text-align: left; }
+}

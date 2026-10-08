@@ -1,0 +1,273 @@
+/*
+  Catálogo y precios (/admin/catalogo). Prefijo de clases: .cat-
+  También da estilo a las ventanas CatalogoFormServicio y CatalogoFormPaquete.
+  Todo color sale de tokens.css.
+*/
+
+.cat-pagina { min-width: 0; }
+.cat-recargando { opacity: 0.6; transition: opacity 0.2s; }
+
+/* ---------- Aviso de precios por confirmar ---------- */
+.aviso.cat-aviso-precios { align-items: center; padding: 14px 16px; margin-bottom: 20px; }
+.cat-aviso-texto { display: flex; gap: 14px; align-items: center; flex: 1 1 320px; min-width: 0; }
+.cat-aviso-cifra {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  height: 52px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--superficie);
+  color: var(--alerta);
+  font-size: 1.45rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums lining-nums;
+  line-height: 1;
+  border: 1.5px solid var(--alerta);
+}
+.cat-aviso-precios .btn { flex: none; }
+@media (max-width: 479.98px) {
+  .cat-aviso-texto { align-items: flex-start; }
+  .cat-aviso-cifra { min-width: 44px; height: 44px; font-size: 1.2rem; }
+  .cat-aviso-precios .btn { width: 100%; }
+}
+.aviso.cat-aviso-compacto { font-size: 0.9rem; margin: 10px 0 0; }
+
+/* ---------- Pestañas ---------- */
+.pestanas.cat-pestanas { margin-bottom: 18px; }
+.cat-contador {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: var(--fondo-alt);
+  color: var(--tinta-3);
+  font-size: 0.72rem;
+}
+.pestana[aria-selected='true'] .cat-contador { background: var(--verde-suave); color: var(--verde); }
+
+.cat-filtros .campo { flex: 0 1 240px; }
+.cat-filtros .adm-busqueda { flex: 1 1 260px; }
+@media (max-width: 559.98px) {
+  .cat-filtros .campo, .cat-filtros .adm-busqueda { flex: 1 1 100%; min-width: 0; }
+}
+.cat-intro { color: var(--tinta-2); max-width: 78ch; margin-bottom: 16px; }
+
+/* ---------- Servicios por categoría ---------- */
+.cat-categoria { margin-bottom: 26px; }
+.cat-categoria-cabeza { display: flex; align-items: baseline; gap: 6px 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.cat-categoria-titulo { font-size: 1.5rem; margin: 0; color: var(--verde); }
+.cat-agregar-aqui { margin-left: auto; }
+
+.cat-envoltura { position: relative; container-type: inline-size; }
+.cat-tabla td { vertical-align: top; }
+.cat-celda-nombre { min-width: 200px; }
+.cat-nombre { font-weight: 700; color: var(--tinta); }
+.cat-pill-junto { margin-left: 6px; vertical-align: 1px; }
+.cat-celda-precio, .cat-celda-duracion { white-space: nowrap; }
+.cat-celda-acciones { width: 1%; }
+.cat-inactivo td { background: var(--fondo); color: var(--tinta-3); }
+.cat-inactivo .cat-nombre { color: var(--tinta-3); font-weight: 600; }
+
+.cat-en-linea { display: flex; flex-direction: column; gap: 2px; font-size: 0.86rem; min-width: 120px; }
+.cat-si, .cat-no { display: flex; flex-direction: column; padding-left: 14px; position: relative; line-height: 1.35; }
+.cat-si::before, .cat-no::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.45em;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.cat-si { color: var(--exito); font-weight: 700; }
+.cat-si::before { background: var(--exito); }
+.cat-no { color: var(--tinta-2); }
+.cat-no::before { background: transparent; border: 1.5px solid var(--tinta-3); }
+.cat-motivo { font-size: 0.78rem; color: var(--tinta-3); font-weight: 400; }
+
+/* Cada fila se vuelve tarjeta cuando la tabla tiene menos de 900 px disponibles:
+   nombre y botón arriba; precio, duración, etapa, en línea y estado debajo. */
+@container (max-width: 899.98px) {
+  .tabla.cat-tabla thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .tabla.cat-tabla, .tabla.cat-tabla tbody { display: block; }
+  .tabla.cat-tabla tr {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px 14px;
+    padding: 12px 14px 14px;
+    border-bottom: 1px solid var(--linea-2);
+  }
+  .tabla.cat-tabla tbody tr:last-child { border-bottom: 0; }
+  .tabla.cat-tabla td {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 0;
+    border: 0;
+    text-align: left;
+    min-width: 0;
+    background: none;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-size: 0.88rem;
+  }
+  .tabla.cat-tabla td[data-etiqueta]::before {
+    content: attr(data-etiqueta);
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--tinta-3);
+    margin-bottom: 2px;
+  }
+  .tabla.cat-tabla .cat-celda-nombre { grid-column: 1 / 3; grid-row: 1; display: block; min-width: 0; font-size: 0.95rem; align-self: center; }
+  .tabla.cat-tabla .cat-celda-acciones { grid-column: 3; grid-row: 1; width: auto; align-items: flex-end; justify-content: center; }
+  .tabla.cat-tabla td[data-etiqueta='En línea'] { grid-column: span 2; }
+  .tabla.cat-tabla .cat-en-linea { min-width: 0; }
+  .tabla.cat-tabla tr.cat-inactivo { background: var(--fondo); }
+}
+@container (min-width: 560px) and (max-width: 899.98px) {
+  .tabla.cat-tabla tr { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .tabla.cat-tabla .cat-celda-nombre { grid-column: 1 / 5; }
+  .tabla.cat-tabla .cat-celda-acciones { grid-column: 5; }
+  .tabla.cat-tabla td[data-etiqueta='En línea'] { grid-column: auto; }
+}
+
+/* ---------- Paquetes ---------- */
+.cat-paquetes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+}
+.cat-paquetes > li { display: flex; min-width: 0; }
+.cat-paquete { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 18px; min-width: 0; }
+.cat-paquete-inactivo { background: var(--fondo); border-style: dashed; }
+.cat-paquete-inactivo .cat-paquete-nombre, .cat-paquete-inactivo .cat-paquete-precio { color: var(--tinta-3); }
+.cat-paquete-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.cat-paquete-cabeza { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.cat-paquete-nombre { font-size: 1.45rem; margin: 0; color: var(--verde); }
+.cat-paquete-precio { font-size: 1.35rem; font-weight: 700; color: var(--tinta); white-space: nowrap; }
+.cat-paquete-desc { margin: 0; color: var(--tinta-2); font-size: 0.95rem; }
+.cat-paquete-items { list-style: none; margin: 0; padding: 10px 12px; background: var(--fondo-alt); border-radius: var(--radio-sm); font-size: 0.93rem; }
+.cat-paquete-items li { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
+.cat-cantidad { font-weight: 700; color: var(--verde); }
+.cat-paquete-separado { margin: 0; font-size: 0.93rem; }
+.cat-cuenta-bien { color: var(--exito); }
+.cat-cuenta-mal { color: var(--alerta); }
+.cat-paquete-datos { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px 14px; margin: 0; padding-top: 10px; border-top: 1px solid var(--linea-2); }
+.cat-paquete-datos dt { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tinta-3); }
+.cat-paquete-datos dd { margin: 0; font-size: 0.92rem; }
+.cat-paquete-pie { margin-top: auto; display: flex; justify-content: flex-end; padding-top: 4px; }
+
+/* ---------- Formularios (ventanas) ---------- */
+.adm-modal.adm-modal-amplio:has(.cat-form) { max-width: 820px; }
+.cat-paso { margin-top: 4px; margin-bottom: 14px; }
+.cat-slug { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.cat-form code, .cat-slug code {
+  font-size: 0.88rem;
+  background: var(--fondo-alt);
+  border: 1px solid var(--linea-2);
+  border-radius: 4px;
+  padding: 1px 6px;
+  overflow-wrap: anywhere;
+}
+.cat-error-campo { font-size: 0.85rem; color: var(--error); font-weight: 600; }
+.cat-casillas { display: grid; gap: 0 18px; margin: 4px 0 6px; }
+@media (min-width: 640px) { .cat-casillas { grid-template-columns: 1fr 1fr; } }
+.cat-nota { margin: 8px 0 0; }
+
+/* Entrada con $ / min / días */
+.cat-entrada { display: flex; align-items: stretch; min-width: 0; }
+.cat-entrada .input { flex: 1 1 auto; min-width: 0; }
+.cat-entrada-pre, .cat-entrada-post {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  background: var(--fondo-alt);
+  border: 1px solid var(--linea);
+  color: var(--tinta-3);
+  font-weight: 700;
+  font-size: 0.9rem;
+  flex: none;
+}
+.cat-entrada-pre { border-right: 0; border-radius: var(--radio-sm) 0 0 var(--radio-sm); }
+.cat-entrada-post { border-left: 0; border-radius: 0 var(--radio-sm) var(--radio-sm) 0; }
+.cat-entrada-con-pre .input { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.cat-entrada-con-post .input { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+
+/* Vista previa de reglas */
+.cat-vista-previa { background: var(--verde-suave); border-radius: var(--radio-sm); padding: 12px 16px; margin: 6px 0 14px; }
+.cat-vista-titulo { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--verde); margin: 0 0 6px; }
+.cat-vista-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 0.93rem; }
+.cat-vista-lista .cat-si, .cat-vista-lista .cat-no, .cat-vista-lista .cat-neutro { display: block; font-weight: 400; color: var(--tinta); }
+.cat-vista-lista .cat-si strong { color: var(--exito); }
+.cat-neutro { padding-left: 14px; position: relative; }
+.cat-neutro::before { content: ''; position: absolute; left: 1px; top: 0.5em; width: 6px; height: 6px; border-radius: 50%; background: var(--tinta-3); }
+
+/* Tipo de paquete */
+.cat-grupo-radio { border: 0; padding: 0; margin: 0 0 14px; min-width: 0; }
+.cat-grupo-radio legend { padding: 0; margin-bottom: 8px; }
+.cat-opciones { display: grid; gap: 8px; }
+@media (min-width: 520px) { .cat-opciones { grid-template-columns: 1fr 1fr; } }
+.cat-opcion {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1.5px solid var(--linea);
+  border-radius: var(--radio-sm);
+  padding: 10px 12px;
+  cursor: pointer;
+  background: var(--superficie);
+}
+.cat-opcion input { width: 18px; height: 18px; margin: 3px 0 0; accent-color: var(--verde); flex: none; }
+.cat-opcion-activa { border-color: var(--verde); background: var(--verde-suave); }
+
+/* Servicios del paquete */
+.cat-lineas { list-style: none; margin: 0 0 10px; padding: 0; container: cat-lineas / inline-size; }
+.cat-linea {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  gap: 0 12px;
+  align-items: end;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--linea-2);
+}
+.cat-linea:first-child { padding-top: 0; }
+.cat-linea .campo { margin-bottom: 0; }
+.cat-linea-servicio { grid-column: 1 / -1; margin-bottom: 8px !important; }
+.cat-linea-sub { display: flex; flex-direction: column; gap: 2px; min-height: 44px; justify-content: flex-end; padding-bottom: 10px; }
+.cat-linea-sub .num { font-weight: 700; }
+.cat-linea-quitar { grid-column: 1 / -1; justify-self: start; margin-top: 6px; }
+.cat-linea-cantidad .input { text-align: right; }
+@container cat-lineas (min-width: 600px) {
+  .cat-linea { grid-template-columns: minmax(0, 1fr) 96px 120px 44px; }
+  .cat-linea-servicio { grid-column: auto; margin-bottom: 0 !important; }
+  .cat-linea-quitar { grid-column: auto; justify-self: end; margin: 0 0 4px; min-width: 40px; }
+  .cat-solo-movil { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+@container cat-lineas (max-width: 599.98px) {
+  .cat-linea { grid-template-columns: 96px minmax(0, 1fr); }
+  .cat-linea-sub { padding-left: 4px; }
+}
+
+.cat-cuentas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: 10px;
+  margin: 4px 0 0;
+}
+.cat-cuentas > div { background: var(--fondo-alt); border-radius: var(--radio-sm); padding: 10px 14px; }
+.cat-cuentas dt { font-size: 0.78rem; font-weight: 700; color: var(--tinta-3); }
+.cat-cuentas dd { margin: 2px 0 0; font-size: 1.2rem; font-weight: 700; color: var(--tinta); }
+.cat-cuentas dd.cat-cuenta-bien { color: var(--exito); }
+.cat-cuentas dd.cat-cuenta-mal { color: var(--alerta); }

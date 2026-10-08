@@ -139,15 +139,22 @@ begin
                         'servicio por confirmar: se reserva con total 0');
   perform pruebas.igual((select precio from public.cita_items where cita_id = (r ->> 'id')::uuid), null::numeric(10,2),
                         'el ítem guarda precio null (por confirmar)');
+  perform public.cancelar_cita((r ->> 'id')::uuid);   -- deja lugar (máximo 3 citas próximas por clienta)
   perform pruebas.como_postgres();
 
   perform pruebas.igual((select creada_por from public.citas where id = v_cita), v_a, 'creada_por es la clienta');
-  perform pruebas.afirma((select bool_and(co.documento_hash = encode(sha256(convert_to(
-                              p.hash_sha256 || coalesce(co.ficha_salud_id::text, '')
-                              || to_char(co.firmado_en at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), 'UTF8')), 'hex'))
+  perform pruebas.afirma((select bool_and(co.documento_hash = encode(sha256(convert_to(concat_ws('|',
+                              p.hash_sha256, co.cliente_id::text, coalesce(co.cita_id::text, ''),
+                              coalesce(co.ficha_salud_id::text, ''), co.nombre_firmante, coalesce(co.tutor_nombre, ''),
+                              case when co.es_menor then 't' else 'f' end,
+                              encode(sha256(convert_to(co.firma_svg, 'UTF8')), 'hex'),
+                              to_char(co.firmado_en at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')), 'UTF8')), 'hex'))
                             from public.consentimientos co join public.politicas p on p.id = co.politica_id
                            where co.cliente_id = pruebas.cliente_de(v_a)),
-                         'documento_hash = sha256(hash política || ficha || firmado_en)');
+                         'documento_hash = sha256(política | clienta | cita | ficha | firmante | tutor | menor | sha256(firma) | firmado_en)');
+  perform pruebas.igual((select string_agg(distinct co.canal || '/' || (co.capturado_por = v_a)::text, ',')
+                           from public.consentimientos co where co.cliente_id = pruebas.cliente_de(v_a)),
+                        'reserva_web/true', 'al reservar: canal reserva_web, capturado por la clienta');
   raise notice 'OK - reserva exitosa: confirmada, total del servidor, un consentimiento por tipo';
 end $$;
 
@@ -430,6 +437,8 @@ begin
   perform public.firmar_consentimiento_cita((r ->> 'id')::uuid, 'Mariana Mostrador', pruebas.firma());
   perform pruebas.igual((select count(*)::int from public.consentimientos where cita_id = (r ->> 'id')::uuid), 1,
                         'firmar dos veces no duplica');
+  perform pruebas.igual((select canal || '/' || (capturado_por = v_esp)::text from public.consentimientos where cita_id = (r ->> 'id')::uuid),
+                        'cabina/true', 'firma en cabina: canal cabina, capturada por el personal');
   perform public.cambiar_estado_cita((r ->> 'id')::uuid, 'en_curso');
   perform pruebas.igual((select estado::text from public.citas where id = (r ->> 'id')::uuid), 'en_curso', 'con firma, en curso');
 
@@ -476,6 +485,8 @@ begin
   perform public.firmar_consentimiento_cita((r2 ->> 'id')::uuid, 'Ana Prueba Reserva', pruebas.firma(), null, 'Celular');
   perform pruebas.igual((select consentimientos_firmados from public.v_citas_detalle where id = (r2 ->> 'id')::uuid), 1,
                         'la clienta firmó desde su portal');
+  perform pruebas.igual((select canal || '/' || (capturado_por = v_a)::text from public.consentimientos where cita_id = (r2 ->> 'id')::uuid),
+                        'portal/true', 'firma desde el portal: canal portal, capturada por la clienta');
   perform pruebas.espera_error(format('select public.completar_cita(%L)', r2 ->> 'id'), 'No tienes permiso para hacer esto.');
   perform pruebas.espera_error(format('select public.cambiar_estado_cita(%L, %L)', r2 ->> 'id', 'en_curso'),
     'No tienes permiso para hacer esto.');
@@ -488,7 +499,7 @@ end $$;
 -- ---------------------------------------------------------------------------
 do $$
 declare
-  v_a uuid := pruebas.usuario('ana.prueba@ejemplo.mx');
+  v_a uuid := pruebas.clienta_lista('rita.prueba@ejemplo.mx');
   v_admin uuid := pruebas.usuario('admin@demo.opalo.mx');
   v_jueves date := pruebas.proximo_dia(4, 28);
   v_sql text;
@@ -496,7 +507,7 @@ begin
   perform pruebas.como(v_admin);
   perform public.publicar_politica('cancelacion', 'Política de cancelación (v2)', 'Nuevo texto de prueba.');
   v_sql := format('select public.reservar_cita(%L::jsonb, %L::timestamptz, %L, %L)',
-                  pruebas.items('axilas'), pruebas.instante(v_jueves, '10:00'), 'Ana Prueba Reserva', pruebas.firma());
+                  pruebas.items('axilas'), pruebas.instante(v_jueves, '10:00'), 'Rita Prueba', pruebas.firma());
   perform pruebas.como(v_a);
   perform pruebas.espera_error(v_sql,
     'Antes de reservar necesitas aceptar los términos, el aviso de privacidad y la política de cancelación.');
@@ -504,6 +515,272 @@ begin
   execute v_sql;
   perform pruebas.como_postgres();
   raise notice 'OK - una versión nueva de una política se vuelve a aceptar';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- Una cuenta no acapara la agenda: máximo 3 citas próximas activas (el personal sí agenda más)
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_l uuid := pruebas.clienta_lista('limite.prueba@ejemplo.mx');
+  v_esp uuid := pruebas.usuario('especialista@demo.opalo.mx');
+  v_dia date := pruebas.proximo_dia(6, 35);   -- sábado: 9:00 a 15:00
+  v_sql text;
+  r jsonb;
+begin
+  perform pruebas.como(v_l);
+  perform public.reservar_cita(pruebas.items('cejas'), pruebas.instante(v_dia, '09:00'), 'Limite Prueba', pruebas.firma());
+  perform public.reservar_cita(pruebas.items('cejas'), pruebas.instante(v_dia, '10:00'), 'Limite Prueba', pruebas.firma());
+  r := public.reservar_cita(pruebas.items('cejas'), pruebas.instante(v_dia, '11:00'), 'Limite Prueba', pruebas.firma());
+  v_sql := format('select public.reservar_cita(%L::jsonb, %L::timestamptz, %L, %L)',
+                  pruebas.items('cejas'), pruebas.instante(v_dia, '12:00'), 'Limite Prueba', pruebas.firma());
+  perform pruebas.espera_error(v_sql, 'Ya tienes 3 citas próximas; para agendar otra escríbenos por WhatsApp al 442 170 1466.');
+  perform public.cancelar_cita((r ->> 'id')::uuid);
+  execute v_sql;
+  perform pruebas.como(v_esp);
+  perform public.reservar_cita_staff(pruebas.cliente_de(v_l), pruebas.items('cejas'), pruebas.instante(v_dia, '13:00'));
+  perform pruebas.como_postgres();
+  perform pruebas.igual((select count(*)::int from public.citas
+                          where cliente_id = pruebas.cliente_de(v_l) and estado in ('pendiente', 'confirmada')), 4,
+                        'al cancelar una vuelve a poder; el personal le agenda una cuarta');
+  raise notice 'OK - máximo 3 citas próximas por clienta en línea';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- Fecha de nacimiento obligatoria e inamovible para la clienta; firma, nombres y notas válidos
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_f uuid := pruebas.clienta_lista('fecha.prueba@ejemplo.mx');
+  v_valeria uuid := pruebas.usuario('valeria@demo.opalo.mx');
+  v_esp uuid := pruebas.usuario('especialista@demo.opalo.mx');
+  v_dia date := pruebas.proximo_dia(3, 35);
+  v_msg_fecha text := 'Tu fecha de nacimiento ya está registrada; si hay un error, escríbenos por WhatsApp al 442 170 1466.';
+  v_msg_firma text := 'No pudimos leer tu firma; bórrala y vuelve a firmar.';
+  v_firma text;
+  r jsonb;
+begin
+  -- Valeria (16 años) no puede borrar ni cambiar su fecha para saltarse al tutor
+  perform pruebas.como(v_valeria);
+  perform pruebas.espera_error(format('update public.clientes set fecha_nacimiento = null where usuario_id = %L', v_valeria), v_msg_fecha);
+  perform pruebas.espera_error(format('update public.clientes set fecha_nacimiento = %L where usuario_id = %L', '1990-01-01', v_valeria),
+                               v_msg_fecha);
+  update public.clientes set telefono = '4420000099', fecha_nacimiento = fecha_nacimiento where usuario_id = v_valeria;
+  perform pruebas.como_postgres();
+  perform pruebas.igual((select telefono from public.clientes where usuario_id = v_valeria), '4420000099',
+                        'sin tocar la fecha, sí guarda sus otros datos');
+
+  -- El personal sí la corrige; sin fecha, la clienta no reserva
+  perform pruebas.como(v_esp);
+  update public.clientes set fecha_nacimiento = null where id = pruebas.cliente_de(v_f);
+  perform pruebas.como(v_f);
+  perform pruebas.espera_error(format('select public.reservar_cita(%L::jsonb, %L::timestamptz, %L, %L, null, null, %L)',
+      pruebas.items('cejas'), pruebas.instante(v_dia, '10:00'), 'Fecha Prueba', pruebas.firma(), 'Tutor inventado'),
+    'Para reservar necesitamos tu fecha de nacimiento.');
+  update public.clientes set fecha_nacimiento = '1992-02-02' where usuario_id = v_f;   -- si no tenía, la captura
+
+  -- Firma: sólo trazos SVG razonables; nombres y notas con límite
+  foreach v_firma in array array['no es una firma', '<svg><script>alert(1)</script></svg>',
+                                 '<svg onload="alert(1)"><path d="M1 1"/></svg>',
+                                 '<svg><image href="https://ejemplo.mx/x.png"/></svg>',
+                                 '<svg><path d="' || repeat('L1 1 ', 40001) || '"/></svg>'] loop
+    perform pruebas.espera_error(format('select public.reservar_cita(%L::jsonb, %L::timestamptz, %L, %L)',
+        pruebas.items('cejas'), pruebas.instante(v_dia, '10:00'), 'Fecha Prueba', v_firma), v_msg_firma);
+  end loop;
+  perform pruebas.espera_error(format('select public.reservar_cita(%L::jsonb, %L::timestamptz, %L, %L)',
+      pruebas.items('cejas'), pruebas.instante(v_dia, '10:00'), repeat('N', 201), pruebas.firma()),
+    'El nombre es muy largo; escríbelo en máximo 200 caracteres.');
+  perform pruebas.espera_error(format('select public.reservar_cita(%L::jsonb, %L::timestamptz, %L, %L, null, %L)',
+      pruebas.items('cejas'), pruebas.instante(v_dia, '10:00'), 'Fecha Prueba', pruebas.firma(), repeat('n', 1001)),
+    'Las notas son muy largas; escríbelas en máximo 1000 caracteres.');
+  perform pruebas.espera_error(format('select public.guardar_ficha_salud(%L, %L, %L, null, null, true)', '{}', '{}', repeat('a', 2001)),
+    'Tu ficha de salud es muy larga; resume cada respuesta en máximo 2000 caracteres.');
+  r := public.reservar_cita(pruebas.items('cejas'), pruebas.instante(v_dia, '10:00'), 'Fecha Prueba', pruebas.firma());
+  perform pruebas.igual(r ->> 'estado', 'confirmada', 'con fecha y firma válidas, reserva');
+
+  -- Firma posterior: desde el portal también pide la fecha; en cabina, el personal verifica en persona
+  perform pruebas.como(v_esp);
+  r := public.reservar_cita_staff(pruebas.cliente_de(v_f), pruebas.items('axilas'), pruebas.instante(v_dia, '12:00'));
+  update public.clientes set fecha_nacimiento = null where id = pruebas.cliente_de(v_f);
+  perform pruebas.como(v_f);
+  perform pruebas.espera_error(format('select public.firmar_consentimiento_cita(%L, %L, %L)', r ->> 'id', 'Fecha Prueba', pruebas.firma()),
+    'Para firmar necesitamos tu fecha de nacimiento.');
+  perform pruebas.espera_error(format('select public.firmar_consentimiento_cita(%L, %L, %L)', r ->> 'id', 'Fecha Prueba', '<svg><script/></svg>'),
+    'Para firmar necesitamos tu fecha de nacimiento.');
+  perform pruebas.como(v_esp);
+  perform pruebas.espera_error(format('select public.firmar_consentimiento_cita(%L, %L, %L)', r ->> 'id', 'Fecha Prueba', '<svg><script/></svg>'),
+    v_msg_firma);
+  perform public.firmar_consentimiento_cita((r ->> 'id')::uuid, 'Fecha Prueba', pruebas.firma());
+
+  -- La tabla misma rechaza firmas que no son trazos (aunque se inserte directo)
+  perform pruebas.como_postgres();
+  begin
+    insert into public.consentimientos (cliente_id, politica_id, nombre_firmante, firma_svg)
+    select pruebas.cliente_de(v_f), id, 'Directo', '<svg><script>x</script></svg>' from public.politicas where activa limit 1;
+    raise exception 'FALLA: se guardó una firma con <script>';
+  exception when check_violation then
+    null;
+  end;
+  raise notice 'OK - fecha de nacimiento, firma, nombres y notas';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- El crédito debe estar vigente el día de la cita
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_g uuid := pruebas.clienta_lista('vigencia.prueba@ejemplo.mx');
+  v_dia date := pruebas.proximo_dia(4, 35);
+  v_cred uuid;
+  v_sql text;
+begin
+  insert into public.creditos (cliente_id, servicio_id, cantidad, vence_en)
+  values (pruebas.cliente_de(v_g), pruebas.servicio('axilas'), 1, public.hoy_local()) returning id into v_cred;
+  v_sql := format('select public.reservar_cita(%L::jsonb, %L::timestamptz, %L, %L)',
+                  jsonb_build_array(jsonb_build_object('servicio_id', pruebas.servicio('axilas'), 'credito_id', v_cred)),
+                  pruebas.instante(v_dia, '10:00'), 'Vigencia Prueba', pruebas.firma());
+  perform pruebas.como(v_g);
+  perform pruebas.espera_error(v_sql, 'Ese crédito no es válido o ya se usó.');
+  perform pruebas.como_postgres();
+  update public.creditos set vence_en = v_dia where id = v_cred;
+  perform pruebas.como(v_g);
+  execute v_sql;
+  perform pruebas.como_postgres();
+  perform pruebas.igual((select usados from public.creditos where id = v_cred), 1, 'vence el mismo día de la cita: sí se usa');
+  raise notice 'OK - vigencia del crédito contra la fecha de la cita';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- El personal respeta los bloqueos (vacaciones, festivos) al agendar
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_esp uuid := pruebas.usuario('especialista@demo.opalo.mx');
+  v_especialista uuid := (select id from public.personal where slug = 'especialista');
+  v_mariana uuid := (select id from public.clientes where apellidos = 'Mostrador (ejemplo)');
+  v_martes date := pruebas.proximo_dia(2, 42);
+  v_apoyo uuid;
+  r jsonb;
+begin
+  insert into public.personal (slug, nombre, orden) values ('apoyo-bloqueo', 'Apoyo (prueba)', 99) returning id into v_apoyo;
+  insert into public.horarios (personal_id, dia_semana, hora_inicio, hora_fin) values (v_apoyo, 2, '10:00', '19:00');
+  insert into public.bloqueos_agenda (personal_id, inicio, fin, motivo)
+  values (v_especialista, pruebas.instante(v_martes, '00:00'), pruebas.instante(v_martes + 1, '00:00'), 'Vacaciones (prueba)');
+
+  perform pruebas.como(v_esp);
+  r := public.reservar_cita_staff(v_mariana, pruebas.items('cejas'), pruebas.instante(v_martes, '10:00'));
+  perform pruebas.igual((select personal_id from public.citas where id = (r ->> 'id')::uuid), v_apoyo,
+                        'la autoasignación salta a quien está de vacaciones');
+  perform pruebas.espera_error(format('select public.reservar_cita_staff(%L, %L::jsonb, %L::timestamptz, %L)',
+      v_mariana, pruebas.items('cejas'), pruebas.instante(v_martes, '12:00'), v_especialista),
+    'Ese horario no está disponible.');
+
+  -- Festivo: bloqueo de todo el spa
+  insert into public.bloqueos_agenda (personal_id, inicio, fin, motivo)
+  values (null, pruebas.instante(v_martes + 7, '00:00'), pruebas.instante(v_martes + 8, '00:00'), 'Festivo (prueba)');
+  perform pruebas.espera_error(format('select public.reservar_cita_staff(%L, %L::jsonb, %L::timestamptz)',
+      v_mariana, pruebas.items('cejas'), pruebas.instante(v_martes + 7, '11:00')),
+    'Ese horario no está disponible.');
+  perform pruebas.espera_error(format('select public.reservar_cita_staff(%L, %L::jsonb, %L::timestamptz, %L)',
+      v_mariana, pruebas.items('cejas'), pruebas.instante(v_martes + 7, '11:00'), v_apoyo),
+    'Ese horario no está disponible.');
+
+  -- Quien está libre de bloqueos pero ocupado: "se acaba de ocupar"
+  perform pruebas.espera_error(format('select public.reservar_cita_staff(%L, %L::jsonb, %L::timestamptz)',
+      v_mariana, pruebas.items('axilas'), pruebas.instante(v_martes, '10:00')),
+    'Ese horario se acaba de ocupar, elige otro.');
+  perform pruebas.como_postgres();
+  raise notice 'OK - el personal no agenda sobre bloqueos';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- R3: "se acaba de ocupar" sólo si lo ocupó alguien que puede hacer el servicio
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_h uuid := pruebas.clienta_lista('mensaje.prueba@ejemplo.mx');
+  v_especialista uuid := (select id from public.personal where slug = 'especialista');
+  v_martes date := pruebas.proximo_dia(2, 49);
+  v_facial uuid;
+begin
+  insert into public.personal (slug, nombre, orden) values ('solo-facial', 'Sólo faciales (prueba)', 99) returning id into v_facial;
+  insert into public.personal_servicios (personal_id, servicio_id) values (v_facial, pruebas.servicio('facial-hidratante'));
+  insert into public.horarios (personal_id, dia_semana, hora_inicio, hora_fin) values (v_facial, 2, '10:00', '19:00');
+  insert into public.cabinas (nombre, orden) values ('Cabina 2 (prueba)', 2);
+  insert into public.bloqueos_agenda (personal_id, inicio, fin, motivo)
+  values (v_especialista, pruebas.instante(v_martes, '10:00'), pruebas.instante(v_martes, '11:00'), 'Junta (prueba)');
+  insert into public.citas (cliente_id, personal_id, cabina_id, inicio, fin)
+  values ((select id from public.clientes where apellidos = 'Mostrador (ejemplo)'), v_facial,
+          (select id from public.cabinas where nombre = 'Cabina 1'),
+          pruebas.instante(v_martes, '10:00'), pruebas.instante(v_martes, '11:00'));
+  perform pruebas.como(v_h);
+  perform pruebas.espera_error(format('select public.reservar_cita(%L::jsonb, %L::timestamptz, %L, %L)',
+      pruebas.items('cejas'), pruebas.instante(v_martes, '10:00'), 'Mensaje Prueba', pruebas.firma()),
+    'Ese horario no está disponible.');
+  perform pruebas.como_postgres();
+  raise notice 'OK - mensaje de horario según quién puede hacer el servicio';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- R6: todo servicio que se agenda tiene un consentimiento que firmar
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_admin uuid := pruebas.usuario('admin@demo.opalo.mx');
+  v_esp uuid := pruebas.usuario('especialista@demo.opalo.mx');
+  v_mariana uuid := (select id from public.clientes where apellidos = 'Mostrador (ejemplo)');
+  v_msg text := 'Elige qué consentimiento firma la clienta para este servicio.';
+begin
+  perform pruebas.como(v_admin);
+  perform pruebas.espera_error('update public.servicios set tipo_consentimiento = null where slug = ''cejas''', v_msg);
+  perform pruebas.espera_error(
+    'insert into public.servicios (categoria_id, slug, nombre) select id, ''sin-consentimiento'', ''Sin consentimiento'' from public.categorias_servicio limit 1',
+    v_msg);
+  insert into public.servicios (categoria_id, slug, nombre, activo)
+  select id, 'borrador-prueba', 'Borrador (prueba)', false from public.categorias_servicio limit 1;   -- inactivo: sí
+  insert into public.servicios (categoria_id, slug, nombre, etapa)
+  select id, 'segunda-etapa-prueba', 'Segunda etapa (prueba)', 'segunda_etapa' from public.categorias_servicio limit 1;
+  perform pruebas.espera_error('update public.servicios set activo = true where slug = ''borrador-prueba''', v_msg);
+
+  -- Sin política activa de ese consentimiento, la cita no se crea (nunca se podría completar)
+  perform pruebas.como_postgres();
+  update public.politicas set activa = false where tipo = 'consentimiento_corporal';
+  perform pruebas.como(v_esp);
+  perform pruebas.espera_error(format('select public.reservar_cita_staff(%L, %L::jsonb, %L::timestamptz)',
+      v_mariana, pruebas.items('reductivo-zona'), pruebas.instante(pruebas.proximo_dia(3, 42), '10:00')),
+    'Uno de los servicios elegidos no se puede reservar en línea.');
+  perform pruebas.como_postgres();
+  update public.politicas set activa = true where tipo = 'consentimiento_corporal' and version = 1;
+  raise notice 'OK - R6: servicios agendables con consentimiento';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- "No asistió" no se cancela (ni devuelve créditos) ni se completa directo
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_esp uuid := pruebas.usuario('especialista@demo.opalo.mx');
+  v_mariana uuid := (select id from public.clientes where apellidos = 'Mostrador (ejemplo)');
+  v_cred uuid;
+  r jsonb;
+begin
+  insert into public.creditos (cliente_id, servicio_id, cantidad, vence_en)
+  values (v_mariana, pruebas.servicio('cejas'), 1, public.hoy_local() + 90) returning id into v_cred;
+  perform pruebas.como(v_esp);
+  r := public.reservar_cita_staff(v_mariana,
+         jsonb_build_array(jsonb_build_object('servicio_id', pruebas.servicio('cejas'), 'credito_id', v_cred)),
+         pruebas.instante(pruebas.proximo_dia(5, 42), '10:00'));
+  perform public.firmar_consentimiento_cita((r ->> 'id')::uuid, 'Mariana Mostrador', pruebas.firma());
+  perform public.cambiar_estado_cita((r ->> 'id')::uuid, 'no_asistio');
+  perform pruebas.espera_error(format('select public.cambiar_estado_cita(%L, %L)', r ->> 'id', 'cancelada'),
+    'Esta cita ya no se puede cancelar.');
+  perform pruebas.espera_error(format('select public.cancelar_cita(%L)', r ->> 'id'), 'Esta cita ya no se puede cancelar.');
+  perform pruebas.espera_error(format('select public.completar_cita(%L)', r ->> 'id'), 'Esta cita se marcó como no asistió.');
+  perform pruebas.como_postgres();
+  perform pruebas.igual((select estado::text || '/' || (select usados from public.creditos where id = v_cred)::text
+                           from public.citas where id = (r ->> 'id')::uuid), 'no_asistio/1',
+                        'sigue como no asistió y el crédito no regresa');
+  raise notice 'OK - no asistió: ni se cancela ni se completa directo';
 end $$;
 
 rollback;

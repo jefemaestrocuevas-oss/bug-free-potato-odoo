@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import type { Slot } from '../../lib/api/tipos';
 import { dinero, duracion, fechaLarga, hora } from '../../lib/format';
 import { NOMBRES_PASOS, TOTAL_PASOS, type Paso } from './estado';
-import type { Total } from './utilidades';
+import { notaPago, type Total } from './utilidades';
 
 export function Progreso({ paso, maxPaso, onIr }: { paso: Paso; maxPaso: Paso; onIr: (p: Paso) => void }) {
   const pasos = Array.from({ length: TOTAL_PASOS }, (_, i) => (i + 1) as Paso);
@@ -165,7 +165,8 @@ export function ResumenReserva({
       </dl>
       {lineas.length > 0 && (
         <p className="ayuda rv-resumen-nota">
-          Pagas en el spa el día de tu cita.{total.porConfirmar ? ' Los precios por confirmar te los decimos en cabina antes de empezar.' : ''}
+          {notaPago(total)}
+          {total.porConfirmar ? ' Los precios por confirmar te los decimos en cabina antes de empezar.' : ''}
         </p>
       )}
     </div>

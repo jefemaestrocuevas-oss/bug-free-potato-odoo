@@ -89,6 +89,11 @@ export function PasoServicios({ cat, items, onCambiar, creditos, total, duracion
     (c) => c.vigente && c.restantes > 0 && creditoAItem(c) && (!c.codigo_regalo || items.some((x) => x.credito_id === c.id)),
   );
 
+  const paquetesPorId = new Map(cat.paquetes.map((p) => [p.id, p]));
+  const nombresElegidos = items
+    .map((it) => (it.tipo === 'servicio' ? porId.get(it.id)?.nombre : paquetesPorId.get(it.id)?.nombre))
+    .filter((n): n is string => !!n);
+
   const cuantos = items.length;
   const resumenMovil =
     cuantos === 0 ? (
@@ -107,6 +112,19 @@ export function PasoServicios({ cat, items, onCambiar, creditos, total, duracion
       <p className="texto-2">
         Elige todo lo que quieras hacerte en esta visita. Te mostramos el tiempo estimado y el total mientras eliges.
       </p>
+
+      {/* En el celular el resumen queda hasta abajo: aquí se ve de inmediato lo que ya está elegido (p. ej. desde ?servicio=). */}
+      {nombresElegidos.length > 0 && (
+        <p className="rv-elegidos">
+          Elegiste: <strong>{unirConY(nombresElegidos)}</strong>
+        </p>
+      )}
+
+      {items.length > 0 && !hayBase && !error && (
+        <p className="aviso aviso-alerta" role="status">
+          Los complementos se agregan a un servicio: elige también tu servicio principal.
+        </p>
+      )}
 
       {creditosUsables.length > 0 && (
         <fieldset className="rv-grupo rv-grupo-creditos">
@@ -214,12 +232,6 @@ export function PasoServicios({ cat, items, onCambiar, creditos, total, duracion
             })}
           </div>
         </fieldset>
-      )}
-
-      {items.length > 0 && !hayBase && !error && (
-        <p className="aviso aviso-alerta" role="status">
-          Los complementos se agregan a un servicio: elige también tu servicio principal.
-        </p>
       )}
 
       {error && (

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
 import { reiniciarDemo } from '../lib/api/demo';
@@ -6,6 +6,7 @@ import { borrarCarritoGuardado, useCarrito } from '../lib/carrito';
 import { enlaceWhatsApp, telefonoBonito } from '../lib/format';
 import { useSesion } from '../lib/sesion';
 import { Marca } from '../components/ui/Gema';
+import { Modal } from '../components/cuenta/Modal';
 import { antesDeApertura, enlaceMapa, useContacto } from '../components/publico/contacto';
 import {
   IconoBolsa,
@@ -26,28 +27,120 @@ const NAVEGACION = [
 ];
 
 /** Rutas con su propio flujo de botones donde el botón flotante de WhatsApp estorbaría. */
+const RUTAS_SIN_FLOTANTE = ['/reservar', '/cuenta/firmar', '/carrito', '/entrar'];
 function ocultarFlotante(ruta: string): boolean {
-  return ruta.startsWith('/reservar') || ruta.startsWith('/cuenta/firmar');
+  return RUTAS_SIN_FLOTANTE.some((r) => ruta === r || ruta.startsWith(`${r}/`));
+}
+
+/**
+ * Lo que el botón flotante no debe tapar: lo marcado con `data-sin-flotante` (el inicio de la
+ * página de Inicio, con sus botones principales) y los enlaces de WhatsApp que la página ya muestra.
+ */
+const SELECTOR_SIN_FLOTANTE = '[data-sin-flotante], a[href^="https://wa.me/"]:not(.sp-whatsapp)';
+
+/**
+ * true mientras algo de SELECTOR_SIN_FLOTANTE está en pantalla (también lo que aparece después de
+ * cargar). Empieza en true y no responde hasta que cada elemento nuevo reportó si se ve: así el
+ * botón no se asoma un instante sobre el hero al abrir Inicio.
+ */
+function useAlgoQueNoTapar(raiz: RefObject<HTMLElement | null>): boolean {
+  const [enPantalla, setEnPantalla] = useState(true);
+  useEffect(() => {
+    const el = raiz.current;
+    if (!el || typeof IntersectionObserver === 'undefined' || typeof MutationObserver === 'undefined') {
+      setEnPantalla(false);
+      return;
+    }
+    const visibles = new Set<Element>();
+    const observados = new Set<Element>();
+    const sinReporte = new Set<Element>();
+    const actualizar = () => {
+      if (sinReporte.size === 0) setEnPantalla(visibles.size > 0);
+    };
+    const io = new IntersectionObserver((entradas) => {
+      for (const e of entradas) {
+        sinReporte.delete(e.target);
+        if (e.isIntersecting) visibles.add(e.target);
+        else visibles.delete(e.target);
+      }
+      actualizar();
+    });
+    let pendiente = 0;
+    const revisar = () => {
+      pendiente = 0;
+      const actuales = new Set(el.querySelectorAll(SELECTOR_SIN_FLOTANTE));
+      for (const n of observados) {
+        if (!actuales.has(n)) {
+          io.unobserve(n);
+          observados.delete(n);
+          visibles.delete(n);
+          sinReporte.delete(n);
+        }
+      }
+      for (const n of actuales) {
+        if (!observados.has(n)) {
+          io.observe(n);
+          observados.add(n);
+          sinReporte.add(n);
+        }
+      }
+      actualizar();
+    };
+    revisar();
+    // Las páginas cargan datos y cambian de ruta dentro del mismo layout: se vuelve a buscar.
+    const mo = new MutationObserver(() => {
+      if (!pendiente) pendiente = window.requestAnimationFrame(revisar);
+    });
+    mo.observe(el, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      io.disconnect();
+      if (pendiente) window.cancelAnimationFrame(pendiente);
+    };
+  }, [raiz]);
+  return enPantalla;
 }
 
 function BannerDemo() {
+  const [confirmando, setConfirmando] = useState(false);
   if (api.modo !== 'demo') return null;
   return (
-    <div className="banner-demo sp-banner-demo">
-      <span>Modo demostración: los datos se guardan sólo en este navegador</span>
-      <button
-        type="button"
-        className="sp-banner-demo-boton"
-        onClick={() => {
-          if (window.confirm('¿Borrar los datos de la demostración y empezar de nuevo?')) {
-            borrarCarritoGuardado();
-            reiniciarDemo();
+    <>
+      <div className="banner-demo sp-banner-demo">
+        <span>Modo demostración: los datos se guardan sólo en este navegador</span>
+        <button type="button" className="sp-banner-demo-boton" onClick={() => setConfirmando(true)}>
+          Reiniciar datos
+        </button>
+      </div>
+      {confirmando && (
+        <Modal
+          titulo="¿Reiniciar la demostración?"
+          onCerrar={() => setConfirmando(false)}
+          pie={
+            <>
+              <button type="button" className="btn btn-secundario" onClick={() => setConfirmando(false)} data-autofocus>
+                No, conservarlos
+              </button>
+              <button
+                type="button"
+                className="btn btn-peligro"
+                onClick={() => {
+                  borrarCarritoGuardado();
+                  reiniciarDemo();
+                }}
+              >
+                Sí, reiniciar
+              </button>
+            </>
           }
-        }}
-      >
-        Reiniciar datos
-      </button>
-    </div>
+        >
+          <p>
+            Se borra lo que hiciste en la demostración desde este navegador, incluido tu carrito, y vuelves a empezar con
+            los datos de ejemplo.
+          </p>
+        </Modal>
+      )}
+    </>
   );
 }
 
@@ -91,7 +184,9 @@ export function LayoutPublico() {
   const [menuAbierto, setMenuAbierto] = useState(false);
   const botonMenu = useRef<HTMLButtonElement>(null);
   const main = useRef<HTMLElement>(null);
+  const raiz = useRef<HTMLDivElement>(null);
   const rutaAnterior = useRef(pathname);
+  const apartarFlotante = useAlgoQueNoTapar(raiz);
 
   // Al cambiar de página: arriba del todo (o al ancla), cierra el menú y, si cambió la ruta,
   // lleva el foco al contenido para que los lectores de pantalla empiecen por la página nueva.
@@ -130,7 +225,7 @@ export function LayoutPublico() {
   const anio = new Date().getFullYear();
 
   return (
-    <div className={`sitio-publico ${menuAbierto ? 'sp-menu-abierto' : ''}`}>
+    <div ref={raiz} className={`sitio-publico ${menuAbierto ? 'sp-menu-abierto' : ''}`}>
       <a
         className="sp-saltar"
         href="#contenido"
@@ -315,7 +410,12 @@ export function LayoutPublico() {
       </footer>
 
       {!menuAbierto && !ocultarFlotante(pathname) && (
-        <a className="sp-whatsapp" href={whatsapp} target="_blank" rel="noopener noreferrer">
+        <a
+          className={`sp-whatsapp ${apartarFlotante ? 'es-apartado' : ''}`}
+          href={whatsapp}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
           <IconoMensaje tam={28} />
           <span className="sr-only">Escríbenos por WhatsApp (se abre en una pestaña nueva)</span>
         </a>

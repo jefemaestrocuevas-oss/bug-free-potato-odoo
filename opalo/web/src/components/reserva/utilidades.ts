@@ -143,43 +143,59 @@ export interface LineaPrecio {
 }
 
 export interface Total {
-  /** Suma de lo que ya tiene precio. */
+  /** Suma de lo que ya tiene precio (sin lo prepagado). */
   monto: number;
   /** Hay algo con precio por confirmar. */
   porConfirmar: boolean;
-  /** Nada tiene precio conocido. */
+  /** Lo que queda por pagar sólo tiene precios por confirmar (nada con precio conocido). */
   todoPorConfirmar: boolean;
+  /** Cuántas líneas se pagan con un servicio prepagado. */
+  prepagados: number;
+  /** Todo se paga con servicios prepagados: no hay nada que pagar en el spa. */
+  todoPrepagado: boolean;
   texto: string;
 }
 
-/** Total estimado: precios null = "por confirmar en cabina"; los prepagados cuentan $0. */
+/** Total estimado: precios null = "por confirmar en cabina"; los prepagados no se cobran. */
 export function calcularTotal(lineas: LineaPrecio[]): Total {
   let monto = 0;
   let porConfirmar = false;
-  let conocidos = 0;
+  let conPrecio = 0;
+  let prepagados = 0;
   for (const l of lineas) {
-    if (l.prepagado) {
-      conocidos++;
-      continue;
-    }
-    if (l.precio === null) porConfirmar = true;
+    if (l.prepagado) prepagados++;
+    else if (l.precio === null) porConfirmar = true;
     else {
       monto += l.precio;
-      conocidos++;
+      conPrecio++;
     }
   }
   monto = Math.round(monto * 100) / 100;
-  const todoPorConfirmar = lineas.length > 0 && conocidos === 0;
+  const todoPrepagado = lineas.length > 0 && prepagados === lineas.length;
+  const todoPorConfirmar = porConfirmar && conPrecio === 0;
   let texto: string;
-  if (todoPorConfirmar) texto = 'Por confirmar en cabina';
+  if (todoPrepagado) texto = 'Prepagado';
+  else if (todoPorConfirmar) texto = 'Por confirmar en cabina';
   else if (porConfirmar) texto = `${dinero(monto)} + lo que se confirme en cabina`;
+  else if (prepagados > 0) texto = `${dinero(monto)} (más ${prepagados === 1 ? 'tu servicio prepagado' : 'tus servicios prepagados'})`;
   else texto = dinero(monto);
-  return { monto, porConfirmar, todoPorConfirmar, texto };
+  return { monto, porConfirmar, todoPorConfirmar, prepagados, todoPrepagado, texto };
 }
 
-/** Total de una cita ya creada (los ítems traen su precio copiado; null = por confirmar). */
+/**
+ * Total de una cita ya creada (los ítems traen su precio copiado; null = por confirmar).
+ * R4: el ítem que se paga con un servicio prepagado se guarda con precio 0, así que 0 = prepagado.
+ */
 export function totalCita(items: ItemCita[]): Total {
-  return calcularTotal(items.map((i) => ({ precio: i.precio })));
+  return calcularTotal(items.map((i) => ({ precio: i.precio, prepagado: i.precio === 0 })));
+}
+
+/** Frase sobre el pago para el resumen y la confirmación. */
+export function notaPago(t: Total): string {
+  if (t.todoPrepagado)
+    return `Ya está cubierto con ${t.prepagados === 1 ? 'tu servicio prepagado' : 'tus servicios prepagados'}: no pagas nada en el spa.`;
+  if (t.prepagados > 0) return 'Lo demás lo pagas en el spa el día de tu cita.';
+  return 'Pagas en el spa el día de tu cita.';
 }
 
 // ---------------- Personas ----------------
@@ -225,11 +241,23 @@ export function emailValido(e: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e.trim());
 }
 
-/** Sólo rutas internas para ?volver= (evita redirigir a otro sitio). */
+/**
+ * Sólo rutas internas para ?volver= (evita redirigir a otro sitio). Rechaza caracteres de control y
+ * barras invertidas: el parser de URL los quita o los vuelve "/" ('/\t/evil.com' → '//evil.com').
+ */
 export function volverSeguro(v: string | null | undefined): string | null {
-  if (!v) return null;
-  if (!v.startsWith('/') || v.startsWith('//') || v.startsWith('/\\')) return null;
-  return v;
+  if (!v || !v.startsWith('/') || v.startsWith('//')) return null;
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001F\u007F\\]/.test(v)) return null;
+  try {
+    const base = 'https://opalo.invalid';
+    const u = new URL(v, base);
+    if (u.origin !== base || !u.pathname.startsWith('/') || u.pathname.startsWith('//')) return null;
+    // Ruta ya normalizada (sin "..", ni "//" que salgan de quitar segmentos).
+    return u.pathname + u.search + u.hash;
+  } catch {
+    return null;
+  }
 }
 
 /** Horas que faltan para un instante (negativo si ya pasó). */

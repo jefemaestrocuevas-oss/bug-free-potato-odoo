@@ -50,12 +50,16 @@ interface Props {
   max: string;
   hoy: string;
   seleccionada: string | null;
+  /** Días ya revisados: true = hay lugar, false = sin horarios libres (se ven tachados y no se eligen). */
+  disponibilidad?: Record<string, boolean>;
+  /** Avisa qué mes ('YYYY-MM') se está mostrando. */
+  onMes?: (mes: string) => void;
   onElegir: (fecha: string) => void;
   /** id del texto que describe el calendario. */
   describedBy?: string;
 }
 
-export function Calendario({ min, max, hoy, seleccionada, onElegir, describedBy }: Props) {
+export function Calendario({ min, max, hoy, seleccionada, disponibilidad, onMes, onElegir, describedBy }: Props) {
   const inicial = seleccionada && seleccionada >= min && seleccionada <= max ? seleccionada : min;
   const [foco, setFoco] = useState(inicial);
   const [mes, setMes] = useState(inicial.slice(0, 7));
@@ -72,7 +76,21 @@ export function Calendario({ min, max, hoy, seleccionada, onElegir, describedBy 
     tablaRef.current?.querySelector<HTMLButtonElement>(`button[data-fecha="${foco}"]`)?.focus();
   }, [foco, mes]);
 
-  const habilitado = (f: string) => f >= min && f <= max;
+  // Si el día elegido cambia desde fuera (p. ej. "el primer día con lugar"), se muestra su mes.
+  useEffect(() => {
+    if (!seleccionada || seleccionada < min || seleccionada > max) return;
+    setMes(seleccionada.slice(0, 7));
+    setFoco(seleccionada);
+  }, [seleccionada, min, max]);
+
+  useEffect(() => {
+    onMes?.(mes);
+  }, [mes, onMes]);
+
+  const enRango = (f: string) => f >= min && f <= max;
+  const sinLugar = (f: string) => disponibilidad?.[f] === false;
+  // El día ya elegido sigue activo aunque se haya llenado (abajo se explica que no hay horarios).
+  const habilitado = (f: string) => enRango(f) && (!sinLugar(f) || f === seleccionada);
 
   function irA(f: string) {
     // No sale del rango de meses visibles.
@@ -182,15 +200,18 @@ export function Calendario({ min, max, hoy, seleccionada, onElegir, describedBy 
               {s.map((f, j) => {
                 if (!f) return <td key={j} />;
                 const ok = habilitado(f);
+                const lleno = enRango(f) && sinLugar(f);
                 const elegido = f === seleccionada;
                 const esHoy = f === hoy;
-                const etiqueta = `${fechaLarga(isoDesdeLocal(f, '12:00'))}${esHoy ? ', hoy' : ''}${ok ? '' : ', no disponible'}`;
+                const etiqueta = `${fechaLarga(isoDesdeLocal(f, '12:00'))}${esHoy ? ', hoy' : ''}${
+                  lleno ? ', sin horarios libres' : ok ? '' : ', no disponible'
+                }`;
                 return (
                   <td key={j}>
                     <button
                       type="button"
                       data-fecha={f}
-                      className={`rv-cal-dia${elegido ? ' rv-cal-dia-elegido' : ''}${esHoy ? ' rv-cal-dia-hoy' : ''}`}
+                      className={`rv-cal-dia${elegido ? ' rv-cal-dia-elegido' : ''}${esHoy ? ' rv-cal-dia-hoy' : ''}${lleno ? ' rv-cal-dia-sin-lugar' : ''}`}
                       tabIndex={f === focoVisible ? 0 : -1}
                       aria-disabled={!ok || undefined}
                       aria-pressed={elegido}

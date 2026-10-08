@@ -1,6 +1,7 @@
 // Estado del asistente de reserva. Se guarda en sessionStorage para sobrevivir al ir a
-// /entrar y volver (o a una recarga). La ficha de salud y la firma NO se guardan aquí:
-// son datos sensibles y viven sólo en memoria mientras la pestaña está abierta.
+// /entrar y volver (o a una recarga). La ficha de salud, la firma y las notas (texto libre
+// donde puede haber datos de salud) NO se guardan aquí: viven sólo en memoria. Al cerrar
+// sesión se borra todo con borrarEstado().
 import type { CitaDetalle, EstadoCita, FichaSalud, ResultadoReserva, Slot } from '../../lib/api/tipos';
 import type { ItemElegido } from './utilidades';
 
@@ -46,6 +47,7 @@ export interface EstadoReserva {
   consentimientoLeido: boolean;
   /** `${usuario}|${tipos de consentimiento}` con que se completó el paso de políticas. */
   politicasPara: string | null;
+  /** Sólo en memoria: no se guarda en sessionStorage. */
   notas: string;
   /** ?credito=<id> que falta aplicar (p. ej. mientras inicia sesión). */
   creditoPendiente: string | null;
@@ -77,6 +79,8 @@ export interface Confirmacion {
   personal_titulo: string | null;
   servicios: string[];
   total_texto: string;
+  /** "Pagas en el spa…" o "no pagas nada en el spa" si todo es prepagado. */
+  nota_pago: string;
   /** Para "Agregar a mi calendario". */
   cita?: CitaDetalle;
 }
@@ -131,7 +135,8 @@ export function cargarEstado(): EstadoReserva {
       paso: esPaso(x.paso) ? x.paso : 1,
       items,
       politicasMarcadas: Array.isArray(x.politicasMarcadas) ? x.politicasMarcadas.filter((i) => typeof i === 'string') : [],
-      notas: typeof x.notas === 'string' ? x.notas : '',
+      // Las notas no se leen del almacenamiento (versiones anteriores sí las guardaban).
+      notas: '',
     };
   } catch {
     return base;
@@ -140,7 +145,7 @@ export function cargarEstado(): EstadoReserva {
 
 export function guardarEstado(e: EstadoReserva): void {
   try {
-    almacen()?.setItem(CLAVE_RESERVA, JSON.stringify(e));
+    almacen()?.setItem(CLAVE_RESERVA, JSON.stringify({ ...e, notas: '' }));
   } catch {
     // Sin almacenamiento: el asistente sigue funcionando en memoria.
   }

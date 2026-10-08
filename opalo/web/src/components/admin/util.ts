@@ -89,12 +89,17 @@ export function nombreCompleto(c: { nombre: string; apellidos?: string | null })
   return [c.nombre, c.apellidos].filter(Boolean).join(' ').trim();
 }
 
-/** Texto de un input numérico → número (acepta coma decimal). Vacío o inválido → null. */
+/**
+ * Texto de un input numérico → número. Vacío o inválido → null.
+ * Acepta "$" al inicio, comas de miles como se escriben en México ("1,200" → 1200,
+ * "12,500.50" → 12500.5) y coma decimal en lo demás ("1,5" → 1.5).
+ */
 export function aNumero(v: string | number | null | undefined): number | null {
   if (v === null || v === undefined) return null;
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
-  const t = v.trim().replace(/\s/g, '').replace(',', '.');
+  let t = v.trim().replace(/\s/g, '').replace(/^\$/, '');
   if (!t) return null;
+  t = /^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(t) ? t.replace(/,/g, '') : t.replace(',', '.');
   const n = Number(t);
   return Number.isFinite(n) ? n : null;
 }

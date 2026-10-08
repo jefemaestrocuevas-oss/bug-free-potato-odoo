@@ -30,11 +30,19 @@ La fuente de todo esto es el archivo `datos/catalogo.json`; de ahí se carga la 
 - **Clientas**: nombre, teléfono, correo, fecha de nacimiento y si acepta promociones. Pueden
   tener cuenta en el sitio o no (las que agendan por WhatsApp las da de alta el personal).
   Si una clienta registrada por el personal después crea su cuenta con el mismo correo, el
-  sistema la reconoce y no la duplica. Las **notas internas** sólo las ve el equipo.
+  sistema la reconoce y no la duplica, pero **sólo cuando confirma su correo** (así nadie entra
+  al historial de otra registrándose con su correo). Si se borra una cuenta, su ficha se
+  conserva sin el correo. Las **notas internas** sólo las ve el equipo: la base no se las
+  entrega a la clienta aunque las pida directamente.
+- **Fecha de nacimiento**: se pide para reservar en línea (decide la edad mínima y si una menor
+  necesita tutor). La clienta la captura una vez; si hay un error, la corrige el equipo.
 - **Equipo**: quién atiende, su horario semanal y los servicios que hace.
 - **Capacitaciones**: cursos, talleres, diplomados y certificaciones de cada persona. Son la
-  prueba de "en capacitación constante" y se muestran en el sitio.
+  prueba de "en capacitación constante" y se muestran en el sitio (sólo nombre, institución,
+  tipo, fecha y horas; las notas y las constancias, que pueden traer la CURP, son internas).
 - **Roles**: *clienta*, *personal* (cabina) y *admin* (socios). Cada quien ve sólo lo que le toca.
+  Por ahora los roles (y ligar a alguien del equipo con su cuenta) se cambian desde el editor SQL
+  de Supabase; el panel todavía no tiene esa pantalla.
 
 ### 3. Agenda
 - **Cabinas**: hoy hay una. Una cita necesita persona **y** cabina libres.
@@ -45,7 +53,10 @@ La fuente de todo esto es el archivo `datos/catalogo.json`; de ahí se carga la 
   (pendiente, confirmada, en curso, completada, cancelada, no asistió), de dónde vino
   (sitio, WhatsApp, mostrador, teléfono), total y si es la primera vez de la clienta.
   **La base no permite dos citas encimadas** de la misma persona o en la misma cabina, aunque
-  dos clientas reserven al mismo segundo.
+  dos clientas reserven al mismo segundo. El personal tampoco puede agendar sobre un bloqueo
+  (vacaciones, festivo); si no elige quién atiende, el sistema asigna a quien está libre.
+- **Para que nadie acapare la agenda**, cada clienta puede tener en línea hasta **3 citas
+  próximas**; para más, el equipo se las agenda por WhatsApp.
 
 ### 4. Políticas, ficha de salud y consentimiento
 - **Políticas**: términos, aviso de privacidad, cancelación y los tres consentimientos
@@ -58,9 +69,11 @@ La fuente de todo esto es el archivo `datos/catalogo.json`; de ahí se carga la 
   **datos sensibles** (ley de protección de datos): sólo los ven la clienta y el equipo, y para
   guardarlos se pide su consentimiento expreso. Se guarda el historial; la última es la vigente.
 - **Consentimientos firmados**: la firma en pantalla, el nombre de quien firma (y del tutor si es
-  menor), la versión exacta del documento, la ficha de salud de ese momento y la fecha. **No se
-  pueden editar ni borrar.** **Sin consentimiento firmado no se puede iniciar ni completar un
-  servicio.**
+  menor), la versión exacta del documento, la ficha de salud de ese momento, la fecha, **quién la
+  capturó y dónde** (al reservar, desde la cuenta de la clienta o en la tablet de la cabina) y una
+  huella digital que cubre todo eso, incluida la firma. **No se pueden editar ni borrar.**
+  **Sin consentimiento firmado no se puede iniciar ni completar un servicio**; por eso cada
+  servicio que se puede agendar debe decir qué consentimiento se firma.
 
 ### 5. Ventas y pagos
 - **Pedidos** de la tienda en línea (folio OP-00001…): servicios, paquetes o productos, también
@@ -68,10 +81,14 @@ La fuente de todo esto es el archivo `datos/catalogo.json`; de ahí se carga la 
   lo registra.
 - **Pagos**: de un pedido o de una cita, con su método (efectivo, tarjeta, transferencia,
   Mercado Pago, cortesía). La **propina se guarda aparte** (es de quien atiende, no del spa).
+  En la tienda la clienta sólo elige efectivo, tarjeta o transferencia (la cortesía la decide el
+  equipo al cobrar) y puede tener hasta 5 pedidos por pagar.
 - **Créditos (servicios prepagados)**: al pagarse un pedido, cada servicio o paquete comprado se
   vuelve un crédito que la clienta usa al reservar (la cita queda en $0). Vencen en 365 días
-  (o lo que diga el paquete). Si se compró **para regalar**, el crédito trae un **código de 8
-  letras** que la persona regalada canjea en su cuenta. Si se cancela la cita, el crédito regresa.
+  (o lo que diga el paquete) y deben estar vigentes **el día de la cita**. Si se compró **para
+  regalar**, el regalo trae un **código de 8 letras** que la persona regalada canjea en su cuenta
+  (un bono de varios servicios es un solo código y se canjea completo). Si se cancela la cita, el
+  crédito regresa; si la clienta no asistió, no.
 
 ### 6. Inventario y costos
 - **Productos**: insumos de cabina (cera, talco, aceite, guantes…) y productos de venta. Cada uno
@@ -147,7 +164,7 @@ erDiagram
 
 | Pregunta del negocio | Dónde se ve | Quién la ve |
 |---|---|---|
-| ¿Cuánto ganamos este mes? ¿Y los meses anteriores? | **Resultados del mes** (`v_resultado_mensual`): ingresos, propinas, costo de insumos, compras, gastos, **utilidad** y **flujo** de los últimos 12 meses con actividad | Socios |
+| ¿Cuánto ganamos este mes? ¿Y los meses anteriores? | **Resultados del mes** (`v_resultado_mensual`): ingresos, propinas, costo de insumos, compras, gastos, **utilidad** y **flujo** de los últimos 12 meses con actividad, hasta el mes en curso | Socios |
 | ¿Qué hay que reponer? ¿Cuánto nos costará? | **Por reponer** (`v_reposicion`): productos en o bajo su mínimo, cuánto falta, cuántas presentaciones comprar, costo estimado y proveedor | Equipo y socios |
 | ¿Cuánto nos cuesta cada servicio y cuánto nos deja? | **Costo por servicio** (`v_costo_servicio`): costo de material según la receta, margen en pesos y en % | Equipo y socios |
 | ¿Qué gastos fijos vencen pronto? | **Gastos por vencer** (`v_gastos_por_vencer`): vencido / próximo (7 días o menos) / al corriente | Socios |
@@ -201,3 +218,8 @@ Cómo se calculan los resultados del mes:
 - **Montos de los gastos fijos** (renta, luz, agua…): se cargan como "por definir".
 - **Textos legales**: las políticas están en borrador hasta que las revisen la especialista y un
   abogado; al publicarlas se crea su versión definitiva.
+- **Más personal**: los horarios que ofrece el sitio todavía no distinguen qué servicios hace cada
+  quien. Con una especialista que hace todo no importa; antes de sumar a alguien que sólo haga
+  algunos servicios hay que ajustarlo.
+- **Vincular cuentas con historial**: hoy basta con que la clienta confirme su correo. Si se
+  quiere más seguridad, el equipo podría aprobar cada vinculación desde el expediente.

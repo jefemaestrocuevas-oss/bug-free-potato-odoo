@@ -24,7 +24,13 @@ begin
   perform pruebas.igual(pruebas.filas('public.productos_tienda'), 1, 'tienda');
   perform pruebas.igual(pruebas.filas('public.configuracion'), 1, 'configuración');
   perform pruebas.igual(pruebas.filas('public.politicas'), (select count(*)::int from public.politicas where activa), 'políticas activas');
-  perform pruebas.afirma(pruebas.filas('public.personal') >= 1, 'personal activo');
+  perform pruebas.igual(pruebas.filas('public.personal'), 0, 'la tabla personal no (usa personal_publico)');
+  perform pruebas.igual(pruebas.filas('public.capacitaciones'), 0, 'la tabla capacitaciones no (usa capacitaciones_publicas)');
+  perform pruebas.espera_rechazo('select usuario_id from public.personal');
+  perform pruebas.espera_rechazo('select notas, constancia_url from public.capacitaciones');
+  foreach t in array array['public.horarios', 'public.cabinas', 'public.personal_servicios', 'public.v_clientes_notas'] loop
+    perform pruebas.igual(pruebas.filas(t), 0, 'el visitante no ve ' || t);
+  end loop;
 
   perform pruebas.espera_rechazo('insert into public.clientes (nombre) values (''Intrusa'')');
   perform pruebas.espera_rechazo('update public.servicios set precio = 1');
@@ -202,6 +208,117 @@ begin
   perform pruebas.afirma((select count(*) from public.gastos) >= 10, 'service_role ve todo');
   reset role;
   raise notice 'OK - service_role';
+end $$;
+
+-- Columnas internas: la clienta no las lee ni con su JWT (RLS filtra filas, no columnas)
+do $$
+declare
+  v_ana uuid := pruebas.usuario('clienta@demo.opalo.mx');
+  v_ana_c uuid := pruebas.cliente_de(pruebas.usuario('clienta@demo.opalo.mx'));
+  v_esp uuid := pruebas.usuario('especialista@demo.opalo.mx');
+  v_nueva uuid;
+  v_id uuid;
+begin
+  update public.clientes set notas_internas = 'Nota del personal (prueba)' where id = v_ana_c;
+  update public.citas set notas_internas = 'Nota de la cita (prueba)'
+   where id = (select id from public.citas where cliente_id = v_ana_c order by inicio limit 1);
+
+  perform pruebas.como(v_ana);
+  perform pruebas.espera_rechazo('select notas_internas from public.clientes');
+  perform pruebas.espera_rechazo('select * from public.clientes');
+  perform pruebas.espera_rechazo('select notas_internas from public.citas');
+  perform pruebas.espera_rechazo('select creada_por from public.citas');
+  perform pruebas.espera_rechazo('select recibido_por from public.pagos');
+  perform pruebas.espera_rechazo('select notas from public.pagos');
+  perform pruebas.igual(pruebas.filas('public.v_clientes_notas'), 0, 'la clienta no ve notas en la vista');
+  -- Lo que el sitio sí pide sigue funcionando (COLUMNAS_CLIENTE, actualizar sus datos, sus citas)
+  perform pruebas.igual((select count(*)::int from (select id, nombre, apellidos, telefono, email, fecha_nacimiento, acepta_promociones
+                                                       from public.clientes where usuario_id = v_ana) x), 1, 'lee sus datos básicos');
+  update public.clientes set acepta_promociones = false where usuario_id = v_ana returning id into v_id;
+  perform pruebas.igual(v_id, v_ana_c, 'actualiza sus datos y recibe su id');
+  perform pruebas.afirma((select count(*) from public.v_citas_detalle) >= 4, 'sus citas en v_citas_detalle');
+  perform pruebas.afirma((select count(*) from public.v_pedidos_detalle) >= 1, 'sus pedidos con lo pagado');
+
+  -- El personal escribe notas y las lee en v_clientes_notas (tampoco las pide directo a la tabla)
+  perform pruebas.como(v_esp);
+  perform pruebas.igual((select notas_internas from public.v_clientes_notas where id = v_ana_c), 'Nota del personal (prueba)',
+                        'el personal lee las notas en la vista');
+  perform pruebas.igual(pruebas.filas('public.v_clientes_notas'), (select count(*)::int from public.clientes), 'de todas las clientas');
+  perform pruebas.espera_rechazo('select notas_internas from public.clientes');
+  update public.clientes set notas_internas = 'Nota corregida (prueba)' where id = v_ana_c returning id into v_id;
+  perform pruebas.igual(v_id, v_ana_c, 'el personal actualiza notas');
+  insert into public.clientes (nombre, notas_internas) values ('Nueva (prueba)', 'Llamar en la tarde') returning id into v_nueva;
+  perform pruebas.igual((select notas_internas from public.v_clientes_notas where id = v_nueva), 'Llamar en la tarde',
+                        'y las de una clienta nueva');
+  perform pruebas.como_postgres();
+  raise notice 'OK - notas internas y columnas del personal: fuera del alcance de la clienta';
+end $$;
+
+-- Equipo: la clienta no lee capacitaciones ni personal directo, salvo a quien la atendió
+do $$
+declare
+  v_n uuid := pruebas.clienta_lista('equipo.prueba@ejemplo.mx');
+  v_esp uuid := pruebas.usuario('especialista@demo.opalo.mx');
+begin
+  perform pruebas.como(v_n);
+  perform pruebas.igual(pruebas.filas('public.capacitaciones'), 0, 'capacitaciones sólo por la vista pública');
+  perform pruebas.afirma(pruebas.filas('public.capacitaciones_publicas') >= 1, 'la vista pública sí');
+  perform pruebas.igual(pruebas.filas('public.personal'), 0, 'sin citas no ve filas de personal');
+  perform pruebas.igual(pruebas.filas('public.personal_publico'), 1, 'el equipo público sí');
+  perform pruebas.como(v_esp);
+  perform public.reservar_cita_staff(pruebas.cliente_de(v_n), pruebas.items('cejas'), pruebas.instante(pruebas.proximo_dia(2, 21), '15:00'));
+  perform pruebas.afirma(pruebas.filas('public.capacitaciones') >= 1, 'el personal lee capacitaciones');
+  perform pruebas.como(v_n);
+  perform pruebas.igual(pruebas.filas('public.personal'), 1, 've a quien la atenderá');
+  perform pruebas.igual((select personal_nombre from public.v_citas_detalle limit 1), 'Especialista de Ópalo', 'y su nombre en la cita');
+  perform pruebas.como_postgres();
+  raise notice 'OK - equipo y capacitaciones por sus vistas públicas';
+end $$;
+
+-- Seguridad por defecto: RLS en todo, funciones y vistas abiertas sólo las del contrato, y nada
+-- de lo que se cree después queda abierto a anon/authenticated
+do $$
+declare
+  v_lista text;
+  c_anon constant text[] := array['aceptar_politicas', 'cancelar_cita', 'cancelar_pedido', 'canjear_regalo',
+    'configuracion_actual', 'crear_pedido', 'duracion_reserva', 'es_admin', 'es_personal', 'firmar_consentimiento_cita',
+    'guardar_ficha_salud', 'horarios_disponibles', 'hoy_local', 'mi_cliente_id', 'mi_rol', 'reservar_cita', 'telefono_legible'];
+  c_personal constant text[] := array['ajustar_inventario', 'avanzar_vencimiento', 'cambiar_estado_cita', 'completar_cita',
+    'dias_del_mes', 'primer_vencimiento', 'publicar_politica', 'registrar_compra', 'registrar_pago', 'reservar_cita_staff'];
+begin
+  select string_agg(c.relname, ', ') into v_lista
+    from pg_class c join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'public' and c.relkind in ('r', 'p') and not c.relrowsecurity;
+  perform pruebas.igual(v_lista, null::text, 'tablas de public sin RLS');
+
+  select string_agg(p.proname, ', ' order by p.proname) into v_lista
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and has_function_privilege('anon', p.oid, 'execute') and p.proname <> all (c_anon);
+  perform pruebas.igual(v_lista, null::text, 'funciones que anon puede ejecutar fuera de la lista');
+  select string_agg(p.proname, ', ' order by p.proname) into v_lista
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'execute')
+     and p.proname <> all (c_anon || c_personal);
+  perform pruebas.igual(v_lista, null::text, 'funciones que authenticated puede ejecutar fuera de la lista');
+
+  select string_agg(c.relname, ', ') into v_lista
+    from pg_class c join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'public' and c.relkind = 'v'
+     and not coalesce(c.reloptions && array['security_invoker=true', 'security_invoker=on'], false)
+     and c.relname <> all (array['personal_publico', 'capacitaciones_publicas', 'productos_tienda', 'v_clientes_notas']);
+  perform pruebas.igual(v_lista, null::text, 'vistas con permisos del dueño fuera de la lista');
+
+  -- Objetos nuevos (como los de una migración futura): cerrados hasta que se den permisos explícitos
+  create table public.t_nueva_prueba (x int);
+  create function public.f_nueva_prueba() returns int language sql security definer as 'select 1';
+  perform pruebas.afirma(not has_table_privilege('anon', 'public.t_nueva_prueba', 'select, insert, update, delete'), 'tabla nueva: anon nada');
+  perform pruebas.afirma(not has_table_privilege('authenticated', 'public.t_nueva_prueba', 'select, insert, update, delete'),
+                         'tabla nueva: authenticated nada');
+  perform pruebas.afirma(not has_function_privilege('anon', 'public.f_nueva_prueba()', 'execute'), 'función nueva: anon no la ejecuta');
+  perform pruebas.afirma(not has_function_privilege('authenticated', 'public.f_nueva_prueba()', 'execute'),
+                         'función nueva: authenticated no la ejecuta');
+  perform pruebas.afirma(has_table_privilege('service_role', 'public.t_nueva_prueba', 'select'), 'service_role sí');
+  raise notice 'OK - seguridad por defecto (RLS, funciones, vistas y objetos nuevos)';
 end $$;
 
 rollback;

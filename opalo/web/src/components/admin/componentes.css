@@ -13,7 +13,10 @@
 .adm-volver { display: inline-block; font-size: 0.9rem; font-weight: 700; margin-bottom: 6px; text-decoration: none; }
 
 /* ---------- Utilidades ---------- */
-.adm-sin-margen { margin: 0; }
+/* Envoltura de cada página del panel (la usan todas). */
+.adm-pagina { min-width: 0; }
+/* base.css se carga después de este archivo: el selector doble le gana a .aviso, .campo… */
+.adm-sin-margen.adm-sin-margen { margin: 0; }
 .adm-margen-arriba { margin-top: 16px; }
 .adm-fila-fin { justify-content: flex-end; }
 .adm-fila-nowrap { flex-wrap: nowrap; }
@@ -68,8 +71,11 @@
 .adm-totales dd { margin: 0; font-size: 1.1rem; }
 
 /* ---------- Modal ---------- */
-.adm-modal-fondo { padding: 4vh 12px; }
-.adm-modal { max-height: none; }
+/* El fondo es el que hace scroll. Sin relleno abajo: así el pie fijo (sticky) queda pegado al
+   borde de la pantalla y no se asoma el formulario por debajo; el respiro lo da el margen del modal.
+   (Selector doble: base.css se carga después y .modal-fondo le ganaría.) */
+.modal-fondo.adm-modal-fondo { padding: 4vh 12px 0; }
+.modal.adm-modal { max-height: none; margin-bottom: 4vh; }
 .adm-modal-amplio { max-width: 820px; }
 .adm-modal-completo { max-width: 1100px; }
 .adm-modal:focus { outline: none; }

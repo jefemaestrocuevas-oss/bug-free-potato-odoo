@@ -1,9 +1,10 @@
 // Paso 2: día en el calendario y hora disponible (siempre en hora de Querétaro).
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import type { Configuracion, Slot } from '../../lib/api/tipos';
 import { fechaLarga, fechaLocal, hora, isoDesdeLocal, mensajeError, sumarDias } from '../../lib/format';
 import { useAsync } from '../../lib/useAsync';
+import { FECHA_APERTURA } from '../publico/contacto';
 import { Cargando, MensajeError } from '../ui/Estado';
 import { Calendario } from './Calendario';
 import { PieAsistente } from './Piezas';
@@ -19,6 +20,32 @@ interface Props {
   onContinuar: () => void;
 }
 
+/** Cuántos días del mes se revisan a la vez para marcar los que no tienen lugar. */
+const CONSULTAS_A_LA_VEZ = 4;
+
+/** Primer día que se puede reservar: hoy o, si todavía no abrimos, el día de apertura. */
+export function primerDiaReservable(hoy: string = fechaLocal()): string {
+  return hoy < FECHA_APERTURA ? FECHA_APERTURA : hoy;
+}
+
+/** Días del mes `ym` ('YYYY-MM') dentro de [min, max]. */
+function diasEnRango(ym: string, min: string, max: string): string[] {
+  const dias: string[] = [];
+  for (let f = `${ym}-01`; f.slice(0, 7) === ym; f = sumarDias(f, 1)) if (f >= min && f <= max) dias.push(f);
+  return dias;
+}
+
+/** Horarios agrupados por especialista, en el orden en que llegan. */
+function porEspecialista(lista: Slot[]): { personal_id: string; personal_nombre: string; slots: Slot[] }[] {
+  const grupos = new Map<string, { personal_id: string; personal_nombre: string; slots: Slot[] }>();
+  for (const s of lista) {
+    const g = grupos.get(s.personal_id) ?? { personal_id: s.personal_id, personal_nombre: s.personal_nombre, slots: [] };
+    g.slots.push(s);
+    grupos.set(s.personal_id, g);
+  }
+  return [...grupos.values()];
+}
+
 /** El dispositivo no está en la hora del centro de México (UTC−6 todo el año). */
 function enOtraZona(): boolean {
   try {
@@ -30,22 +57,84 @@ function enOtraZona(): boolean {
 
 export function PasoHorario({ config, duracionMin, fecha, slot, onFecha, onSlot, onAtras, onContinuar }: Props) {
   const hoy = fechaLocal();
+  const min = primerDiaReservable(hoy);
   const max = sumarDias(hoy, Math.max(0, config.ventana_reserva_dias));
+  const antesDeAbrir = min > hoy;
+  // Un día guardado antes (p. ej. anterior a la apertura o ya pasado) no cuenta.
+  const fechaVigente = fecha && fecha >= min && fecha <= max ? fecha : null;
   const [error, setError] = useState<string | null>(null);
   const [buscando, setBuscando] = useState(false);
   const [sinLugar, setSinLugar] = useState<string | null>(null);
   const errorRef = useRef<HTMLParagraphElement>(null);
   const horasRef = useRef<HTMLDivElement>(null);
 
-  const horarios = useAsync<Slot[] | null>(
-    () => (fecha && duracionMin ? api.getHorariosDisponibles(fecha, duracionMin) : Promise.resolve(null)),
-    [fecha, duracionMin],
-  );
+  // Qué días del mes visible tienen lugar (true) o no (false), para marcarlos en el calendario.
+  const [mes, setMes] = useState<string | null>(null);
+  const [libres, setLibres] = useState<Record<string, boolean>>({});
+  const [revisando, setRevisando] = useState(false);
+  const cache = useRef(new Map<string, boolean>());
+
+  function anotar(f: string, dur: number, hay: boolean) {
+    cache.current.set(`${dur}|${f}`, hay);
+    setLibres((r) => (r[f] === hay ? r : { ...r, [f]: hay }));
+  }
+
+  useEffect(() => {
+    if (!mes || !duracionMin) {
+      setLibres({});
+      setRevisando(false);
+      return;
+    }
+    const dur = duracionMin;
+    const k = (f: string) => `${dur}|${f}`;
+    const dias = diasEnRango(mes, min, max);
+    let vivo = true;
+    const publicar = () => {
+      const r: Record<string, boolean> = {};
+      for (const f of dias) {
+        const v = cache.current.get(k(f));
+        if (v !== undefined) r[f] = v;
+      }
+      setLibres(r);
+    };
+    publicar();
+    const faltan = dias.filter((f) => !cache.current.has(k(f)));
+    setRevisando(faltan.length > 0);
+    if (faltan.length === 0) return;
+    let i = 0;
+    const trabajador = async () => {
+      while (vivo && i < faltan.length) {
+        const f = faltan[i++];
+        try {
+          cache.current.set(k(f), (await api.getHorariosDisponibles(f, dur)).length > 0);
+        } catch {
+          // Si no se pudo revisar, el día se queda sin marcar y se puede elegir.
+        }
+      }
+    };
+    void Promise.all(Array.from({ length: Math.min(CONSULTAS_A_LA_VEZ, faltan.length) }, trabajador)).then(() => {
+      if (!vivo) return;
+      publicar();
+      setRevisando(false);
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [mes, duracionMin, min, max]);
+
+  const horarios = useAsync<Slot[] | null>(async () => {
+    if (!fechaVigente || !duracionMin) return null;
+    const s = await api.getHorariosDisponibles(fechaVigente, duracionMin);
+    anotar(fechaVigente, duracionMin, s.length > 0);
+    return s;
+  }, [fechaVigente, duracionMin]);
 
   const otraZona = enOtraZona();
 
   const lista = horarios.datos ?? [];
-  const slotElegidoAqui = !!slot && !!fecha && lista.some((s) => s.inicio === slot.inicio && s.personal_id === slot.personal_id);
+  const grupos = porEspecialista(lista);
+  const slotElegidoAqui = !!slot && !!fechaVigente && lista.some((s) => s.inicio === slot.inicio && s.personal_id === slot.personal_id);
+  const hayDiasSinLugar = Object.values(libres).some((v) => !v);
 
   function elegirFecha(f: string) {
     setError(null);
@@ -60,13 +149,16 @@ export function PasoHorario({ config, duracionMin, fecha, slot, onFecha, onSlot,
     setSinLugar(null);
     setError(null);
     try {
-      let f = desde;
+      let f = desde < min ? min : desde;
       for (let i = 0; i < 45 && f <= max; i++) {
-        const s = await api.getHorariosDisponibles(f, duracionMin);
-        if (s.length > 0) {
-          onFecha(f);
-          requestAnimationFrame(() => horasRef.current?.focus());
-          return;
+        if (cache.current.get(`${duracionMin}|${f}`) !== false) {
+          const s = await api.getHorariosDisponibles(f, duracionMin);
+          anotar(f, duracionMin, s.length > 0);
+          if (s.length > 0) {
+            onFecha(f);
+            requestAnimationFrame(() => horasRef.current?.focus());
+            return;
+          }
         }
         f = sumarDias(f, 1);
       }
@@ -83,21 +175,25 @@ export function PasoHorario({ config, duracionMin, fecha, slot, onFecha, onSlot,
   }
 
   function continuar() {
-    const vigente = !!slot && (!horarios.datos || slotElegidoAqui);
+    const slotEnRango = !!slot && fechaLocal(new Date(slot.inicio)) >= min;
+    const vigente = !!slot && slotEnRango && !!fechaVigente && (!horarios.datos || slotElegidoAqui);
     if (!vigente) {
-      setError(fecha ? 'Elige una hora para tu cita.' : 'Elige el día de tu cita en el calendario.');
+      setError(fechaVigente ? 'Elige una hora para tu cita.' : 'Elige el día de tu cita en el calendario.');
       requestAnimationFrame(() => errorRef.current?.focus());
       return;
     }
     onContinuar();
   }
 
+  const fechaTexto = (f: string) => fechaLarga(isoDesdeLocal(f, '12:00'));
 
   return (
     <div className="rv-paso-cuerpo">
       <p className="texto-2" id="rv-cal-ayuda">
-        Puedes reservar desde hoy y hasta el {fechaLarga(isoDesdeLocal(max, '12:00'))}. Los horarios están en hora de Querétaro.
-        Con el teclado: flechas para moverte entre días, Enter para elegir.
+        {antesDeAbrir
+          ? `Abrimos el ${fechaTexto(min)}: puedes reservar desde ese día y hasta el ${fechaTexto(max)}.`
+          : `Puedes reservar desde hoy y hasta el ${fechaTexto(max)}.`}{' '}
+        Los horarios están en hora de Querétaro. Con el teclado: flechas para moverte entre días, Enter para elegir.
       </p>
       {otraZona && (
         <p className="aviso aviso-info">
@@ -107,9 +203,21 @@ export function PasoHorario({ config, duracionMin, fecha, slot, onFecha, onSlot,
 
       <div className="rv-horario">
         <div className="rv-horario-cal">
-          <Calendario min={hoy} max={max} hoy={hoy} seleccionada={fecha} onElegir={elegirFecha} describedBy="rv-cal-ayuda" />
-          {!fecha && (
-            <button type="button" className="btn btn-texto btn-sm rv-buscar" onClick={() => buscarSiguiente(hoy)} disabled={buscando || !duracionMin}>
+          <Calendario
+            min={min}
+            max={max}
+            hoy={hoy}
+            seleccionada={fechaVigente}
+            disponibilidad={libres}
+            onMes={setMes}
+            onElegir={elegirFecha}
+            describedBy="rv-cal-ayuda"
+          />
+          <p className="ayuda rv-cal-leyenda" aria-live="polite">
+            {revisando ? 'Revisando qué días tienen lugar…' : hayDiasSinLugar ? 'Los días tachados no tienen horarios libres.' : ''}
+          </p>
+          {!fechaVigente && (
+            <button type="button" className="btn btn-texto btn-sm rv-buscar" onClick={() => buscarSiguiente(min)} disabled={buscando || !duracionMin}>
               {buscando ? 'Buscando…' : 'Mostrarme el primer día con lugar'}
             </button>
           )}
@@ -117,43 +225,56 @@ export function PasoHorario({ config, duracionMin, fecha, slot, onFecha, onSlot,
 
         <div className="rv-horario-horas" ref={horasRef} tabIndex={-1} aria-labelledby="rv-horas-titulo">
           <h3 id="rv-horas-titulo" className="rv-subtitulo">
-            {fecha ? `Horarios del ${fechaLarga(isoDesdeLocal(fecha, '12:00'))}` : 'Horarios'}
+            {fechaVigente ? `Horarios del ${fechaTexto(fechaVigente)}` : 'Horarios'}
           </h3>
-          {!fecha && <p className="texto-3">Elige un día en el calendario para ver las horas libres.</p>}
-          {fecha && !duracionMin && <Cargando texto="Calculando la duración de tu cita…" />}
-          {fecha && duracionMin && horarios.cargando && <Cargando texto="Buscando horarios…" />}
-          {fecha && <MensajeError error={horarios.error} onReintentar={horarios.recargar} />}
-          {fecha && duracionMin && !horarios.cargando && !horarios.error && lista.length === 0 && (
+          {!fechaVigente && <p className="texto-3">Elige un día en el calendario para ver las horas libres.</p>}
+          {fechaVigente && !duracionMin && <Cargando texto="Calculando la duración de tu cita…" />}
+          {fechaVigente && duracionMin && horarios.cargando && <Cargando texto="Buscando horarios…" />}
+          {fechaVigente && <MensajeError error={horarios.error} onReintentar={horarios.recargar} />}
+          {fechaVigente && duracionMin && !horarios.cargando && !horarios.error && lista.length === 0 && (
             <div className="rv-sin-horarios">
               <p>No hay horarios este día; prueba otro.</p>
-              <button type="button" className="btn btn-secundario btn-sm" onClick={() => buscarSiguiente(sumarDias(fecha, 1))} disabled={buscando}>
+              <button
+                type="button"
+                className="btn btn-secundario btn-sm"
+                onClick={() => buscarSiguiente(sumarDias(fechaVigente, 1))}
+                disabled={buscando}
+              >
                 {buscando ? 'Buscando…' : 'Buscar el siguiente día con lugar'}
               </button>
             </div>
           )}
-          {fecha && !horarios.cargando && lista.length > 0 && (
-            <div className="rv-horas" role="group" aria-labelledby="rv-horas-titulo">
-              {lista.map((s) => {
-                const activo = !!slot && s.inicio === slot.inicio && s.personal_id === slot.personal_id;
-                return (
-                  <button
-                    key={`${s.inicio}|${s.personal_id}`}
-                    type="button"
-                    className={`rv-hora${activo ? ' rv-hora-elegida' : ''}`}
-                    aria-pressed={activo}
-                    onClick={() => {
-                      setError(null);
-                      onSlot(s);
-                    }}
-                  >
-                    <span className="rv-hora-hora num">{hora(s.inicio)}</span>
-                    <span className="rv-hora-quien">te atiende {s.personal_nombre}</span>
-                  </button>
-                );
-              })}
+          {fechaVigente && !horarios.cargando && lista.length > 0 && (
+            <div className="rv-horas-grupos">
+              {grupos.map((g) => (
+                <div key={g.personal_id} className="rv-horas-grupo">
+                  <p className="rv-horas-quien" id={`rv-horas-${g.personal_id}`}>
+                    Te atiende <strong>{g.personal_nombre}</strong>
+                  </p>
+                  <div className="rv-horas" role="group" aria-labelledby={`rv-horas-titulo rv-horas-${g.personal_id}`}>
+                    {g.slots.map((s) => {
+                      const activo = !!slot && s.inicio === slot.inicio && s.personal_id === slot.personal_id;
+                      return (
+                        <button
+                          key={`${s.inicio}|${s.personal_id}`}
+                          type="button"
+                          className={`rv-hora${activo ? ' rv-hora-elegida' : ''}`}
+                          aria-pressed={activo}
+                          onClick={() => {
+                            setError(null);
+                            onSlot(s);
+                          }}
+                        >
+                          <span className="rv-hora-hora num">{hora(s.inicio)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
-          {slot && fecha && !horarios.cargando && !!horarios.datos && !slotElegidoAqui && (
+          {slot && fechaVigente && !horarios.cargando && !!horarios.datos && !slotElegidoAqui && (
             <p className="ayuda">
               Tenías elegido el {fechaLarga(slot.inicio)} a las {hora(slot.inicio)}; ese horario ya no aparece libre. Elige otro.
             </p>

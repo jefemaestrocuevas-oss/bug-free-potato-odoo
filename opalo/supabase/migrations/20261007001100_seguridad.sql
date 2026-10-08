@@ -51,29 +51,26 @@ create policy clientes_editar on public.clientes
   using (usuario_id = (select auth.uid()) or (select public.es_personal()))
   with check (usuario_id = (select auth.uid()) or (select public.es_personal()));
 
--- personal: público lo activo; la clienta también ve a quien la atendió; admin edita
-create policy personal_leer_anon on public.personal
-  for select to anon using (activo);
+-- personal y capacitaciones: el público (y las clientas) los ven por las vistas personal_publico
+-- y capacitaciones_publicas, que sólo exponen columnas no sensibles (sin usuario_id, notas ni
+-- constancias). En la tabla: el personal todo; la clienta, sólo a quien la atendió (para
+-- v_citas_detalle); admin edita.
 create policy personal_leer on public.personal
   for select to authenticated using (
-    activo
-    or (select public.es_personal())
+    (select public.es_personal())
     or exists (select 1 from public.citas c
                 where c.personal_id = personal.id and c.cliente_id = (select public.mi_cliente_id())));
 create policy personal_admin on public.personal
   for all to authenticated using ((select public.es_admin())) with check ((select public.es_admin()));
 
--- capacitaciones: públicas si mostrar_en_sitio
-create policy capacitaciones_leer_anon on public.capacitaciones
-  for select to anon using (mostrar_en_sitio);
 create policy capacitaciones_leer on public.capacitaciones
-  for select to authenticated using (mostrar_en_sitio or (select public.es_personal()));
+  for select to authenticated using ((select public.es_personal()));
 create policy capacitaciones_admin on public.capacitaciones
   for all to authenticated using ((select public.es_admin())) with check ((select public.es_admin()));
 
 -- personal_servicios
 create policy personal_servicios_leer on public.personal_servicios
-  for select to anon, authenticated using (true);
+  for select to authenticated using (true);
 create policy personal_servicios_admin on public.personal_servicios
   for all to authenticated using ((select public.es_admin())) with check ((select public.es_admin()));
 
@@ -111,12 +108,12 @@ create policy contraindicaciones_admin on public.contraindicaciones
 
 -- agenda
 create policy cabinas_leer on public.cabinas
-  for select to anon, authenticated using (true);
+  for select to authenticated using (true);
 create policy cabinas_admin on public.cabinas
   for all to authenticated using ((select public.es_admin())) with check ((select public.es_admin()));
 
 create policy horarios_leer on public.horarios
-  for select to anon, authenticated using (true);
+  for select to authenticated using (true);
 create policy horarios_admin on public.horarios
   for all to authenticated using ((select public.es_admin())) with check ((select public.es_admin()));
 
@@ -220,16 +217,32 @@ create policy gastos_admin on public.gastos
 revoke all on all tables in schema public from anon, authenticated;
 revoke all on all sequences in schema public from anon, authenticated;
 
--- Visitante: sólo lo público
+-- Visitante: sólo lo público (ESPEC §3). Equipo y capacitaciones, por sus vistas públicas; los
+-- horarios libres, con horarios_disponibles (security definer).
 grant select on
   public.configuracion, public.categorias_servicio, public.servicios, public.paquetes,
-  public.paquete_servicios, public.contraindicaciones, public.personal, public.capacitaciones,
-  public.personal_servicios, public.cabinas, public.horarios, public.politicas,
+  public.paquete_servicios, public.contraindicaciones, public.politicas,
   public.personal_publico, public.capacitaciones_publicas, public.productos_tienda
 to anon;
 
--- Usuarios con sesión: leen todo lo que su RLS les permita
+-- Usuarios con sesión: leen todo lo que su RLS les permita…
 grant select on all tables in schema public to authenticated;
+
+-- …salvo columnas internas. RLS filtra filas, no columnas, y personal y clientas comparten el
+-- rol "authenticated": la clienta podría pedir GET /clientes?select=notas_internas de su fila.
+-- Así que esas columnas no se conceden a nadie con sesión; el personal lee las notas en
+-- v_clientes_notas. (Las funciones security definer y service_role no se ven afectadas.)
+revoke select on public.clientes, public.citas, public.pagos from authenticated;
+grant select (id, usuario_id, nombre, apellidos, telefono, email, fecha_nacimiento, como_nos_conocio,
+              acepta_promociones, creado_en, actualizado_en)              -- sin notas_internas
+  on public.clientes to authenticated;
+grant select (id, cliente_id, personal_id, cabina_id, inicio, fin, estado, origen, primera_vez,
+              requiere_revision, alertas, notas_cliente, total, cancelada_en, motivo_cancelacion,
+              creado_en, actualizado_en)                                   -- sin notas_internas ni creada_por
+  on public.citas to authenticated;
+grant select (id, pedido_id, cita_id, monto, propina, metodo, referencia, pagado_en)
+  on public.pagos to authenticated;                                        -- sin recibido_por ni notas
+grant select on public.v_clientes_notas to authenticated;                  -- filtra es_personal()
 
 -- Escrituras directas (ESPEC §6.1). Lo demás sólo por RPC.
 grant insert (id, nombre, apellidos, telefono, email, fecha_nacimiento, como_nos_conocio,
@@ -313,6 +326,23 @@ to authenticated;
 
 -- Internas (crear_cita_interna, cancelar_cita_interna, completar_cita_interna,
 -- liquidar_pedido_interna, generar_codigo_regalo, personal_puede_hacer, edad_en, ip_solicitud,
--- tg_*): sin EXECUTE para anon/authenticated. Sólo las llaman otras funciones security definer.
+-- firma_valida, validar_firma, tg_*): sin EXECUTE para anon/authenticated. Sólo las llaman otras
+-- funciones security definer (o triggers / restricciones).
 
 grant execute on all functions in schema public to service_role;
+
+-- -----------------------------------------------------------------------------
+-- Privilegios por defecto de lo que se cree DESPUÉS (migraciones futuras)
+--
+-- Supabase da por defecto ALL a anon/authenticated sobre tablas, secuencias y funciones nuevas
+-- de public, y Postgres da EXECUTE a PUBLIC sobre toda función nueva. Lo de arriba sólo cubre
+-- lo que ya existe; sin esto, una tabla o función nueva quedaría abierta a anon hasta que
+-- alguien se acordara de cerrarla. A partir de aquí, cada objeto nuevo necesita su GRANT
+-- explícito (y cada tabla nueva, su RLS: tests/07 falla si falta).
+-- Aplica a lo que cree el rol que corre las migraciones (postgres en Supabase). El EXECUTE de
+-- PUBLIC es un default global (no por esquema), por eso esa línea no lleva "in schema".
+-- -----------------------------------------------------------------------------
+alter default privileges in schema public revoke all on tables from anon, authenticated;
+alter default privileges in schema public revoke all on sequences from anon, authenticated;
+alter default privileges in schema public revoke all on functions from anon, authenticated;
+alter default privileges revoke execute on functions from public;

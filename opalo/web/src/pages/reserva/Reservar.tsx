@@ -25,7 +25,7 @@ import {
 import { PasoDatos } from '../../components/reserva/PasoDatos';
 import { PasoFicha } from '../../components/reserva/PasoFicha';
 import { PasoFirma } from '../../components/reserva/PasoFirma';
-import { PasoHorario } from '../../components/reserva/PasoHorario';
+import { PasoHorario, primerDiaReservable } from '../../components/reserva/PasoHorario';
 import { PasoPoliticas } from '../../components/reserva/PasoPoliticas';
 import { PasoServicios } from '../../components/reserva/PasoServicios';
 import { Progreso, ResumenReserva, type LineaResumen } from '../../components/reserva/Piezas';
@@ -37,6 +37,7 @@ import {
   creditoUsable,
   firmaItems,
   mapaPaquetes,
+  notaPago,
   mapaServicios,
   nombreCompleto,
   paqueteReservable,
@@ -124,12 +125,24 @@ function Asistente({ config, cat }: { config: Configuracion; cat: Catalogo }) {
     guardarEstado(estado);
   }, [estado]);
 
-  // Si cambia la persona que inició sesión, lo personal se descarta.
+  // Si cambia la persona que inició sesión (o se cerró la sesión), lo personal se descarta:
+  // ficha, políticas, notas y los servicios prepagados de la otra cuenta.
   useEffect(() => {
-    if (cargandoSesion || !usuario || !estado.usuario || estado.usuario === usuario) return;
+    if (cargandoSesion || !estado.usuario || estado.usuario === usuario) return;
     setFicha(null);
     fichaGuardada.current = null;
-    setEstado((e) => ({ ...e, usuario: null, datosListos: false, fichaPara: null, politicasMarcadas: [], politicasPara: null, consentimientoLeido: false }));
+    setEstado((e) => ({
+      ...e,
+      items: e.items.map((it) => (it.credito_id ? { ...it, credito_id: null } : it)),
+      usuario: null,
+      datosListos: false,
+      fichaPara: null,
+      politicasMarcadas: [],
+      politicasPara: null,
+      consentimientoLeido: false,
+      notas: '',
+      creditoPendiente: null,
+    }));
   }, [usuario, estado.usuario, cargandoSesion]);
 
   // Ítems válidos (sólo lo que existe y se puede reservar).
@@ -164,8 +177,8 @@ function Asistente({ config, cat }: { config: Configuracion; cat: Catalogo }) {
     if (sSlug) {
       const s = cat.servicios.find((x) => x.slug === sSlug);
       if (s && servicioReservable(s)) {
+        // Si es un complemento, el paso 1 ya avisa que falta el servicio principal.
         nuevos.push({ tipo: 'servicio', id: s.id, credito_id: null });
-        if (s.es_complemento) texto = `${s.nombre} se agrega a un servicio: elige también tu servicio principal.`;
       } else {
         texto = s
           ? `${s.nombre} todavía no se puede reservar en línea. Escríbenos por WhatsApp y con gusto te orientamos.`
@@ -266,7 +279,9 @@ function Asistente({ config, cat }: { config: Configuracion; cat: Catalogo }) {
 
   // ¿Qué pasos están completos?
   const okServicios = items.length > 0 && tieneServicioBase(items, cat);
-  const okHorario = okServicios && !!estado.slot && estado.slotPara === firmaSel;
+  // Un horario guardado antes del día de apertura (o ya pasado) no cuenta.
+  const slotVigente = !!estado.slot && fechaLocal(new Date(estado.slot.inicio)) >= primerDiaReservable();
+  const okHorario = okServicios && slotVigente && estado.slotPara === firmaSel;
   const okDatos = okHorario && !!sesion?.cliente && estado.datosListos && estado.usuario === usuario;
   const okFicha = okDatos && !!ficha && estado.fichaPara === firmaFicha;
   const okPoliticas = okFicha && estado.politicasPara === firmaPoliticas;
@@ -299,7 +314,7 @@ function Asistente({ config, cat }: { config: Configuracion; cat: Catalogo }) {
       const n = { ...e, ...patch };
       // Los ítems no cambian al avanzar: la firma de la selección es la actual.
       const s1 = okServicios;
-      const s2 = s1 && !!n.slot && n.slotPara === firmaSel;
+      const s2 = s1 && !!n.slot && fechaLocal(new Date(n.slot.inicio)) >= primerDiaReservable() && n.slotPara === firmaSel;
       const s3 = s2 && !!sesion?.cliente && n.datosListos && n.usuario === usuario;
       const s4 = s3 && !!fichaNueva && n.fichaPara === firmaFicha;
       const s5 = s4 && n.politicasPara === firmaPoliticas;
@@ -356,6 +371,7 @@ function Asistente({ config, cat }: { config: Configuracion; cat: Catalogo }) {
       } catch {
         cita = null;
       }
+      const totalFinal = cita ? totalCita(cita.items) : total;
       setConfirmacion({
         resultado,
         estado: cita?.estado ?? resultado.estado,
@@ -365,7 +381,8 @@ function Asistente({ config, cat }: { config: Configuracion; cat: Catalogo }) {
         personal_nombre: cita?.personal_nombre ?? slot.personal_nombre,
         personal_titulo: cita?.personal_titulo ?? null,
         servicios: cita ? cita.items.map((i) => i.nombre) : lineas.map((l) => l.nombre),
-        total_texto: cita ? totalCita(cita.items).texto : total.texto,
+        total_texto: totalFinal.texto,
+        nota_pago: notaPago(totalFinal),
         cita: cita ?? undefined,
       });
       setFicha(null);
@@ -490,7 +507,8 @@ function Asistente({ config, cat }: { config: Configuracion; cat: Catalogo }) {
         </section>
 
         {!confirmacion && (
-          <aside className="rv-resumen" aria-label="Resumen de tu cita">
+          // En el paso 6 el resumen ya está dentro del paso: en pantallas chicas no se repite abajo.
+          <aside className={`rv-resumen${paso === 6 ? ' rv-resumen-firma' : ''}`} aria-label="Resumen de tu cita">
             <ResumenReserva
               lineas={lineas}
               total={total}

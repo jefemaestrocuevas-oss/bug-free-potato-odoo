@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, type BloqueoAgenda, type CitaDetalle, type PersonalInterno } from '../../lib/api';
 import {
@@ -21,6 +21,7 @@ import { useAsync } from '../../lib/useAsync';
 import { Cargando, MensajeError } from '../../components/ui/Estado';
 import { AccionesCita } from '../../components/admin/AccionesCita';
 import { BloqueosAgenda, quienBloqueo, rangoBloqueo } from '../../components/admin/Bloqueos';
+import { useCabina } from '../../components/admin/cabina';
 import { IconoAlerta, IconoAnterior, IconoMensaje, IconoSiguiente } from '../../components/admin/Iconos';
 import { NuevaCita } from '../../components/admin/NuevaCita';
 import { EncabezadoAdmin, Exito, PillEstadoCita, PillFirma } from '../../components/admin/Piezas';
@@ -72,6 +73,7 @@ function TarjetaCita({ cita, color, onCambio, onAviso }: { cita: CitaDetalle; co
           <span className="num">
             Total {dinero(cita.total, 'por confirmar')} · Pagado {dinero(cita.pagado)}
             {saldo > 0.005 && !inactiva && <strong className="adm-saldo"> · Saldo {dinero(saldo)}</strong>}
+            {saldo < -0.005 && <strong className="adm-pagado-de-mas"> · Pagado de más {dinero(-saldo)}</strong>}
           </span>
           {!inactiva && (
             <span>
@@ -116,6 +118,19 @@ export default function Agenda() {
   const [nueva, setNueva] = useState<null | { fecha: string; hora?: string }>(null);
   const [verBloqueos, setVerBloqueos] = useState(false);
   const [verCanceladas, setVerCanceladas] = useState(false);
+
+  // Al desbloquear la tablet después de «Firmar en cabina» (aunque se haya recargado la página
+  // a media firma), se vuelve a leer la agenda para que la firma aparezca.
+  const cabina = useCabina();
+  const huboCabina = useRef(false);
+  const { recargar: recargarAgenda } = agenda;
+  useEffect(() => {
+    if (cabina) huboCabina.current = true;
+    else if (huboCabina.current) {
+      huboCabina.current = false;
+      recargarAgenda();
+    }
+  }, [cabina, recargarAgenda]);
 
   const ir = (cambios: Record<string, string | null>) => {
     const p = new URLSearchParams(params);
@@ -383,54 +398,56 @@ function VistaSemana({
   const dias = Array.from({ length: 7 }, (_, i) => sumarDias(desde, i));
   const colores = new Map(equipo.map((p) => [p.id, p.color_agenda]));
   return (
-    <div className="adm-semana">
-      {dias.map((f) => {
-        const iniMs = new Date(isoDesdeLocal(f, '00:00')).getTime();
-        const finMs = new Date(isoDesdeLocal(sumarDias(f, 1), '00:00')).getTime();
-        const delDia = citas.filter((c) => fechaLocal(new Date(c.inicio)) === f);
-        const bloq = bloqueos.filter((b) => new Date(b.inicio).getTime() < finMs && new Date(b.fin).getTime() > iniMs);
-        const [, , d] = f.split('-');
-        return (
-          <section key={f} className={`adm-semana-dia ${f === hoy ? 'adm-semana-hoy' : ''}`} aria-label={fechaLarga(isoDesdeLocal(f, '12:00'))}>
-            <button type="button" className="adm-semana-cabeza" onClick={() => onDia(f)}>
-              <span className="adm-semana-dow">{DIAS_CORTOS[diaSemana(f)]}</span>
-              <span className="adm-semana-num num">{Number(d)}</span>
-              <span className="adm-semana-cuenta">{delDia.length ? `${delDia.length} ${delDia.length === 1 ? 'cita' : 'citas'}` : 'Sin citas'}</span>
-            </button>
-            {bloq.map((b) => (
-              <p key={b.id} className="adm-semana-bloqueo">
-                Bloqueado · {quienBloqueo(b, equipo)}
-                {b.motivo ? ` · ${b.motivo}` : ''}
-              </p>
-            ))}
-            <ul className="adm-semana-citas">
-              {delDia.map((c) => {
-                const color = colores.get(c.personal_id);
-                return (
-                  <li key={c.id}>
-                    <button
-                      type="button"
-                      className={`adm-semana-cita adm-cita-${c.estado}`}
-                      style={color ? ({ '--adm-color-personal': color } as CSSProperties) : undefined}
-                      onClick={() => onDia(f)}
-                    >
-                      <span className="num adm-semana-cita-hora">{hora(c.inicio)}</span>
-                      <span className="adm-semana-cita-nombre">{c.cliente_nombre}</span>
-                      <span className="adm-semana-cita-detalle">{c.items.map((i) => i.nombre).join(', ')}</span>
-                      <span className="adm-semana-cita-pills">
-                        <PillEstadoCita estado={c.estado} />
-                        {c.consentimientos_firmados === 0 && c.estado !== 'cancelada' && c.estado !== 'no_asistio' && c.estado !== 'completada' && (
-                          <span className="pill pill-error">Sin firma</span>
-                        )}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        );
-      })}
+    <div className="adm-semana-marco">
+      <div className="adm-semana">
+        {dias.map((f) => {
+          const iniMs = new Date(isoDesdeLocal(f, '00:00')).getTime();
+          const finMs = new Date(isoDesdeLocal(sumarDias(f, 1), '00:00')).getTime();
+          const delDia = citas.filter((c) => fechaLocal(new Date(c.inicio)) === f);
+          const bloq = bloqueos.filter((b) => new Date(b.inicio).getTime() < finMs && new Date(b.fin).getTime() > iniMs);
+          const [, , d] = f.split('-');
+          return (
+            <section key={f} className={`adm-semana-dia ${f === hoy ? 'adm-semana-hoy' : ''}`} aria-label={fechaLarga(isoDesdeLocal(f, '12:00'))}>
+              <button type="button" className="adm-semana-cabeza" onClick={() => onDia(f)}>
+                <span className="adm-semana-dow">{DIAS_CORTOS[diaSemana(f)]}</span>
+                <span className="adm-semana-num num">{Number(d)}</span>
+                <span className="adm-semana-cuenta">{delDia.length ? `${delDia.length} ${delDia.length === 1 ? 'cita' : 'citas'}` : 'Sin citas'}</span>
+              </button>
+              {bloq.map((b) => (
+                <p key={b.id} className="adm-semana-bloqueo">
+                  Bloqueado · {quienBloqueo(b, equipo)}
+                  {b.motivo ? ` · ${b.motivo}` : ''}
+                </p>
+              ))}
+              <ul className="adm-semana-citas">
+                {delDia.map((c) => {
+                  const color = colores.get(c.personal_id);
+                  return (
+                    <li key={c.id}>
+                      <button
+                        type="button"
+                        className={`adm-semana-cita adm-cita-${c.estado}`}
+                        style={color ? ({ '--adm-color-personal': color } as CSSProperties) : undefined}
+                        onClick={() => onDia(f)}
+                      >
+                        <span className="num adm-semana-cita-hora">{hora(c.inicio)}</span>
+                        <span className="adm-semana-cita-nombre">{c.cliente_nombre}</span>
+                        <span className="adm-semana-cita-detalle">{c.items.map((i) => i.nombre).join(', ')}</span>
+                        <span className="adm-semana-cita-pills">
+                          <PillEstadoCita estado={c.estado} />
+                          {c.consentimientos_firmados === 0 && c.estado !== 'cancelada' && c.estado !== 'no_asistio' && c.estado !== 'completada' && (
+                            <span className="pill pill-error">Sin firma</span>
+                          )}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          );
+        })}
+      </div>
     </div>
   );
 }

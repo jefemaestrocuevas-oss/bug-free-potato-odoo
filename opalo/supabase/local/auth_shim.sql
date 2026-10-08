@@ -3,7 +3,7 @@
 -- un PostgreSQL limpio. NO se aplica en Supabase (allí todo esto ya existe).
 --
 --   * esquemas auth y extensions
---   * auth.users (sólo las columnas que usamos), auth.uid(), auth.role(), auth.jwt()
+--   * auth.users (sólo las columnas que usamos, incl. email_confirmed_at), auth.uid(), auth.role(), auth.jwt()
 --   * roles anon, authenticated, service_role (nologin; service_role con bypassrls)
 --   * privilegios por defecto como Supabase: ALL a anon/authenticated/service_role sobre
 --     tablas, funciones y secuencias de public (la barrera real es RLS)
@@ -32,9 +32,11 @@ grant usage on schema public, extensions, auth to anon, authenticated, service_r
 create table if not exists auth.users (
   id                  uuid primary key default gen_random_uuid(),
   email               text,
+  email_confirmed_at  timestamptz,          -- null hasta que la persona confirma su correo
   raw_user_meta_data  jsonb default '{}'::jsonb,
   created_at          timestamptz default now()
 );
+alter table auth.users add column if not exists email_confirmed_at timestamptz;
 grant all on auth.users to service_role;
 
 -- Igual que Supabase: lee request.jwt.claim.sub (o el claim "sub" de request.jwt.claims).

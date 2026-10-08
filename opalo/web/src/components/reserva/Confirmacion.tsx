@@ -117,9 +117,9 @@ export function Confirmacion({ conf, config, onOtra }: { conf: DatosConfirmacion
             Si necesitas cancelar, hazlo con al menos {config.horas_cancelacion} horas de anticipación desde{' '}
             <Link to="/cuenta/citas">tu cuenta</Link>. Con menos tiempo, escríbenos por WhatsApp.
           </li>
-          <li>
-            Estamos en {config.direccion}. Pagas en el spa el día de tu cita.
-          </li>
+          {/* La dirección ya puede terminar en punto ("Querétaro, Qro."): no se agrega otro. */}
+          <li>Estamos en {config.direccion.trim().replace(/\.+$/, '')}.</li>
+          <li>{conf.nota_pago}</li>
         </ul>
       </section>
 

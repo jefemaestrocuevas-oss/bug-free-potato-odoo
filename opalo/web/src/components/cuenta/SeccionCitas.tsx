@@ -212,7 +212,11 @@ function TarjetaCita({ cita, config, proxima = false, onCancelar }: { cita: Cita
             <dt>Total</dt>
             <dd className="num">
               {total.texto}
-              {cita.pagado > 0 ? <span className="texto-3"> · pagado {dinero(cita.pagado)}</span> : null}
+              {total.todoPrepagado ? (
+                <span className="texto-3"> · no pagas nada en el spa</span>
+              ) : cita.pagado > 0 ? (
+                <span className="texto-3"> · pagado {dinero(cita.pagado)}</span>
+              ) : null}
             </dd>
           </div>
         </dl>

@@ -1,0 +1,14 @@
+/*
+  Pedidos y pagos (/admin/pedidos). Prefijo .adm-pe-. Sólo tokens de color.
+*/
+.adm-pe-kpis { grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); max-width: 760px; }
+
+.adm-pe-barra { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.pestanas.adm-pe-pestanas { margin-bottom: 0; }
+.adm-pe-pestanas .pestana { min-height: 44px; }
+.adm-pe-cuenta { display: inline-block; min-width: 1.6em; padding: 0 6px; margin-left: 4px; border-radius: 999px; background: var(--fondo-alt); color: var(--tinta-3); font-size: 0.78rem; text-align: center; }
+.adm-pe-pestanas .pestana[aria-selected='true'] .adm-pe-cuenta { background: var(--verde-suave); color: var(--verde); }
+.campo.adm-pe-busqueda { margin: 0; max-width: 420px; }
+
+.adm-pe-conteo { margin: 0 0 8px; }
+.adm-pe-recargando { opacity: 0.6; transition: opacity 0.2s; }

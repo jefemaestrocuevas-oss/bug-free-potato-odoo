@@ -68,23 +68,34 @@ Es idempotente. Al volver a correrlo:
 
 ## 3. Crear el primer admin
 
-1. Regístrate en el sitio (o crea el usuario en *Authentication → Users*). El trigger
-   `on_auth_user_created` le crea su perfil (`rol = 'cliente'`) y su ficha de clienta.
-2. En el SQL Editor:
+0. En *Authentication → Providers → Email* deja **activo "Confirm email"**. Es obligatorio: una
+   cuenta sólo se vincula con la ficha que el personal ya había registrado con ese correo cuando
+   el correo está confirmado (`auth.users.email_confirmed_at`). Sin confirmación, cualquiera que
+   se registrara con el correo de una clienta vería su historial, su ficha de salud y sus
+   créditos.
+1. Regístrate en el sitio (o crea el usuario en *Authentication → Users*) y confirma el correo.
+   El trigger `on_auth_user_created` le crea su perfil (`rol = 'cliente'`) y su ficha de clienta.
+2. En el SQL Editor (sólo cuentas con el correo confirmado):
 
 ```sql
 update public.perfiles set rol = 'admin'
- where id = (select id from auth.users where email = 'socia@ejemplo.mx');
+ where id = (select id from auth.users
+              where email = 'socia@ejemplo.mx' and email_confirmed_at is not null);
 ```
 
 Para personal de cabina: `rol = 'personal'`, y liga su usuario con su ficha de equipo:
 
 ```sql
-update public.personal set usuario_id = (select id from auth.users where email = 'especialista@ejemplo.mx')
+update public.personal set usuario_id = (select id from auth.users
+                                          where email = 'especialista@ejemplo.mx'
+                                            and email_confirmed_at is not null)
  where slug = 'especialista';
 ```
 
-Después, los roles se cambian desde el panel (sólo admin puede).
+El panel todavía **no** tiene pantalla para cambiar roles ni para ligar a alguien del equipo con
+su cuenta: dar de alta a una especialista, hacer admin a una socia o quitarle el acceso a alguien
+se hace siempre con estas dos sentencias en el SQL Editor (para quitar el acceso:
+`rol = 'cliente'` y `usuario_id = null`). La base ya lo permite sólo a admin (ESPEC §6.1).
 
 **Antes de abrir (31 oct 2026)**, si el sitio se publica antes, cierra la agenda con un bloqueo global:
 
@@ -124,7 +135,15 @@ Cuentas de `seed_demo.sql` (sólo local): `admin@demo.opalo.mx` (admin),
 
 - **Registro**: `supabase.auth.signUp({ email, password, options: { data: { nombre, apellidos,
   telefono, fecha_nacimiento } } })` — `fecha_nacimiento` como `'YYYY-MM-DD'`. El trigger crea la
-  clienta (o la vincula si el personal ya la había registrado con ese email).
+  clienta, o la vincula con la que el personal ya había registrado con ese email **cuando el
+  correo queda confirmado** (`on_auth_user_confirmed`; mientras tanto no se le crea otra). Al
+  borrar una cuenta de Auth, su ficha se conserva sin correo (`on_auth_user_deleted`), para que
+  nadie la reclame registrándose con él; si la clienta vuelve, el personal le captura de nuevo
+  su correo.
+  Riesgo que queda (de Supabase Auth, no de la base): si alguien se registra con el correo de una
+  clienta y es *ella* quien después hace clic en el enlace de confirmación, la cuenta del intruso
+  queda confirmada. Para cerrarlo del todo, la vinculación de fichas con historial tendría que
+  aprobarla el personal (pendiente de decidir; requiere pantalla y cambio de contrato).
 - **Errores**: las RPC lanzan `P0001` con el mensaje listo para mostrarse (`error.message`).
   Además de los canónicos de la especificación existen estos (también para mostrarse tal cual):
   `Tu carrito está vacío.` · `La cantidad debe ser al menos 1.` · `Este pedido ya no se puede cancelar.` ·
@@ -137,9 +156,56 @@ Cuentas de `seed_demo.sql` (sólo local): `admin@demo.opalo.mx` (admin),
   `No encontramos ese proveedor.` · `Sólo se registran ajustes o mermas.` ·
   `La cantidad no puede ser cero.` · `No encontramos ese producto.` ·
   `Escribe el título y el contenido de la política.` ·
-  `Esta versión ya fue aceptada o firmada por alguna clienta: publica una versión nueva.`
+  `Esta versión ya fue aceptada o firmada por alguna clienta: publica una versión nueva.` ·
+  `Para reservar necesitamos tu fecha de nacimiento.` · `Para firmar necesitamos tu fecha de nacimiento.` ·
+  `Tu fecha de nacimiento ya está registrada; si hay un error, escríbenos por WhatsApp al 442 170 1466.` ·
+  `Ya tienes 3 citas próximas; para agendar otra escríbenos por WhatsApp al 442 170 1466.` ·
+  `No pudimos leer tu firma; bórrala y vuelve a firmar.` ·
+  `El nombre es muy largo; escríbelo en máximo 200 caracteres.` ·
+  `Las notas son muy largas; escríbelas en máximo 1000 caracteres.` ·
+  `Tu ficha de salud es muy larga; resume cada respuesta en máximo 2000 caracteres.` ·
+  `Revisa las cantidades.` · `Elige efectivo, tarjeta o transferencia.` ·
+  `El nombre de quien recibe el regalo es muy largo (máximo 120 caracteres).` ·
+  `Tienes 5 pedidos por pagar; págalos o cancela alguno antes de hacer otro.` ·
+  `Esta cita se marcó como no asistió.` ·
+  `Elige qué consentimiento firma la clienta para este servicio.`
   En `crear_pedido`, un servicio/paquete/producto que no se puede comprar responde
   `Uno de los productos ya no está disponible para compra en línea.`
+- **Límites** (constantes en las funciones): la clienta reserva en línea a lo más **3 citas
+  próximas** activas (pendiente/confirmada; el personal sí puede agendarle más) y tiene a lo más
+  **5 pedidos por pagar**; cantidades enteras de 1 a 99 por renglón; `crear_pedido` sólo acepta
+  efectivo, tarjeta o transferencia (cortesía y Mercado Pago los elige el personal al cobrar).
+  Firma: un `<svg>` sólo con trazos (`path`, `g`, `polyline`, `line`, `circle`), sin scripts,
+  eventos ni enlaces, de hasta 200 000 caracteres (`firma_valida`, también como restricción de
+  `consentimientos`); nombres hasta 200, notas hasta 1000, campos de la ficha hasta 2000.
+- **Fecha de nacimiento**: `reservar_cita` (y `firmar_consentimiento_cita` desde el portal) la
+  exigen; la clienta la captura una vez y después sólo el personal la cambia (`tg_clientes_proteger`).
+- **Servicios**: uno activo y en etapa `disponible` debe tener `tipo_consentimiento`
+  (trigger `servicios_consentimiento`); una cita sin ningún consentimiento que firmar no se crea.
+- **Agenda del personal**: `reservar_cita_staff` respeta los bloqueos (de la persona o globales)
+  y la autoasignación salta a quien está bloqueada. `horarios_disponibles` todavía no filtra por
+  `personal_servicios` (no recibe los servicios): con una especialista que hace todo no importa.
+- **Regalos**: un código por regalo; un bono de varios servicios genera varios créditos con el
+  mismo código y `canjear_regalo` los pasa todos.
+- **Consentimientos**: `documento_hash` = sha256 de política, clienta, cita, ficha, firmante,
+  tutor, menor, sha256 de la firma y `firmado_en` (ver `tg_consentimiento_hash`); `capturado_por`
+  y `canal` (`reserva_web`, `portal`, `cabina`) dicen quién y dónde se firmó. La IP
+  (`ip_solicitud`) es orientativa: `cf-connecting-ip` o, si no viene, el primer `x-forwarded-for`.
+- **Columnas internas**: nadie con sesión (rol `authenticated`) lee `clientes.notas_internas`,
+  `citas.notas_internas`, `citas.creada_por`, `pagos.recibido_por` ni `pagos.notas` directo de la
+  tabla (personal y clientas comparten ese rol y RLS no filtra columnas). El personal lee las notas
+  de cada clienta en la vista **`v_clientes_notas`** (`id, notas_internas`, sólo personal); las sigue
+  escribiendo con `update clientes set notas_internas = …`. Pide columnas explícitas: `select('*')`
+  sobre `clientes`, `citas` o `pagos` falla.
+- **Visitante**: el equipo y las capacitaciones sólo por `personal_publico` y
+  `capacitaciones_publicas` (las tablas `personal`, `capacitaciones`, `horarios`, `cabinas` y
+  `personal_servicios` ya no se leen sin sesión). Con sesión, la clienta sólo ve en `personal` a
+  quien la atiende.
+- **Objetos nuevos**: desde `1100_seguridad`, lo que se cree en `public` no tiene permisos para
+  `anon`/`authenticated` (ni `EXECUTE` para `PUBLIC`): cada tabla, vista o función nueva necesita
+  su `grant` explícito y cada tabla su RLS. `tests/07` falla si una tabla no tiene RLS, si una
+  función queda abierta fuera de la lista del contrato o si una vista sin `security_invoker` no es
+  de las públicas.
 - **Privilegios** (además de RLS): la clienta sólo puede `update` en `clientes` de
   `nombre, apellidos, telefono, fecha_nacimiento, acepta_promociones` (un trigger lo exige);
   `productos.stock_actual` no se escribe directo (sólo con movimientos: `registrar_compra`,
@@ -152,4 +218,6 @@ Cuentas de `seed_demo.sql` (sólo local): `admin@demo.opalo.mx` (admin),
   `total_pagado` de `v_clientes_resumen`.
 - **Funciones internas** (no expuestas por la API): `crear_cita_interna`, `cancelar_cita_interna`,
   `completar_cita_interna`, `liquidar_pedido_interna`, `generar_codigo_regalo`,
-  `personal_puede_hacer`, `edad_en`, `ip_solicitud` y los `tg_*`.
+  `personal_puede_hacer`, `edad_en`, `ip_solicitud`, `firma_valida`, `validar_firma` y los `tg_*`.
+- **Resultados**: `v_resultado_mensual` da los últimos 12 meses con actividad **hasta el mes en
+  curso** (un gasto con periodo futuro no desplaza a los meses ya vividos).

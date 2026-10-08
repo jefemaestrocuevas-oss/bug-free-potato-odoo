@@ -122,6 +122,9 @@ end;
 $$;
 
 -- IP de la petición (PostgREST pone los encabezados en request.headers). Null en local.
+-- Es orientativa: se prefiere cf-connecting-ip, que pone el proxy de Supabase (Cloudflare) y la
+-- clienta no puede fijar; si no viene, el primer valor de x-forwarded-for (ése sí lo puede
+-- inventar quien hace la petición).
 create or replace function public.ip_solicitud()
 returns text
 language plpgsql
@@ -130,11 +133,14 @@ set search_path = public, extensions, pg_temp
 as $$
 declare
   v_headers text := current_setting('request.headers', true);
+  v_json    json;
 begin
   if v_headers is null or v_headers = '' then
     return null;
   end if;
-  return nullif(btrim(split_part(v_headers::json ->> 'x-forwarded-for', ',', 1)), '');
+  v_json := v_headers::json;
+  return left(coalesce(nullif(btrim(v_json ->> 'cf-connecting-ip'), ''),
+                       nullif(btrim(split_part(v_json ->> 'x-forwarded-for', ',', 1)), '')), 100);
 exception when others then
   return null;
 end;

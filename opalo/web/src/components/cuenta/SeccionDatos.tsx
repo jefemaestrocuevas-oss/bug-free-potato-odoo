@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import type { Cliente } from '../../lib/api/tipos';
 import { fechaLocal, mensajeError, telefonoBonito } from '../../lib/format';
 import { useSesion } from '../../lib/sesion';
+import { borrarEstado } from '../reserva/estado';
 import { errorFechaNacimiento, normalizarTelefono, telefonoValido } from '../reserva/utilidades';
 
 type Campo = 'nombre' | 'telefono' | 'fecha_nacimiento';
@@ -16,6 +17,8 @@ export function SeccionDatos() {
 
   async function salir() {
     setSaliendo(true);
+    // El borrador de la reserva (servicios, horario, usuaria) no debe quedar para quien use después esta pestaña.
+    borrarEstado();
     try {
       await api.cerrarSesion();
     } finally {

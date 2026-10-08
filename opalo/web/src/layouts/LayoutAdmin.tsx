@@ -23,6 +23,8 @@ import {
   IconoSalir,
   IconoSitio,
 } from '../components/admin/Iconos';
+import { useConfirmar } from '../components/admin/Modal';
+import { ModoCabina } from '../components/admin/ModoCabina';
 import { ETIQUETA_ROL } from '../components/admin/util';
 import '../components/admin/componentes.css';
 import './admin.css';
@@ -52,6 +54,7 @@ const ADMINISTRACION: Enlace[] = [
 ];
 
 function BannerDemo() {
+  const { confirmar, dialogo } = useConfirmar();
   if (api.modo !== 'demo') return null;
   return (
     <div className="banner-demo adm-banner-demo">
@@ -59,12 +62,24 @@ function BannerDemo() {
       <button
         type="button"
         className="adm-banner-boton"
-        onClick={() => {
-          if (window.confirm('¿Borrar los datos de la demostración y empezar de nuevo?')) reiniciarDemo();
-        }}
+        onClick={() =>
+          confirmar({
+            titulo: 'Reiniciar la demostración',
+            mensaje: (
+              <p>
+                Se borran los cambios que hiciste en este navegador (citas, pagos, inventario…) y se vuelven a cargar los datos de ejemplo. La página se
+                recarga.
+              </p>
+            ),
+            textoBoton: 'Sí, reiniciar',
+            peligro: true,
+            accion: async () => reiniciarDemo(),
+          })
+        }
       >
         Reiniciar datos
       </button>
+      {dialogo}
     </div>
   );
 }
@@ -191,6 +206,7 @@ export function LayoutAdmin() {
           </div>
         </main>
       </div>
+      <ModoCabina />
     </div>
   );
 }

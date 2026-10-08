@@ -149,6 +149,8 @@ export function NuevaCita({ onCerrar, onListo, inicial }: Props) {
   const personal = (base.datos?.[1] ?? []).filter((p) => p.activo);
   const config = base.datos?.[2];
 
+  const paquetesElegidos = elegidos.filter((k) => k.startsWith('p:')).length;
+
   const porCategoria = useMemo(() => {
     if (!catalogo) return [];
     return catalogo.categorias
@@ -213,9 +215,11 @@ export function NuevaCita({ onCerrar, onListo, inicial }: Props) {
         }
       >
         <div className="pila">
-          <p className="aviso aviso-exito adm-sin-margen">
-            La cita de <strong>{cliente?.nombre}</strong> quedó para el <strong>{fechaHora(ini)}</strong> · Estado: {ETIQUETA_ESTADO_CITA[r.estado]}.
-          </p>
+          <div className="aviso aviso-exito adm-sin-margen">
+            <p className="adm-sin-margen">
+              La cita de <strong>{cliente?.nombre}</strong> quedó para el <strong>{fechaHora(ini)}</strong>. Estado: {ETIQUETA_ESTADO_CITA[r.estado]}.
+            </p>
+          </div>
           {r.requiere_revision && (
             <div className="aviso aviso-alerta adm-sin-margen">
               <div>
@@ -368,29 +372,35 @@ export function NuevaCita({ onCerrar, onListo, inicial }: Props) {
         <MensajeError error={base.error} onReintentar={base.recargar} />
         {catalogo && (
           <div className="adm-elegir-servicios">
-            {porCategoria.map(({ categoria, servicios }) => (
-              <details key={categoria.id} className="adm-grupo-servicios" open={servicios.some((s) => elegidos.includes(`s:${s.id}`))}>
-                <summary>
-                  {categoria.nombre}
-                  <span className="texto-3 pequeno"> · {servicios.filter((s) => elegidos.includes(`s:${s.id}`)).length || ''}</span>
-                </summary>
-                <div className="adm-chips">
-                  {servicios.map((s: Servicio) => (
-                    <label key={s.id} className={`adm-chip ${elegidos.includes(`s:${s.id}`) ? 'adm-chip-activo' : ''}`}>
-                      <input type="checkbox" checked={elegidos.includes(`s:${s.id}`)} onChange={() => alternar(`s:${s.id}`)} />
-                      <span>
-                        {s.nombre}
-                        {s.es_complemento && <span className="texto-3"> (complemento)</span>}
-                        <span className="adm-chip-precio num">{dinero(s.precio, 'por confirmar')}</span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </details>
-            ))}
+            {porCategoria.map(({ categoria, servicios }) => {
+              const n = servicios.filter((s) => elegidos.includes(`s:${s.id}`)).length;
+              return (
+                <details key={categoria.id} className="adm-grupo-servicios" open={n > 0}>
+                  <summary>
+                    {categoria.nombre}
+                    {n > 0 && <span className="texto-3 pequeno"> · {n} {n === 1 ? 'elegido' : 'elegidos'}</span>}
+                  </summary>
+                  <div className="adm-chips">
+                    {servicios.map((s: Servicio) => (
+                      <label key={s.id} className={`adm-chip ${elegidos.includes(`s:${s.id}`) ? 'adm-chip-activo' : ''}`}>
+                        <input type="checkbox" checked={elegidos.includes(`s:${s.id}`)} onChange={() => alternar(`s:${s.id}`)} />
+                        <span>
+                          {s.nombre}
+                          {s.es_complemento && <span className="texto-3"> (complemento)</span>}
+                          <span className="adm-chip-precio num">{dinero(s.precio, 'por confirmar')}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </details>
+              );
+            })}
             {catalogo.paquetes.filter((p) => p.activo).length > 0 && (
-              <details className="adm-grupo-servicios" open={elegidos.some((k) => k.startsWith('p:'))}>
-                <summary>Paquetes</summary>
+              <details className="adm-grupo-servicios" open={paquetesElegidos > 0}>
+                <summary>
+                  Paquetes
+                  {paquetesElegidos > 0 && <span className="texto-3 pequeno"> · {paquetesElegidos} {paquetesElegidos === 1 ? 'elegido' : 'elegidos'}</span>}
+                </summary>
                 <div className="adm-chips">
                   {catalogo.paquetes
                     .filter((p) => p.activo)

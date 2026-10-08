@@ -41,7 +41,8 @@ export default function Inicio() {
   return (
     <div className="inicio">
       {/* ---------- Hero ---------- */}
-      <section className="ini-hero" aria-labelledby="hero-titulo">
+      {/* data-sin-flotante: en celular el botón flotante de WhatsApp no tapa los botones del hero. */}
+      <section className="ini-hero" aria-labelledby="hero-titulo" data-sin-flotante>
         <div className="contenedor ini-hero-rejilla">
           <div className="ini-hero-texto">
             <p className="eyebrow">{abre ? 'Spa en Querétaro · Abrimos el 31 de octubre' : 'Spa en Querétaro · Momentum Centro Sur'}</p>
@@ -61,14 +62,16 @@ export default function Inicio() {
               </Link>
             </div>
             <ul className="ini-hero-datos">
+              <li className="ini-hero-dato-enlace">
+                <Link to="/equipo">
+                  <IconoBirrete tam={18} /> Equipo en capacitación constante
+                </Link>
+              </li>
               <li>
                 <IconoReloj tam={18} /> Sesiones de 1 hora
               </li>
               <li>
                 <IconoFirma tam={18} /> Reserva y firma en línea
-              </li>
-              <li>
-                <IconoCalendario tam={18} /> Atención con cita
               </li>
             </ul>
           </div>

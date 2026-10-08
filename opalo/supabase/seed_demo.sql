@@ -29,18 +29,19 @@ select t.tipo, 1, initcap(replace(t.tipo::text, '_', ' ')) || ' (ejemplo)',
 -- -----------------------------------------------------------------------------
 -- Usuarios (tg_nuevo_usuario crea perfil + clienta)
 -- -----------------------------------------------------------------------------
-insert into auth.users (id, email, raw_user_meta_data) values
-  ('00000000-0000-4000-a000-000000000001', 'admin@demo.opalo.mx',
+-- Cuentas con el correo ya confirmado (como quedan en Supabase con "Confirm email" activo).
+insert into auth.users (id, email, email_confirmed_at, raw_user_meta_data) values
+  ('00000000-0000-4000-a000-000000000001', 'admin@demo.opalo.mx', now(),
      '{"nombre": "Socia", "apellidos": "Administración (ejemplo)"}'),
-  ('00000000-0000-4000-a000-000000000002', 'especialista@demo.opalo.mx',
+  ('00000000-0000-4000-a000-000000000002', 'especialista@demo.opalo.mx', now(),
      '{"nombre": "Especialista", "apellidos": "Demo (ejemplo)", "telefono": "4420000000"}'),
-  ('00000000-0000-4000-a000-000000000011', 'clienta@demo.opalo.mx',
+  ('00000000-0000-4000-a000-000000000011', 'clienta@demo.opalo.mx', now(),
      '{"nombre": "Ana", "apellidos": "Ejemplo Ruiz", "telefono": "4420000001", "fecha_nacimiento": "1994-05-12"}'),
-  ('00000000-0000-4000-a000-000000000012', 'sofia@demo.opalo.mx',
+  ('00000000-0000-4000-a000-000000000012', 'sofia@demo.opalo.mx', now(),
      '{"nombre": "Sofía", "apellidos": "Prueba López", "telefono": "4420000002", "fecha_nacimiento": "1988-09-30"}');
 
-insert into auth.users (id, email, raw_user_meta_data)
-values ('00000000-0000-4000-a000-000000000013', 'valeria@demo.opalo.mx',
+insert into auth.users (id, email, email_confirmed_at, raw_user_meta_data)
+values ('00000000-0000-4000-a000-000000000013', 'valeria@demo.opalo.mx', now(),
         jsonb_build_object('nombre', 'Valeria', 'apellidos', 'Muestra (ejemplo)', 'telefono', '4420000003',
                            'fecha_nacimiento', (public.hoy_local() - interval '16 years 3 months')::date));
 

@@ -8,7 +8,7 @@ import { useAsync } from '../../lib/useAsync';
 import { Cargando, MensajeError } from '../ui/Estado';
 import { borradorDesdeFicha, type FichaBorrador } from './estado';
 import { PieAsistente } from './Piezas';
-import { contraindicacionesAplicables } from './utilidades';
+import { contraindicacionesAplicables, unirConY } from './utilidades';
 
 const MSG_CONSENTIMIENTO = 'Para guardar tu ficha de salud necesitamos tu consentimiento expreso para tratar datos de salud.';
 
@@ -94,11 +94,11 @@ function FormularioFicha({
     const sinConsentimiento = !ficha.acepta_datos_sensibles;
     setErrorConsentimiento(sinConsentimiento);
     if (pendientes.length || sinConsentimiento) {
+      // Resumen corto: el detalle (p. ej. el texto del consentimiento) ya aparece en rojo junto a cada campo.
       const partes: string[] = [];
-      if (pendientes.length)
-        partes.push(pendientes.length === 1 ? 'Falta contestar 1 pregunta.' : `Faltan contestar ${pendientes.length} preguntas.`);
-      if (sinConsentimiento) partes.push(MSG_CONSENTIMIENTO);
-      setResumenError(partes.join(' '));
+      if (pendientes.length) partes.push(pendientes.length === 1 ? 'contestar 1 pregunta' : `contestar ${pendientes.length} preguntas`);
+      if (sinConsentimiento) partes.push('marcar la casilla de consentimiento');
+      setResumenError(`Para continuar falta ${unirConY(partes)}. Te lo marcamos en rojo.`);
       requestAnimationFrame(() => {
         if (pendientes.length) document.getElementById(`rv-preg-${pendientes[0].clave}-si`)?.focus();
         else consentimientoRef.current?.focus();

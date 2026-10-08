@@ -290,6 +290,7 @@ function resolverItems(db: Db, items: ItemReserva[], clienteId: string, hoy: str
       if (
         !credito ||
         credito.cliente_id !== clienteId ||
+        credito.codigo_regalo !== null || // regalo sin canjear: aún no es de nadie para reservar
         (credito.vence_en !== null && credito.vence_en < hoy) ||
         credito.cantidad - credito.usados < usar ||
         (sid ? credito.servicio_id !== sid : credito.paquete_id !== pid)
@@ -328,21 +329,23 @@ function puedeHacer(db: Db, personalId: string, servicioIds: string[]): boolean 
   return servicioIds.every((id) => propios.some((x) => x.servicio_id === id));
 }
 
-/** Alertas de la ficha vigente que aplican a las categorías reservadas. */
+/**
+ * R4: alertas de la ficha vigente que aplican a las categorías reservadas. Sólo cuentan las
+ * contraindicaciones con acción 'revisar' o 'no_se_realiza' ('precaucion' no detiene la cita).
+ * `categorias` null = todas; un arreglo (aunque esté vacío) sólo aplica a las que nombra, como en SQL.
+ */
 export function alertasPara(db: Db, clienteId: string, slugs: Set<string>): { alertas: string[]; requiereRevision: boolean } {
   const ficha = fichaVigenteFila(db, clienteId);
   const alertas: string[] = [];
-  let requiereRevision = false;
-  if (!ficha) return { alertas, requiereRevision };
+  if (!ficha) return { alertas, requiereRevision: false };
   const contras = db.contraindicaciones.filter((c) => c.activa).sort((a, b) => a.orden - b.orden);
   for (const c of contras) {
+    if (c.accion !== 'revisar' && c.accion !== 'no_se_realiza') continue;
     if (ficha.respuestas[c.clave] !== true) continue;
-    const aplica = !c.categorias || c.categorias.length === 0 || c.categorias.some((s) => slugs.has(s));
-    if (!aplica) continue;
+    if (c.categorias && !c.categorias.some((s) => slugs.has(s))) continue;
     alertas.push(c.pregunta);
-    if (c.accion === 'revisar' || c.accion === 'no_se_realiza') requiereRevision = true;
   }
-  return { alertas, requiereRevision };
+  return { alertas, requiereRevision: alertas.length > 0 };
 }
 
 // ======================================================================
@@ -490,12 +493,17 @@ export function insertarCita(ctx: Ctx, d: DatosCitaNueva): CitaFila {
   return cita;
 }
 
-function esMenorDeEdad(db: Db, cliente: ClienteFila, hoy: string): boolean {
-  return cliente.fecha_nacimiento ? edad(cliente.fecha_nacimiento, hoy) < db.configuracion.edad_mayoria : false;
+/** Fecha local de la cita: la edad se mide ese día (SQL: edad_en(fecha_nacimiento, fecha local de p_inicio)). */
+function fechaDeCita(inicio: number, hoy: string): string {
+  return Number.isFinite(inicio) ? fechaLocal(new Date(inicio)) : hoy;
 }
 
-function validarEdadMinima(db: Db, cliente: ClienteFila, hoy: string): void {
-  if (cliente.fecha_nacimiento && edad(cliente.fecha_nacimiento, hoy) < db.configuracion.edad_minima)
+function esMenorDeEdad(db: Db, cliente: ClienteFila, fechaCita: string): boolean {
+  return cliente.fecha_nacimiento ? edad(cliente.fecha_nacimiento, fechaCita) < db.configuracion.edad_mayoria : false;
+}
+
+function validarEdadMinima(db: Db, cliente: ClienteFila, fechaCita: string): void {
+  if (cliente.fecha_nacimiento && edad(cliente.fecha_nacimiento, fechaCita) < db.configuracion.edad_minima)
     falla(MSG.edadMinima(db.configuracion.edad_minima));
 }
 
@@ -503,7 +511,7 @@ function firmaCompleta(f: DatosFirma | null | undefined): boolean {
   return !!f && !!(f.nombre_firmante ?? '').trim() && !!(f.firma_svg ?? '').trim();
 }
 
-/** Un consentimiento por cada tipo distinto de los servicios de la cita (si aún no está firmado). */
+/** Un consentimiento por cada tipo distinto de los servicios de la cita (si esa versión aún no está firmada). */
 export function crearConsentimientos(ctx: Ctx, cita: CitaFila, firma: DatosFirma, esMenor: boolean): number {
   const { db } = ctx;
   const items = db.cita_items.filter((i) => i.cita_id === cita.id);
@@ -514,11 +522,7 @@ export function crearConsentimientos(ctx: Ctx, cita: CitaFila, firma: DatosFirma
   for (const tipo of tipos) {
     const pol = politicaActiva(db, tipo);
     if (!pol) continue;
-    const yaFirmado = db.consentimientos.some((k) => {
-      if (k.cita_id !== cita.id) return false;
-      return db.politicas.find((p) => p.id === k.politica_id)?.tipo === tipo;
-    });
-    if (yaFirmado) continue;
+    if (db.consentimientos.some((k) => k.cita_id === cita.id && k.politica_id === pol.id)) continue;
     db.consentimientos.push({
       id: uuid(),
       cliente_id: cita.cliente_id,
@@ -550,8 +554,10 @@ export function reservarCita(ctx: Ctx, s: SolicitudReserva): ResultadoReserva {
     if (pol && !db.aceptaciones_politica.some((a) => a.cliente_id === cliente.id && a.politica_id === pol.id)) falla(MSG.politicas);
   }
   if (!fichaVigenteFila(db, cliente.id)) falla(MSG.ficha);
-  validarEdadMinima(db, cliente, hoy);
-  const esMenor = esMenorDeEdad(db, cliente, hoy);
+  const inicio = ms(s.inicio);
+  const fechaCita = fechaDeCita(inicio, hoy);
+  validarEdadMinima(db, cliente, fechaCita);
+  const esMenor = esMenorDeEdad(db, cliente, fechaCita);
   if (esMenor && !(s.firma?.tutor_nombre ?? '').trim()) falla(MSG.tutor);
   if (!firmaCompleta(s.firma)) falla(MSG.firma);
 
@@ -559,7 +565,6 @@ export function reservarCita(ctx: Ctx, s: SolicitudReserva): ResultadoReserva {
   const dur = duracionReserva(db, s.items);
   const servicioIds = [...expandirServicios(db, s.items).keys()];
 
-  const inicio = ms(s.inicio);
   if (!Number.isFinite(inicio)) falla(MSG.noDisponible);
   const fecha = fechaLocal(new Date(inicio));
   const personalPedido = s.personal_id || null;
@@ -599,11 +604,11 @@ export function reservarCitaStaff(ctx: Ctx, s: SolicitudReservaStaff): Resultado
   const cliente = db.clientes.find((c) => c.id === s.cliente_id);
   if (!cliente) falla(MSG_EXTRA.clienteNoExiste);
   const hoy = hoyDe(ctx);
-  validarEdadMinima(db, cliente, hoy);
+  const inicio = ms(s.inicio);
+  validarEdadMinima(db, cliente, fechaDeCita(inicio, hoy));
   const resueltos = resolverItems(db, s.items, cliente.id, hoy, true);
   const dur = duracionReserva(db, s.items);
   const servicioIds = [...expandirServicios(db, s.items).keys()];
-  const inicio = ms(s.inicio);
   if (!Number.isFinite(inicio)) falla(MSG.noDisponible);
   const fin = inicio + dur * MS_MIN;
 
@@ -646,9 +651,9 @@ export function firmarConsentimientoCita(ctx: Ctx, citaId: string, firma: DatosF
   const cita = buscarCita(db, citaId);
   const mia = miClienteOpcional(ctx)?.id === cita.cliente_id;
   if (!mia && !esPersonal(ctx)) falla(MSG.permiso);
-  if (!['pendiente', 'confirmada', 'en_curso'].includes(cita.estado)) falla(MSG_EXTRA.citaNoFirmable);
+  if (cita.estado === 'cancelada' || cita.estado === 'no_asistio') falla(MSG_EXTRA.citaNoFirmable);
   const cliente = db.clientes.find((c) => c.id === cita.cliente_id)!;
-  const esMenor = esMenorDeEdad(db, cliente, hoyDe(ctx));
+  const esMenor = esMenorDeEdad(db, cliente, fechaLocal(new Date(cita.inicio)));
   if (esMenor && !(firma?.tutor_nombre ?? '').trim()) falla(MSG.tutor);
   if (!firmaCompleta(firma)) falla(MSG.firma);
   crearConsentimientos(ctx, cita, firma, esMenor);
@@ -717,7 +722,7 @@ export function completarCita(ctx: Ctx, citaId: string): void {
   exigirPersonal(ctx);
   const { db } = ctx;
   const cita = buscarCita(db, citaId);
-  if (cita.estado === 'cancelada') falla(MSG_EXTRA.citaCancelada);
+  if (cita.estado === 'cancelada' || cita.estado === 'no_asistio') falla(MSG_EXTRA.citaCancelada);
   if (!tieneConsentimiento(db, cita.id)) falla(MSG.sinConsentimiento);
   const yaConsumida = cita.estado === 'completada' || db.movimientos_inventario.some((m) => m.cita_id === cita.id && m.tipo === 'consumo');
   if (!yaConsumida) {
@@ -750,6 +755,7 @@ export function cambiarEstadoCita(ctx: Ctx, citaId: string, estado: EstadoCita):
   const cita = buscarCita(db, citaId);
   if (cita.estado === estado) return;
   if (cita.estado === 'cancelada') falla(MSG_EXTRA.citaCancelada);
+  if (cita.estado === 'completada') falla(MSG_EXTRA.citaCompletada);
   if (estado === 'cancelada') return cancelarCita(ctx, citaId, null);
   if (estado === 'completada') return completarCita(ctx, citaId);
   if (estado === 'en_curso' && !tieneConsentimiento(db, cita.id)) falla(MSG.sinConsentimiento);
@@ -762,6 +768,7 @@ export function cambiarEstadoCita(ctx: Ctx, citaId: string, estado: EstadoCita):
     if (!cab) falla(MSG.ocupado);
     cita.cabina_id = cab.id;
   }
+  if (estado === 'confirmada') cita.requiere_revision = false; // el personal ya la revisó
   cita.estado = estado;
   cita.actualizado_en = ahoraIso(ctx);
 }
@@ -905,7 +912,7 @@ export function registrarPago(ctx: Ctx, p: NuevoPago): string {
   if (!p.pedido_id && !p.cita_id) falla(MSG_EXTRA.pagoSinDestino);
   const pedido = p.pedido_id ? db.pedidos.find((x) => x.id === p.pedido_id) : null;
   if (p.pedido_id && !pedido) falla(MSG_EXTRA.pedidoNoExiste);
-  if (pedido && pedido.estado === 'cancelado') falla(MSG_EXTRA.pedidoCancelado);
+  if (pedido && (pedido.estado === 'cancelado' || pedido.estado === 'reembolsado')) falla(MSG_EXTRA.pedidoCancelado);
   if (p.cita_id && !db.citas.some((x) => x.id === p.cita_id)) falla(MSG_EXTRA.citaNoExiste);
   const id = uuid();
   db.pagos.push({

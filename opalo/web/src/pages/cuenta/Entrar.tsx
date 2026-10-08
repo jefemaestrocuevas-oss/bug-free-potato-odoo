@@ -15,10 +15,10 @@ import './cuenta.css';
 
 type Modo = 'entrar' | 'registro' | 'recuperar';
 
+// "Olvidé mi contraseña" no es pestaña (no cabía en el celular): se abre con el enlace bajo el formulario.
 const PESTANAS: { modo: Modo; texto: string }[] = [
   { modo: 'entrar', texto: 'Entrar' },
   { modo: 'registro', texto: 'Crear cuenta' },
-  { modo: 'recuperar', texto: 'Olvidé mi contraseña' },
 ];
 
 const PASSWORD_MIN = 8;
@@ -104,6 +104,10 @@ export default function Entrar() {
                 cambiarModo('entrar');
               }}
             />
+          ) : modo === 'recuperar' ? (
+            <div className="cu-entrar-panel">
+              <FormRecuperar onVolver={() => cambiarModo('entrar', true)} />
+            </div>
           ) : (
             <>
               <div className="pestanas cu-entrar-pestanas" role="tablist" aria-label="Opciones de acceso" ref={tabsRef} onKeyDown={alTeclearTabs}>
@@ -125,7 +129,15 @@ export default function Entrar() {
               </div>
               <div role="tabpanel" id={`panel-${modo}`} aria-labelledby={`tab-${modo}`} className="cu-entrar-panel">
                 {modo === 'entrar' && (
-                  <FormEntrar key={emailInicial} emailInicial={emailInicial} onListo={irDespues} onOlvide={() => cambiarModo('recuperar')} />
+                  <FormEntrar
+                    key={emailInicial}
+                    emailInicial={emailInicial}
+                    onListo={irDespues}
+                    onOlvide={() => {
+                      cambiarModo('recuperar');
+                      requestAnimationFrame(() => document.getElementById('rc-email')?.focus());
+                    }}
+                  />
                 )}
                 {modo === 'registro' && (
                   <FormRegistro
@@ -133,7 +145,6 @@ export default function Entrar() {
                     onConfirmarCorreo={(c) => setCorreoPendiente(c)}
                   />
                 )}
-                {modo === 'recuperar' && <FormRecuperar onVolver={() => cambiarModo('entrar')} />}
               </div>
             </>
           )}
@@ -533,6 +544,9 @@ function FormRecuperar({ onVolver }: { onVolver: () => void }) {
       )}
       <button type="submit" className="btn btn-primario btn-bloque" disabled={enviando}>
         {enviando ? 'Enviando…' : 'Enviarme el enlace'}
+      </button>
+      <button type="button" className="btn btn-texto btn-bloque cu-olvide" onClick={onVolver}>
+        Volver a iniciar sesión
       </button>
     </form>
   );

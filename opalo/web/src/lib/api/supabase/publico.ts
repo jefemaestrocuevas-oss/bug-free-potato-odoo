@@ -146,7 +146,14 @@ export function crearApiPublica(ctx: Contexto): ApiPublica {
         p_duracion_min: Number.isFinite(d) && d > 0 ? Math.round(d) : null,
         p_personal_id: personal_id || null,
       });
-      return (Array.isArray(data) ? (data as Fila[]) : []).map(aSlot);
+      // Rangos de horario encimados (o repetidos) dan el mismo bloque dos veces: se deja uno, como en el modo demostración.
+      const vistos = new Set<string>();
+      return (Array.isArray(data) ? (data as Fila[]) : []).map(aSlot).filter((s) => {
+        const k = `${s.personal_id}|${s.inicio}`;
+        if (vistos.has(k)) return false;
+        vistos.add(k);
+        return true;
+      });
     },
 
     async getDuracionReserva(items) {

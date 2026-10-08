@@ -1,0 +1,32 @@
+/*
+  Clientas (/admin/clientes). Prefijo .adm-cl-. Sólo tokens de color.
+*/
+.adm-cl-filtros .campo:not(.adm-busqueda) { flex: 0 1 240px; }
+.adm-cl-buscar { position: relative; }
+.adm-cl-buscar .input { padding-right: 40px; }
+.adm-cl-spinner { position: absolute; right: 12px; top: 50%; margin-top: -9px; }
+
+.adm-cl-conteo { margin: 0 0 8px; }
+.adm-cl-recargando { opacity: 0.6; transition: opacity 0.2s; }
+.adm-cl-vacio-boton { margin-top: 12px; }
+.adm-cl-ayuda-modal { margin: 0 0 14px; }
+
+.adm-cl-nombre { font-weight: 700; }
+.adm-cl-correo { max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Modo tabla: el nombre queda fijo al desplazar horizontalmente. */
+@container adm-clientas-tabla (min-width: 881px) {
+  .adm-cl-tabla th:first-child,
+  .adm-cl-tabla .adm-cl-col-nombre {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+  }
+  .adm-cl-tabla th:first-child { background: var(--fondo-alt); }
+  .adm-cl-tabla .adm-cl-col-nombre { background: var(--superficie); box-shadow: 1px 0 0 var(--linea-2); min-width: 170px; }
+  .adm-cl-tabla tbody tr:hover td { background: var(--fondo); }
+}
+
+@media (max-width: 719px) {
+  .adm-cl-filtros .campo, .adm-cl-filtros .campo:not(.adm-busqueda) { flex: 1 1 100%; min-width: 0; }
+}

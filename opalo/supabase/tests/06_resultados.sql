@@ -137,4 +137,26 @@ begin
   raise notice 'OK - v_gastos_por_vencer: vencido, próximo y al corriente';
 end $$;
 
+-- Un gasto con periodo futuro (renta adelantada) no desplaza a los 12 meses que terminan en el actual
+do $$
+declare
+  v_admin uuid := pruebas.usuario('admin@demo.opalo.mx');
+  v_actual date := date_trunc('month', public.hoy_local())::date;
+  v_cat uuid := (select id from public.categorias_gasto where slug = 'otros');
+begin
+  insert into public.gastos (categoria_id, concepto, monto, fecha, periodo)
+  select v_cat, 'Gasto del mes (prueba)', 10, public.hoy_local(), (v_actual - make_interval(months => n))::date
+    from generate_series(0, 11) n;
+  insert into public.gastos (categoria_id, concepto, monto, fecha, periodo)
+  values (v_cat, 'Renta adelantada (prueba)', 10, public.hoy_local(), (v_actual + interval '1 month')::date);
+
+  perform pruebas.como(v_admin);
+  perform pruebas.igual((select max(mes) from public.v_resultado_mensual), v_actual, 'no incluye meses futuros');
+  perform pruebas.igual((select min(mes) from public.v_resultado_mensual), (v_actual - interval '11 months')::date,
+                        'conserva el mes de hace 11 meses');
+  perform pruebas.igual((select count(*)::int from public.v_resultado_mensual), 12, 'los 12 meses que terminan en el actual');
+  perform pruebas.como_postgres();
+  raise notice 'OK - resultados: sin meses futuros';
+end $$;
+
 rollback;

@@ -124,6 +124,13 @@ $$;
 -- -----------------------------------------------------------------------------
 -- Alta de usuarios: perfil + clienta (nueva o vinculada por email)
 -- raw_user_meta_data: { nombre, apellidos, telefono, fecha_nacimiento ('YYYY-MM-DD') }
+--
+-- Vincular con una clienta que ya registró el personal (mostrador, WhatsApp) da acceso a su
+-- historial (citas, ficha de salud, consentimientos, créditos). Por eso SÓLO se vincula cuando
+-- el correo ya está confirmado (auth.users.email_confirmed_at): al registrarse si ya viene
+-- confirmado, o después, cuando lo confirma (trigger on_auth_user_confirmed). Mientras no lo
+-- confirme no se le crea otra ficha, para no duplicarla. Requiere "Confirm email" activo en
+-- Supabase Auth (ver supabase/README.md §3).
 -- -----------------------------------------------------------------------------
 create or replace function public.tg_nuevo_usuario()
 returns trigger
@@ -162,6 +169,10 @@ begin
   end if;
 
   if v_cliente is not null then
+    if new.email_confirmed_at is null then
+      -- Aún no demuestra que el correo es suyo: se vincula cuando lo confirme.
+      return new;
+    end if;
     -- La clienta ya existía (la registró el personal): se vincula y se completan huecos.
     update public.clientes c
        set usuario_id       = new.id,
@@ -188,10 +199,38 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.tg_nuevo_usuario();
 
+create trigger on_auth_user_confirmed
+  after update of email_confirmed_at on auth.users
+  for each row
+  when (old.email_confirmed_at is null and new.email_confirmed_at is not null)
+  execute function public.tg_nuevo_usuario();
+
+-- Al borrar una cuenta de Auth, la ficha de la clienta se conserva (historial; usuario_id → null
+-- por la llave foránea) pero se le quita el correo: así nadie puede reclamarla después
+-- registrándose con ese correo. Si la misma clienta vuelve, el personal le captura de nuevo su
+-- correo y, al confirmarlo ella, se vuelve a vincular.
+create or replace function public.tg_usuario_borrado()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+begin
+  update public.clientes set email = null where usuario_id = old.id;
+  return old;
+end;
+$$;
+
+create trigger on_auth_user_deleted
+  before delete on auth.users
+  for each row execute function public.tg_usuario_borrado();
+
 -- -----------------------------------------------------------------------------
 -- Una clienta sólo puede cambiar sus datos básicos (ESPEC §3 / §6.1).
 -- El privilegio por columnas no basta porque personal y clientas comparten el rol
 -- "authenticated" de Postgres; este trigger es el candado para las clientas.
+-- La fecha de nacimiento la captura una sola vez (decide si es menor de edad y si necesita
+-- tutor); después sólo el personal la corrige.
 -- (No es security definer a propósito: current_user debe ser el rol que llama.)
 -- -----------------------------------------------------------------------------
 create or replace function public.tg_clientes_proteger()
@@ -208,6 +247,13 @@ begin
        or new.notas_internas   is distinct from old.notas_internas
        or new.creado_en        is distinct from old.creado_en then
       raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+    end if;
+    if old.fecha_nacimiento is not null and new.fecha_nacimiento is distinct from old.fecha_nacimiento then
+      raise exception using
+        message = format('Tu fecha de nacimiento ya está registrada; si hay un error, escríbenos por WhatsApp al %s.',
+                         coalesce(public.telefono_legible((public.configuracion_actual()).telefono_whatsapp),
+                                  '442 170 1466')),
+        errcode = 'P0001';
     end if;
   end if;
   return new;

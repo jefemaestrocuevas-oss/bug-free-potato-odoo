@@ -464,6 +464,24 @@ describe('crearApiSupabaseCon · público', () => {
     expect(llamadas[0].args).toEqual({ p_fecha: '2026-11-03', p_duracion_min: 60, p_personal_id: null });
     expect(slots).toEqual([{ inicio: '2026-11-03T16:00:00.000Z', fin: '2026-11-03T17:00:00.000Z', personal_id: 'a', personal_nombre: 'Ana' }]);
   });
+
+  it('getHorariosDisponibles deja un solo bloque por persona y hora aunque los rangos se encimen', async () => {
+    const bloque = (personal_id: string, hora: string) => ({
+      inicio: `2026-11-03T${hora}:00:00+00:00`,
+      fin: `2026-11-03T${Number(hora) + 1}:00:00+00:00`,
+      personal_id,
+      personal_nombre: personal_id === 'a' ? 'Ana' : 'Bea',
+    });
+    const { api } = apiCon((l) =>
+      l.rpc === 'horarios_disponibles' ? { data: [bloque('a', '16'), bloque('a', '16'), bloque('b', '16'), bloque('a', '17')] } : undefined,
+    );
+    const slots = await api.getHorariosDisponibles('2026-11-03', 60);
+    expect(slots.map((s) => [s.personal_id, s.inicio])).toEqual([
+      ['a', '2026-11-03T16:00:00.000Z'],
+      ['b', '2026-11-03T16:00:00.000Z'],
+      ['a', '2026-11-03T17:00:00.000Z'],
+    ]);
+  });
 });
 
 describe('crearApiSupabaseCon · clienta', () => {
@@ -694,6 +712,118 @@ describe('crearApiSupabaseCon · panel interno', () => {
     await expect(api.admin.guardarHorarios('a', [{ dia_semana: 2, hora_inicio: '19:00', hora_fin: '10:00' }])).rejects.toThrow(
       'La hora de salida debe ser después de la de entrada.',
     );
+  });
+
+  it('guardarHorarios conserva los rangos que no cambian y limpia los repetidos', async () => {
+    const previos = [
+      { id: 'h-mar', dia_semana: 2, hora_inicio: '10:00:00', hora_fin: '19:00:00' },
+      { id: 'h-mar-copia', dia_semana: 2, hora_inicio: '10:00:00', hora_fin: '19:00:00' },
+      { id: 'h-mie', dia_semana: 3, hora_inicio: '10:00:00', hora_fin: '19:00:00' },
+    ];
+    const { api, llamadas } = apiCon((l) => (l.tabla === 'horarios' && ops(l, 'select').length ? { data: previos } : undefined));
+    await api.admin.guardarHorarios('a', [
+      { dia_semana: 2, hora_inicio: '10:00', hora_fin: '19:00' },
+      { dia_semana: 3, hora_inicio: '10:00', hora_fin: '18:00' },
+      { dia_semana: 3, hora_inicio: '10:00', hora_fin: '18:00' },
+    ]);
+    const hs = llamadas.filter((l) => l.tabla === 'horarios');
+    expect(hs).toHaveLength(3);
+    expect(ops(hs[1], 'insert')[0][0]).toEqual([{ personal_id: 'a', dia_semana: 3, hora_inicio: '10:00', hora_fin: '18:00' }]);
+    expect(ops(hs[2], 'in')).toEqual([['id', ['h-mar-copia', 'h-mie']]]);
+
+    // Sin cambios: no se escribe nada.
+    const sinCambios = apiCon((l) => (l.tabla === 'horarios' && ops(l, 'select').length ? { data: previos.slice(0, 1) } : undefined));
+    await sinCambios.api.admin.guardarHorarios('a', [{ dia_semana: 2, hora_inicio: '10:00', hora_fin: '19:00' }]);
+    expect(sinCambios.llamadas).toHaveLength(1);
+  });
+
+  describe('guardados de varios pasos que fallan a medias', () => {
+    const SIN_RED = () => {
+      throw new TypeError('Failed to fetch');
+    };
+    const A_MEDIAS = 'Solo se guardó una parte de los cambios: vuelve a guardar para completarlos.';
+    const PAQUETE = {
+      slug: 'combo',
+      nombre: 'Combo',
+      descripcion: null,
+      tipo: 'combo' as const,
+      precio: 500,
+      duracion_min: null,
+      vigencia_dias: null,
+      activo: true,
+      orden: 1,
+      items: [{ servicio_id: 's1', cantidad: 1 }],
+    };
+    const esBorrado = (l: Llamada) => ops(l, 'delete').length > 0;
+    const esUpsert = (l: Llamada) => ops(l, 'upsert').length > 0;
+
+    it('guardarHorarios: si no se pudieron quitar los rangos viejos, pide volver a guardar', async () => {
+      const { api } = apiCon((l) => {
+        if (l.tabla !== 'horarios') return undefined;
+        if (ops(l, 'select').length) return { data: [{ id: 'h-viejo', dia_semana: 2, hora_inicio: '10:00:00', hora_fin: '19:00:00' }] };
+        if (esBorrado(l)) SIN_RED();
+        return undefined;
+      });
+      const e = await api.admin.guardarHorarios('a', [{ dia_semana: 2, hora_inicio: '10:00', hora_fin: '18:00' }]).catch((x: unknown) => x);
+      expect(e).toBeInstanceOf(ErrorOpalo);
+      expect((e as ErrorOpalo).message).toBe(`${M.red} ${A_MEDIAS}`);
+      expect((e as ErrorOpalo).codigo).toBe('red');
+    });
+
+    it('guardarHorarios: si sólo había que borrar, el error es el de siempre', async () => {
+      const { api } = apiCon((l) => {
+        if (l.tabla !== 'horarios') return undefined;
+        if (ops(l, 'select').length) return { data: [{ id: 'h-viejo', dia_semana: 2, hora_inicio: '10:00:00', hora_fin: '19:00:00' }] };
+        return SIN_RED();
+      });
+      await expect(api.admin.guardarHorarios('a', [])).rejects.toThrow(new ErrorOpalo(M.red));
+    });
+
+    it('guardarReceta: si falla el borrado de lo que sobra, pide volver a guardar', async () => {
+      const { api } = apiCon((l) => (l.tabla === 'recetas_servicio' && esBorrado(l) ? SIN_RED() : undefined));
+      await expect(api.admin.guardarReceta('s1', [{ producto_id: 'cera', cantidad: 20, notas: null }])).rejects.toThrow(`${M.red} ${A_MEDIAS}`);
+      const vacia = apiCon((l) => (l.tabla === 'recetas_servicio' ? SIN_RED() : undefined));
+      await expect(vacia.api.admin.guardarReceta('s1', [])).rejects.toThrow(new ErrorOpalo(M.red));
+    });
+
+    it('guardarPaquete (edición): si fallan los servicios o el borrado, pide volver a guardar', async () => {
+      for (const falla of [esUpsert, esBorrado]) {
+        const { api } = apiCon((l) => {
+          if (l.tabla === 'paquetes') return { data: { id: 'p1' } };
+          if (l.tabla === 'paquete_servicios' && falla(l)) return SIN_RED();
+          return undefined;
+        });
+        await expect(api.admin.guardarPaquete({ ...PAQUETE, id: 'p1' })).rejects.toThrow(`${M.red} ${A_MEDIAS}`);
+      }
+    });
+
+    it('guardarPaquete (nuevo): si fallan los servicios, quita el paquete recién creado', async () => {
+      const { api, llamadas } = apiCon((l) => {
+        if (l.tabla === 'paquetes' && !esBorrado(l)) return { data: { id: 'p-nuevo' } };
+        if (l.tabla === 'paquete_servicios') return { error: { code: '23503', message: 'insert or update violates foreign key constraint' }, status: 409 };
+        return undefined;
+      });
+      await expect(api.admin.guardarPaquete(PAQUETE)).rejects.toThrow(new ErrorOpalo('Uno de los datos elegidos ya no existe.'));
+      const quitar = llamadas.find((l) => l.tabla === 'paquetes' && esBorrado(l));
+      expect(ops(quitar, 'eq')).toEqual([['id', 'p-nuevo']]);
+      expect(llamadas.filter((l) => l.tabla === 'paquete_servicios')).toHaveLength(1);
+    });
+
+    it('guardarPaquete (nuevo): si tampoco se puede quitar, explica cómo terminarlo', async () => {
+      const { api } = apiCon((l) => {
+        if (l.tabla === 'paquetes' && !esBorrado(l)) return { data: { id: 'p-nuevo' } };
+        return SIN_RED();
+      });
+      await expect(api.admin.guardarPaquete(PAQUETE)).rejects.toThrow(
+        `${M.red} El paquete se creó sin sus servicios: cierra este formulario, ábrelo desde la lista y vuelve a guardar.`,
+      );
+    });
+
+    it('guardarPaquete (nuevo): no hay borrado de servicios sobrantes', async () => {
+      const { api, llamadas } = apiCon((l) => (l.tabla === 'paquetes' ? { data: { id: 'p-nuevo' } } : undefined));
+      await api.admin.guardarPaquete(PAQUETE);
+      expect(llamadas.filter((l) => l.tabla === 'paquete_servicios').map((l) => l.ops[0][0])).toEqual(['upsert']);
+    });
   });
 
   it('getClientes filtra en el servidor y afina sin acentos en el navegador', async () => {
