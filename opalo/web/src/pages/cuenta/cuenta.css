@@ -1,0 +1,172 @@
+/*
+  Portal de clientas (/cuenta), acceso (/entrar) y firma pendiente (/cuenta/firmar/:id).
+  Sólo tokens (var(--…)) para que funcione el modo oscuro. Prefijo: .cu-
+*/
+
+.cu-cabeza {
+  background: var(--fondo-alt);
+  border-bottom: 1px solid var(--linea-2);
+  padding: clamp(24px, 5vw, 44px) 0 clamp(20px, 4vw, 32px);
+}
+.cu-cabeza-fila { align-items: flex-end; }
+.cu-titulo { color: var(--verde); font-size: clamp(2rem, 4.5vw, 3rem); margin: 0 0 8px; overflow-wrap: anywhere; }
+.cu-intro { margin: 0; max-width: 60ch; }
+.cu-contenido { padding-top: clamp(18px, 3vw, 28px); padding-bottom: clamp(40px, 6vw, 72px); }
+.cu-angosto { max-width: 820px; }
+.cu-h2 { font-size: clamp(1.5rem, 3vw, 1.9rem); color: var(--tinta); margin: 0; }
+.cu-h2:focus { outline: none; }
+.cu-sin-margen { margin: 0; }
+.cu-mayuscula { display: inline-block; }
+.cu-mayuscula::first-letter { text-transform: uppercase; }
+
+/* Pestañas como enlaces (cambian la URL) */
+.cu-pestanas { margin-bottom: 24px; scrollbar-width: thin; }
+.cu-pestana { text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }
+.cu-pestana:hover { color: var(--verde); }
+.cu-pestana[aria-current='page'] { color: var(--verde); border-bottom-color: var(--verde); }
+
+/* Secciones */
+.cu-seccion { display: flex; flex-direction: column; gap: 16px; }
+.cu-seccion > .aviso { margin: 0; }
+.cu-seccion-cabeza { align-items: center; }
+.cu-bloque { margin-top: 12px; }
+.cu-bloque > .cu-h2 { margin-bottom: 12px; }
+.cu-lista { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.cu-tarjeta {
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  border-radius: var(--radio);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.cu-acciones { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+@media (max-width: 479px) {
+  .cu-acciones > .btn { flex: 1 1 100%; min-height: 44px; }
+}
+
+/* Citas */
+.cu-cita { flex-direction: row; gap: 16px; align-items: flex-start; }
+.cu-cita-proxima { box-shadow: var(--sombra); }
+.cu-cita-fecha {
+  flex: none;
+  width: 64px;
+  border-radius: var(--radio-sm);
+  background: var(--verde-suave);
+  color: var(--verde);
+  text-align: center;
+  padding: 8px 4px;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+.cu-cita-dia { font-family: var(--display); font-size: 1.9rem; font-weight: 600; }
+.cu-cita-mes { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+.cu-cita-cuerpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.cu-cita-cabeza { align-items: flex-start; }
+.cu-cita-titulo { font-family: var(--display); font-size: 1.3rem; font-weight: 600; margin: 0; color: var(--tinta); overflow-wrap: anywhere; }
+@media (max-width: 479px) {
+  .cu-cita { flex-direction: column; }
+  .cu-cita-fecha { display: none; }
+}
+
+.cu-datos { margin: 0; display: grid; gap: 6px 18px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 640px) { .cu-datos { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.cu-datos > div { display: flex; flex-direction: column; min-width: 0; }
+.cu-datos dt { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tinta-3); }
+.cu-datos dd { margin: 0; overflow-wrap: anywhere; }
+
+.cu-aviso-cita { margin: 0; }
+.cu-aviso-cita p { margin: 0 0 6px; }
+.cu-aviso-cita p:last-child { margin: 0; }
+.cu-aviso-cita details summary { cursor: pointer; font-weight: 700; }
+.cu-aviso-cita ul { margin: 6px 0 0; padding-left: 1.2em; }
+.cu-nota-cancelar { margin: 0; }
+
+/* Pedidos */
+.cu-articulos { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--linea-2); }
+.cu-articulos li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--linea-2); }
+.cu-articulos li > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.cu-detalle { display: block; font-size: 0.82rem; color: var(--tinta-3); }
+.cu-totales { margin: 0; display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+.cu-totales > div { display: flex; justify-content: space-between; gap: 12px; }
+.cu-totales dt { color: var(--tinta-2); }
+.cu-totales dd { margin: 0; font-weight: 700; }
+.cu-totales-falta dt, .cu-totales-falta dd { color: var(--alerta); }
+
+/* Servicios prepagados */
+.cu-regalo { display: flex; flex-direction: column; gap: 10px; background: var(--oro-suave); border-radius: var(--radio-sm); padding: 12px 14px; }
+.cu-codigo { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.cu-codigo-texto {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  background: var(--superficie);
+  border: 1px dashed var(--oro);
+  border-radius: var(--radio-sm);
+  padding: 4px 12px;
+  color: var(--tinta);
+}
+.cu-canjear-form { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.cu-canjear-form .campo { flex: 1 1 220px; }
+.cu-codigo-input { text-transform: uppercase; letter-spacing: 0.12em; font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; }
+.cu-anteriores summary { cursor: pointer; font-weight: 700; color: var(--tinta-2); min-height: 44px; display: flex; align-items: center; }
+.cu-lista-simple { list-style: none; margin: 0; padding: 0; }
+.cu-lista-simple li { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--linea-2); }
+
+/* Documentos */
+.cu-huella {
+  display: inline-block;
+  max-width: 100%;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  background: var(--fondo-alt);
+  border-radius: var(--radio-sm);
+  padding: 2px 6px;
+  color: var(--tinta-2);
+}
+.cu-firma { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+
+/* Datos */
+.cu-form { gap: 4px; }
+.cu-form .aviso { margin: 8px 0; }
+.cu-dato-fijo { min-height: 44px; display: flex; align-items: center; padding: 0 12px; background: var(--fondo-alt); border-radius: var(--radio-sm); overflow-wrap: anywhere; }
+.cu-promos { margin: 4px 0 12px; }
+.cu-salir { margin-top: 8px; }
+
+/* Entrar */
+.cu-entrar { display: grid; gap: 28px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 960px) { .cu-entrar { grid-template-columns: minmax(0, 560px) minmax(0, 1fr); } }
+.cu-entrar-caja {
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  border-radius: var(--radio);
+  box-shadow: var(--sombra);
+  padding: clamp(16px, 3vw, 28px);
+  min-width: 0;
+}
+.cu-entrar-pestanas { margin-bottom: 18px; }
+.cu-entrar-pestanas .pestana { min-height: 44px; }
+.cu-entrar-panel:focus { outline: none; }
+.cu-form-acceso { display: flex; flex-direction: column; gap: 4px; }
+.cu-form-acceso .aviso { margin: 4px 0 10px; }
+.cu-form-acceso > p { margin: 0 0 10px; }
+.cu-olvide { margin-top: 6px; }
+.cu-password { position: relative; display: flex; }
+.cu-password .input { padding-right: 96px; }
+.cu-password-ver { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); min-height: 36px; }
+.cu-confirma-correo { display: flex; flex-direction: column; gap: 10px; }
+.cu-confirma-correo p { margin: 0; }
+
+.cu-demo { display: flex; flex-direction: column; gap: 12px; }
+.cu-demo-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.cu-demo-cuenta { gap: 6px; border-color: var(--oro); background: var(--superficie); }
+.cu-demo-cuenta .btn { align-self: flex-start; margin-top: 4px; }
+.cu-demo-cuenta .ayuda { overflow-wrap: anywhere; }
+
+/* Firma pendiente */
+.cu-firmar .rv-final-datos dd::first-letter { text-transform: uppercase; }

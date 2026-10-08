@@ -1,0 +1,86 @@
+/* Políticas. Sólo tokens. */
+
+.pol-grupo { margin-bottom: clamp(32px, 5vw, 48px); }
+.pol-grupo h2 { color: var(--verde); margin-bottom: 12px; }
+.pol-grupo-texto { display: flex; gap: 10px; align-items: flex-start; color: var(--tinta-2); max-width: 70ch; }
+.pol-grupo-texto .sp-icono { flex: none; color: var(--oro-osc); margin-top: 3px; }
+.pol-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+}
+.pol-lista > li { display: flex; }
+.pol-tarjeta {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 56px 18px 18px;
+  border-radius: var(--radio-lg);
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  box-shadow: var(--sombra);
+  color: var(--tinta);
+  text-decoration: none;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.pol-tarjeta:hover { border-color: var(--oro); transform: translateY(-2px); color: var(--tinta); }
+.pol-tarjeta-tipo { font-size: 0.74rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--oro-osc); }
+.pol-tarjeta-titulo { font-family: var(--display); font-size: 1.4rem; font-weight: 600; line-height: 1.2; color: var(--verde); }
+.pol-tarjeta-meta { font-size: 0.86rem; color: var(--tinta-2); }
+.pol-tarjeta-ir {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--verde-suave);
+  color: var(--verde);
+}
+.pol-nota { color: var(--tinta-2); font-size: 0.92rem; max-width: 75ch; padding: 14px 18px; border-radius: var(--radio); background: var(--fondo-alt); }
+
+/* Documento */
+.pol-migas { font-size: 0.9rem; color: var(--tinta-2); margin-bottom: 18px; overflow-wrap: anywhere; }
+.pol-migas a { font-weight: 700; }
+.pol-doc-rejilla { display: grid; gap: 32px; grid-template-columns: 1fr; align-items: start; }
+@media (min-width: 1000px) { .pol-doc-rejilla { grid-template-columns: minmax(0, 1fr) 260px; gap: 48px; } }
+.pol-articulo {
+  min-width: 0;
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  border-radius: var(--radio-lg);
+  padding: clamp(20px, 5vw, 48px);
+  box-shadow: var(--sombra);
+}
+.pol-doc-cabeza { border-bottom: 1px solid var(--linea); padding-bottom: 18px; margin-bottom: 24px; }
+.pol-doc-cabeza h1 { color: var(--verde); font-size: clamp(2rem, 5vw, 2.8rem); overflow-wrap: anywhere; }
+.pol-datos { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 8px; }
+.pol-datos > div { padding: 8px 14px; border-radius: var(--radio); background: var(--fondo-alt); }
+.pol-datos dt { font-size: 0.74rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--tinta-2); }
+.pol-datos dd { margin: 0; font-weight: 700; }
+.pol-huella { font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 0.95rem; letter-spacing: 0.06em; color: var(--verde); }
+.pol-huella-ayuda { font-size: 0.85rem; color: var(--tinta-2); margin: 6px 0 4px; max-width: 70ch; }
+.pol-imprimir { margin-left: -8px; }
+.pol-texto { max-width: 72ch; overflow-wrap: break-word; }
+.pol-texto p, .pol-texto li { color: var(--tinta); }
+.pol-otras { position: sticky; top: 96px; }
+.pol-otras h2 { font-family: var(--cuerpo); font-size: 0.8rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--tinta-2); margin: 0 0 10px; }
+.pol-otras ul { list-style: none; margin: 0; padding: 0; border-left: 2px solid var(--linea-2); }
+.pol-otras a { display: block; padding: 8px 0 8px 14px; margin-left: -2px; border-left: 2px solid transparent; color: var(--tinta-2); text-decoration: none; font-weight: 600; }
+.pol-otras a:hover { color: var(--verde); border-left-color: var(--oro); }
+@media (max-width: 999px) { .pol-otras { position: static; } }
+
+@media print {
+  .pol-migas, .pol-otras, .pol-imprimir { display: none !important; }
+  .pol-articulo { border: 0; box-shadow: none; padding: 0; }
+  .pol-doc-rejilla { display: block; }
+}

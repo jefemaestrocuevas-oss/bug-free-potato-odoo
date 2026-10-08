@@ -1,0 +1,155 @@
+/* Piezas compartidas del sitio público (catálogo, compra, decoración). Sólo tokens. */
+
+/* ---------- Decoración ---------- */
+.arte-hero { position: relative; width: 100%; max-width: 440px; aspect-ratio: 1; margin: 0 auto; }
+.arte-hero-fondo { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.arte-hero-fondo .f-verde { fill: var(--verde-suave); }
+.arte-hero-fondo .f-oro { fill: var(--oro-suave); }
+.arte-hero-fondo .f-linea { fill: none; stroke: var(--oro); stroke-width: 1; opacity: 0.45; stroke-dasharray: 2 6; }
+.arte-hero-fondo .f-linea-2 { stroke-dasharray: none; opacity: 0.25; }
+.arte-hero-gema {
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  width: 46%;
+  transform: translate(-50%, -50%);
+  animation: flotar 7s ease-in-out infinite;
+}
+.arte-hero-gema svg { display: block; width: 100%; height: auto; overflow: visible; }
+.arte-hero-gema .g-trazo { stroke: var(--verde); stroke-width: 0.9; }
+.arte-hero-gema .g-cara-1 { fill: var(--oro-suave); }
+.arte-hero-gema .g-cara-2 { fill: var(--superficie); }
+.arte-hero-gema .g-cara-3 { fill: var(--verde-suave); }
+.arte-hero-gema .g-cara-4 { fill: var(--fondo-alt); }
+.arte-hero-gema .g-cara-5 { fill: var(--oro-suave); }
+.sp-destello { position: absolute; color: var(--oro); }
+.arte-hero .d1 { width: 9%; top: 14%; left: 18%; animation: titilar 4s ease-in-out infinite; }
+.arte-hero .d2 { width: 6%; top: 24%; right: 14%; animation: titilar 5s ease-in-out 1s infinite; }
+.arte-hero .d3 { width: 7%; bottom: 14%; right: 24%; color: var(--verde); animation: titilar 6s ease-in-out 2s infinite; }
+@keyframes flotar { 0%, 100% { transform: translate(-50%, -50%); } 50% { transform: translate(-50%, calc(-50% - 10px)); } }
+@keyframes titilar { 0%, 100% { opacity: 0.9; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.8); } }
+
+.sp-onda { display: block; width: 100%; height: 36px; fill: var(--fondo-alt); }
+.sp-onda-invertida { transform: scaleY(-1); }
+
+.separador-gema { display: flex; align-items: center; gap: 14px; color: var(--oro); margin: 0 auto 18px; max-width: 220px; }
+.separador-gema span { flex: 1; height: 1px; background: var(--oro); opacity: 0.55; }
+
+.patron-facetas { display: block; }
+
+.sp-medallon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--verde-suave);
+  color: var(--verde);
+  box-shadow: inset 0 0 0 1px var(--linea-2);
+}
+.sp-medallon-oro { background: var(--oro-suave); color: var(--oro-osc); }
+
+/* ---------- Insignias y precios ---------- */
+.insignia-pronto {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--oro-suave);
+  color: var(--tinta);
+  border: 1px solid var(--oro);
+}
+.sp-precio { font-weight: 800; color: var(--verde); white-space: nowrap; }
+.sp-precio-pendiente { font-weight: 700; font-style: italic; color: var(--tinta-2); font-size: 0.9rem; }
+
+/* ---------- Fila de servicio (menú de spa) ---------- */
+.sp-menu-servicios { list-style: none; margin: 0; padding: 0; }
+.fila-servicio {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px 20px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--linea-2);
+}
+.fila-servicio:first-child { border-top: 1px solid var(--linea-2); }
+@media (min-width: 720px) {
+  .fila-servicio { grid-template-columns: minmax(0, 1fr) 280px; align-items: center; padding: 18px 4px; }
+  .fs-linea { flex-wrap: nowrap; }
+}
+.fs-principal { min-width: 0; }
+.fs-linea { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
+.fs-nombre { font-size: 1.35rem; margin: 0; color: var(--tinta); min-width: 0; overflow-wrap: anywhere; }
+.fs-puntos { flex: 1 1 24px; min-width: 16px; border-bottom: 2px dotted var(--linea); transform: translateY(-5px); }
+.fs-precio { font-size: 1.05rem; }
+.fs-zonas, .fs-desc { margin: 4px 0 0; color: var(--tinta-2); font-size: 0.93rem; max-width: 62ch; }
+.fs-etiqueta { font-weight: 700; color: var(--tinta); }
+.fs-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0 0; font-size: 0.85rem; color: var(--tinta-2); }
+.fs-meta span + span::before { content: '·'; margin-right: 14px; color: var(--oro-osc); }
+.fs-acciones { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (min-width: 720px) { .fs-acciones { justify-content: flex-end; } }
+.fila-servicio.es-pronto .fs-nombre { color: var(--tinta-2); }
+
+/* ---------- Tarjeta de paquete ---------- */
+.tarjeta-paquete {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  border-radius: var(--radio-lg);
+  padding: 24px 20px 20px;
+  box-shadow: var(--sombra);
+  overflow: hidden;
+}
+.tarjeta-paquete::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--verde), var(--oro));
+}
+.tp-cabeza { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.tp-tipo { font-size: 0.75rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--oro-osc); }
+.tp-ahorro {
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--verde-suave);
+  color: var(--verde);
+  white-space: nowrap;
+}
+.tp-nombre { font-size: 1.7rem; margin: 0 0 6px; color: var(--verde); }
+.tp-desc { color: var(--tinta-2); font-size: 0.95rem; margin: 0 0 14px; }
+.tp-incluye-titulo { font-size: 0.78rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--tinta-2); margin: 0 0 6px; }
+.tp-incluye { list-style: none; margin: 0 0 18px; padding: 0; display: grid; gap: 6px; }
+.tp-incluye li { display: flex; gap: 8px; align-items: flex-start; font-size: 0.97rem; }
+.tp-incluye .sp-icono { flex: none; color: var(--oro-osc); margin-top: 3px; }
+.tp-pie { margin-top: auto; padding-top: 16px; border-top: 1px dashed var(--linea); display: grid; gap: 14px; }
+.tp-precios { display: flex; flex-direction: column; gap: 2px; }
+.tp-precio { font-family: var(--display); font-size: 2.1rem; line-height: 1.1; font-weight: 700; }
+.tp-precio.sp-precio-pendiente { font-family: var(--cuerpo); font-size: 1rem; }
+.tp-separado { font-size: 0.88rem; color: var(--tinta-2); }
+.tp-separado s { text-decoration-thickness: 1.5px; }
+.tp-meta { font-size: 0.85rem; color: var(--tinta-2); }
+.tp-acciones { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.sp-rejilla-paquetes { display: grid; gap: 18px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); }
+
+/* ---------- Comprar (con regalo) ---------- */
+.sp-comprar { display: grid; gap: 10px; }
+.sp-comprar-regalo { font-weight: 600; }
+.sp-comprar-regalo-texto { display: inline-flex; align-items: center; gap: 6px; }
+.sp-comprar-regalo-texto .sp-icono { color: var(--oro-osc); }
+.sitio-publico .sp-comprar-para { margin: 0; }
+.sitio-publico .sp-comprar-error { color: var(--error); font-weight: 700; }
+.sitio-publico .sp-ayuda-legible { color: var(--tinta-2); }
+.sp-comprar-boton { justify-self: start; }

@@ -1,0 +1,143 @@
+// Registrar un pago de una cita o de un pedido (con propina aparte para citas).
+import { useState, type FormEvent } from 'react';
+import { api, type MetodoPago } from '../../lib/api';
+import { dinero, ETIQUETA_METODO_PAGO } from '../../lib/format';
+import { useAccion } from '../../lib/useAsync';
+import { MensajeError } from '../ui/Estado';
+import { Modal } from './Modal';
+import { aNumero, textoONulo } from './util';
+
+const METODOS = Object.keys(ETIQUETA_METODO_PAGO) as MetodoPago[];
+
+interface Props {
+  destino: { tipo: 'cita' | 'pedido'; id: string; descripcion: string };
+  total: number;
+  pagado: number;
+  metodoSugerido?: MetodoPago | null;
+  onCerrar: () => void;
+  onListo: (mensaje: string) => void;
+}
+
+export function RegistrarPago({ destino, total, pagado, metodoSugerido, onCerrar, onListo }: Props) {
+  const saldo = Math.max(0, Math.round((total - pagado) * 100) / 100);
+  const [monto, setMonto] = useState(saldo > 0 ? String(saldo) : '');
+  const [metodo, setMetodo] = useState<MetodoPago>(metodoSugerido ?? 'efectivo');
+  const [referencia, setReferencia] = useState('');
+  const [propina, setPropina] = useState('');
+  const { ejecutar, enviando, error, setError } = useAccion(async () => {
+    const m = aNumero(monto);
+    const p = aNumero(propina) ?? 0;
+    if (m === null || m <= 0) throw new Error('Escribe un monto mayor a cero.');
+    if (p < 0) throw new Error('La propina no puede ser negativa.');
+    await api.admin.registrarPago({
+      monto: m,
+      metodo,
+      cita_id: destino.tipo === 'cita' ? destino.id : null,
+      pedido_id: destino.tipo === 'pedido' ? destino.id : null,
+      referencia: textoONulo(referencia),
+      propina: destino.tipo === 'cita' ? p : 0,
+    });
+    return { m, p };
+  });
+
+  const enviar = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const r = await ejecutar();
+    if (!r) return;
+    const cubre = pagado + r.m >= total - 0.005;
+    let mensaje = `Pago de ${dinero(r.m)} registrado.`;
+    if (r.p > 0) mensaje += ` Propina de ${dinero(r.p)} registrada aparte.`;
+    if (destino.tipo === 'pedido' && cubre) mensaje += ' El pedido quedó pagado y sus servicios ya están disponibles como créditos de la clienta.';
+    onListo(mensaje);
+  };
+
+  const pideReferencia = metodo === 'transferencia' || metodo === 'tarjeta' || metodo === 'mercado_pago';
+
+  return (
+    <Modal
+      titulo="Registrar pago"
+      onCerrar={onCerrar}
+      bloqueado={enviando}
+      pie={
+        <>
+          <button type="button" className="btn btn-texto" onClick={onCerrar} disabled={enviando}>
+            Cancelar
+          </button>
+          <button type="submit" form="form-pago" className="btn btn-primario" disabled={enviando}>
+            {enviando ? 'Guardando…' : 'Registrar pago'}
+          </button>
+        </>
+      }
+    >
+      <form id="form-pago" onSubmit={enviar} className="pila">
+        <p className="texto-2 adm-sin-margen">{destino.descripcion}</p>
+        <dl className="adm-totales">
+          <div>
+            <dt>Total</dt>
+            <dd className="num">{dinero(total, 'Por confirmar')}</dd>
+          </div>
+          <div>
+            <dt>Pagado</dt>
+            <dd className="num">{dinero(pagado)}</dd>
+          </div>
+          <div>
+            <dt>Saldo</dt>
+            <dd className="num">
+              <strong>{dinero(saldo)}</strong>
+            </dd>
+          </div>
+        </dl>
+        <div className="adm-form-2">
+          <div className="campo">
+            <label className="etiqueta" htmlFor="pago-monto">
+              Monto que recibes
+            </label>
+            <input id="pago-monto" className="input num" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} required />
+            {saldo > 0 && <span className="ayuda">Sugerido: el saldo pendiente ({dinero(saldo)}).</span>}
+          </div>
+          <div className="campo">
+            <label className="etiqueta" htmlFor="pago-metodo">
+              Método
+            </label>
+            <select id="pago-metodo" className="input" value={metodo} onChange={(e) => setMetodo(e.target.value as MetodoPago)}>
+              {METODOS.map((m) => (
+                <option key={m} value={m}>
+                  {ETIQUETA_METODO_PAGO[m]}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="campo">
+          <label className="etiqueta" htmlFor="pago-ref">
+            Referencia {pideReferencia ? '' : '(opcional)'}
+          </label>
+          <input
+            id="pago-ref"
+            className="input"
+            value={referencia}
+            onChange={(e) => setReferencia(e.target.value)}
+            placeholder={pideReferencia ? 'Últimos dígitos, folio o clave de rastreo' : ''}
+          />
+        </div>
+        {destino.tipo === 'cita' && (
+          <div className="campo">
+            <label className="etiqueta" htmlFor="pago-propina">
+              Propina (opcional)
+            </label>
+            <input id="pago-propina" className="input num" inputMode="decimal" value={propina} onChange={(e) => setPropina(e.target.value)} placeholder="0" />
+            <span className="ayuda">La propina es de quien atiende: se guarda aparte y no cuenta como ingreso del spa.</span>
+          </div>
+        )}
+        {destino.tipo === 'pedido' && (
+          <p className="aviso aviso-info adm-sin-margen">
+            Cuando los pagos cubren el total, el pedido pasa a “Pagado” y el sistema activa automáticamente los créditos de los servicios y paquetes
+            (y los códigos de regalo). Los productos se descuentan del inventario.
+          </p>
+        )}
+        <MensajeError error={error} />
+      </form>
+    </Modal>
+  );
+}

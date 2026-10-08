@@ -1,0 +1,90 @@
+/* Nosotras / Equipo. Sólo tokens. */
+
+.eq-compromisos {
+  list-style: none;
+  margin: 0 0 clamp(36px, 6vw, 64px);
+  padding: 0;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+}
+.eq-compromisos li { display: flex; gap: 14px; align-items: flex-start; }
+.eq-compromisos h2 { font-size: 1.35rem; margin: 2px 0 4px; color: var(--verde); }
+.eq-compromisos p { margin: 0; color: var(--tinta-2); font-size: 0.95rem; }
+
+.eq-titulo-equipo { color: var(--verde); margin-bottom: 20px; }
+.eq-lista { display: grid; gap: 24px; }
+
+.eq-persona {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: 1fr;
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  border-radius: var(--radio-lg);
+  box-shadow: var(--sombra);
+  padding: clamp(20px, 4vw, 32px);
+}
+@media (min-width: 900px) { .eq-persona { grid-template-columns: 0.9fr 1.1fr; gap: 40px; } }
+.eq-persona-cabeza { display: flex; flex-direction: column; gap: 16px; align-items: flex-start; }
+@media (min-width: 520px) { .eq-persona-cabeza { flex-direction: row; } }
+.eq-persona-texto { min-width: 0; }
+
+.eq-foto { width: 112px; height: 112px; border-radius: 50%; object-fit: cover; border: 3px solid var(--oro-suave); flex: none; }
+.eq-monograma {
+  position: relative;
+  flex: none;
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--verde-suave);
+  box-shadow: 0 0 0 3px var(--superficie), 0 0 0 4px var(--oro);
+}
+.eq-monograma-letras { font-family: var(--display); font-size: 2.4rem; font-weight: 700; letter-spacing: 0.04em; color: var(--verde); }
+.eq-monograma-insignia {
+  position: absolute;
+  right: -2px;
+  bottom: 2px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--superficie);
+  color: var(--oro);
+  box-shadow: 0 0 0 1px var(--linea-2);
+}
+
+.eq-nombre { font-size: 1.8rem; margin: 0; color: var(--tinta); }
+.eq-cargo { margin: 2px 0 10px; font-weight: 800; font-size: 0.82rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--oro-osc); }
+.eq-bio { color: var(--tinta-2); margin: 0 0 10px; white-space: pre-line; }
+.eq-resumen { display: inline-block; margin: 0; padding: 4px 12px; border-radius: 999px; background: var(--verde-suave); color: var(--verde); font-weight: 700; font-size: 0.86rem; }
+
+.eq-formacion-titulo { font-family: var(--cuerpo); font-size: 0.8rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--tinta-2); margin: 0 0 14px; }
+.eq-formacion-vacia { color: var(--tinta-2); margin: 0; padding: 14px 16px; border: 1px dashed var(--linea); border-radius: var(--radio); }
+
+.eq-linea { list-style: none; margin: 0; padding: 0 0 0 24px; position: relative; }
+.eq-linea::before { content: ''; position: absolute; left: 6px; top: 8px; bottom: 8px; width: 1.5px; background: var(--linea); }
+.eq-linea li { position: relative; padding-bottom: 18px; }
+.eq-linea li:last-child { padding-bottom: 0; }
+.eq-linea-punto { position: absolute; left: -23px; top: 6px; width: 12px; height: 12px; transform: rotate(45deg); background: var(--fondo); border: 2px solid var(--oro); }
+.eq-linea-fecha { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0; font-size: 0.8rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--oro-osc); }
+.eq-proxima { letter-spacing: 0.04em; padding: 0 8px; border-radius: 999px; background: var(--info-suave); color: var(--info); }
+.eq-linea-nombre { margin: 2px 0; font-family: var(--display); font-size: 1.3rem; font-weight: 600; line-height: 1.2; }
+.eq-linea-detalle { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; font-size: 0.88rem; color: var(--tinta-2); }
+.eq-tipo { font-weight: 700; color: var(--verde); }
+
+.eq-cierre {
+  margin-top: clamp(36px, 6vw, 56px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+.eq-cierre-gema { color: var(--oro); }
+.eq-cierre p { font-family: var(--display); font-size: 1.5rem; margin: 0 0 8px; }

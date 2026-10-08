@@ -1,0 +1,8 @@
+/* 404. Sólo tokens. */
+.nf { display: grid; gap: 24px; grid-template-columns: 1fr; align-items: center; }
+@media (min-width: 860px) { .nf { grid-template-columns: 0.8fr 1.2fr; gap: 48px; } }
+.nf-arte { max-width: 240px; width: 100%; margin: 0 auto; }
+@media (min-width: 860px) { .nf-arte { max-width: 360px; } }
+.nf-texto h1 { color: var(--verde); }
+.nf-enlaces { list-style: none; margin: 24px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px; }
+.nf-ayuda { color: var(--tinta-2); }

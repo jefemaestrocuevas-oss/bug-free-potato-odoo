@@ -1,0 +1,154 @@
+/*
+  Panel interno (/admin). Prefijo de clases: .adm-
+  Barra lateral fija desde 960 px; debajo, barra superior con menú desplegable.
+  Todo color sale de tokens.css.
+*/
+.panel-admin {
+  min-height: 100vh;
+  background: var(--fondo);
+  color: var(--tinta);
+}
+
+.adm-saltar {
+  position: absolute;
+  left: 12px;
+  top: -60px;
+  z-index: 200;
+  background: var(--verde);
+  color: var(--superficie);
+  padding: 10px 16px;
+  border-radius: var(--radio-sm);
+  font-weight: 700;
+  text-decoration: none;
+}
+.adm-saltar:focus { top: 12px; color: var(--superficie); }
+
+.adm-banner-demo { display: flex; gap: 12px; justify-content: center; align-items: center; flex-wrap: wrap; }
+.adm-banner-boton {
+  border: 1px solid currentColor;
+  background: none;
+  color: inherit;
+  border-radius: 999px;
+  padding: 2px 12px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.adm-banner-boton:hover { background: var(--superficie); }
+
+.adm-marco { display: flex; flex-direction: column; min-height: 100vh; }
+
+/* ---------- Barra lateral / superior ---------- */
+.adm-lateral {
+  background: var(--fondo-alt);
+  border-bottom: 1px solid var(--linea);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.adm-lateral-cabeza {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px var(--gutter);
+  min-height: 60px;
+}
+.adm-marca { display: inline-flex; flex-direction: column; gap: 0; text-decoration: none; line-height: 1.1; }
+.adm-marca .marca-texto { font-size: 1.35rem; }
+.adm-marca-sub { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--tinta-3); padding-left: 2px; }
+
+.adm-boton-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--linea);
+  border-radius: var(--radio-sm);
+  background: var(--superficie);
+  color: var(--verde);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.adm-lateral-cuerpo {
+  display: none;
+  padding: 4px var(--gutter) 16px;
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
+}
+.adm-menu-abierto .adm-lateral-cuerpo { display: block; }
+
+.adm-nav-grupo {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--tinta-3);
+  margin: 14px 10px 6px;
+}
+.adm-nav { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.adm-nav-enlace {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: var(--radio-sm);
+  border: 0;
+  background: none;
+  color: var(--tinta-2);
+  font-weight: 600;
+  font-size: 0.97rem;
+  text-decoration: none;
+  cursor: pointer;
+  text-align: left;
+}
+.adm-nav-enlace:hover { background: var(--superficie); color: var(--verde); }
+.adm-nav-enlace.adm-nav-activo { background: var(--verde-suave); color: var(--verde); }
+.adm-nav-enlace.adm-nav-activo .adm-icono { color: var(--verde); }
+.adm-nav-enlace .adm-icono { color: var(--tinta-3); flex: none; }
+.adm-nav-enlace:disabled { opacity: 0.6; cursor: wait; }
+
+.adm-usuario { border-top: 1px solid var(--linea); margin-top: 16px; padding-top: 12px; display: flex; flex-direction: column; gap: 2px; }
+.adm-usuario-datos { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 12px 8px; }
+.adm-usuario-nombre { font-size: 0.88rem; color: var(--tinta-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* ---------- Contenido ---------- */
+.adm-principal { flex: 1; min-width: 0; outline: none; }
+.adm-contenido { max-width: 1240px; margin: 0 auto; padding: 20px var(--gutter) 64px; }
+
+@media (min-width: 720px) {
+  .adm-contenido { padding: 28px 28px 72px; }
+}
+
+@media (min-width: 960px) {
+  .adm-marco { flex-direction: row; }
+  .adm-lateral {
+    width: 252px;
+    flex: none;
+    height: 100vh;
+    border-bottom: 0;
+    border-right: 1px solid var(--linea);
+    display: flex;
+    flex-direction: column;
+  }
+  .adm-lateral-cabeza { padding: 22px 18px 8px; }
+  .adm-boton-menu { display: none; }
+  .adm-lateral-cuerpo {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    flex: 1;
+    max-height: none;
+    padding: 0 12px 18px;
+  }
+  .adm-contenido { padding: 32px 36px 80px; }
+}
+
+@media print {
+  .adm-lateral, .adm-banner-demo, .adm-saltar { display: none !important; }
+  .adm-contenido { padding: 0; max-width: none; }
+}

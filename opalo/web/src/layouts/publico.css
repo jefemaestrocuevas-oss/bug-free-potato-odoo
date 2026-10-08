@@ -1,0 +1,372 @@
+/*
+  Sitio público de Ópalo: encabezado, menú móvil, pie, botón flotante de WhatsApp,
+  aviso del carrito y cabecera de páginas. Sólo tokens (var(--…)): así funciona el modo oscuro.
+*/
+
+.sitio-publico {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: clip;
+}
+.sp-contenido { flex: 1 0 auto; }
+.sp-contenido:focus { outline: none; }
+
+/* base.css define .seccion después de .contenedor y su `padding` borra el margen lateral
+   cuando ambas clases van en el mismo elemento: aquí lo recuperamos. */
+.sitio-publico .contenedor.seccion { padding-left: var(--gutter); padding-right: var(--gutter); }
+
+/* AA: el oro claro no alcanza 4.5:1 en texto chico; en el sitio público usamos el oro oscuro. */
+.sitio-publico .eyebrow { color: var(--oro-osc); }
+
+/* Saltar al contenido */
+.sp-saltar {
+  position: absolute;
+  left: 12px;
+  top: -60px;
+  z-index: 200;
+  background: var(--verde);
+  color: var(--fondo);
+  padding: 10px 16px;
+  border-radius: var(--radio-sm);
+  font-weight: 700;
+  text-decoration: none;
+}
+.sp-saltar:focus { top: 12px; color: var(--fondo); }
+
+/* Franja del modo demostración (más específico que .banner-demo de base.css) */
+.sitio-publico .sp-banner-demo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 12px;
+  color: var(--tinta);
+  line-height: 1.4;
+}
+.sp-banner-demo-boton {
+  border: 1px solid var(--oro);
+  background: var(--superficie);
+  color: var(--tinta);
+  border-radius: 999px;
+  padding: 2px 12px;
+  min-height: 28px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sp-banner-demo-boton:hover { background: var(--fondo); }
+
+/* ---------- Encabezado ---------- */
+.sp-encabezado {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--fondo);
+  border-bottom: 1px solid var(--linea-2);
+}
+.sp-barra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 64px;
+}
+.sp-marca { display: inline-flex; text-decoration: none; margin-right: auto; padding: 6px 0; border-radius: var(--radio-sm); }
+.sp-marca .marca-texto { font-size: 1.35rem; }
+@media (min-width: 400px) { .sp-marca .marca-texto { font-size: 1.55rem; } }
+
+.sp-nav { display: none; }
+.sp-nav ul { display: flex; gap: 4px; list-style: none; margin: 0; padding: 0; }
+.sp-nav a,
+.sp-enlace {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--radio-sm);
+  color: var(--tinta-2);
+  font-weight: 700;
+  font-size: 0.95rem;
+  text-decoration: none;
+  position: relative;
+}
+.sp-nav a:hover,
+.sp-enlace:hover { color: var(--verde); background: var(--verde-suave); }
+.sp-nav a[aria-current='page'],
+.sp-enlace[aria-current='page'] { color: var(--verde); }
+.sp-nav a[aria-current='page']::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 6px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--oro);
+}
+
+.sp-acciones { display: flex; align-items: center; gap: 6px; }
+.sp-solo-escritorio { display: none !important; }
+
+.sp-carrito {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  color: var(--verde);
+  text-decoration: none;
+}
+.sp-carrito:hover { background: var(--verde-suave); color: var(--verde); }
+.sp-carrito[aria-current='page'] { background: var(--verde-suave); }
+.sp-carrito-contador {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--oro-osc);
+  color: var(--fondo);
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 20px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--fondo);
+}
+.sitio-publico .sp-reservar { min-height: 40px; padding: 0 14px; font-size: 0.9rem; }
+
+.sp-boton-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--linea);
+  border-radius: var(--radio-sm);
+  background: var(--superficie);
+  color: var(--verde);
+  cursor: pointer;
+}
+.sp-boton-menu[aria-expanded='true'] { background: var(--verde-suave); border-color: var(--verde); }
+
+/* Menú móvil */
+.sp-menu-movil {
+  border-top: 1px solid var(--linea-2);
+  background: var(--fondo);
+  max-height: calc(100dvh - 64px);
+  overflow-y: auto;
+  box-shadow: var(--sombra);
+  padding: 8px 0 20px;
+}
+.sp-menu-movil[hidden] { display: none; }
+.sp-menu-movil-lista { list-style: none; margin: 0; padding: 0; }
+.sp-menu-movil-lista a {
+  display: flex;
+  align-items: center;
+  min-height: 52px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--linea-2);
+  font-family: var(--display);
+  font-size: 1.45rem;
+  font-weight: 600;
+  color: var(--tinta);
+  text-decoration: none;
+}
+.sp-menu-movil-lista a[aria-current='page'] { color: var(--verde); }
+.sp-menu-movil-lista a[aria-current='page']::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  margin-right: 10px;
+  transform: rotate(45deg);
+  background: var(--oro);
+}
+.sp-menu-movil-cuenta { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
+.sp-menu-movil-whatsapp {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  font-weight: 700;
+  color: var(--verde);
+  text-decoration: none;
+}
+
+@media (min-width: 960px) {
+  .sp-nav { display: block; margin-right: auto; }
+  .sp-marca { margin-right: 20px; }
+  .sp-solo-escritorio { display: inline-flex !important; }
+  .sp-boton-menu, .sp-menu-movil { display: none !important; }
+  .sp-barra { min-height: 76px; gap: 12px; }
+  .sitio-publico .sp-reservar { min-height: 44px; padding: 0 22px; font-size: 0.95rem; }
+}
+
+/* ---------- Cabecera de páginas internas ---------- */
+.sp-cabecera {
+  position: relative;
+  overflow: hidden;
+  background: var(--fondo-alt);
+  border-bottom: 1px solid var(--linea-2);
+  padding: clamp(36px, 7vw, 72px) 0 clamp(32px, 6vw, 60px);
+  isolation: isolate;
+}
+.sp-cabecera-patron {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--linea);
+  opacity: 0.55;
+  z-index: -1;
+  -webkit-mask-image: linear-gradient(100deg, transparent 35%, #000 85%);
+  mask-image: linear-gradient(100deg, transparent 35%, #000 85%);
+}
+.sp-cabecera-destello {
+  position: absolute;
+  right: clamp(16px, 8vw, 120px);
+  top: 26px;
+  width: 26px;
+  height: 26px;
+  color: var(--oro);
+  opacity: 0.7;
+  z-index: -1;
+}
+.sp-cabecera-titulo { color: var(--verde); margin-bottom: 12px; max-width: 22ch; }
+.sp-cabecera-texto { margin: 0; }
+.sp-cabecera-texto p { margin: 0 0 0.6em; }
+.sp-cabecera-texto p:last-child { margin: 0; }
+.sp-cabecera-acciones { margin-top: 20px; }
+
+/* Encabezado de sección (título + texto) */
+.sp-encabezado-seccion { margin-bottom: clamp(24px, 4vw, 40px); }
+.sp-encabezado-seccion h2 { color: var(--verde); }
+.sp-encabezado-seccion .subtitulo { margin: 0; }
+.sp-encabezado-seccion.centrado { text-align: center; }
+.sp-encabezado-seccion.centrado .subtitulo { margin: 0 auto; }
+.sp-entre-alineado { display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; align-items: flex-end; }
+
+/* ---------- Pie ---------- */
+.sp-pie {
+  margin-top: auto;
+  background: var(--fondo-alt);
+  border-top: 1px solid var(--linea-2);
+  padding: 48px 0 calc(96px + env(safe-area-inset-bottom, 0px));
+  font-size: 0.95rem;
+}
+@media (min-width: 720px) { .sp-pie { padding-bottom: 28px; } }
+.sp-pie-rejilla { display: grid; gap: 32px 24px; grid-template-columns: 1fr; }
+@media (min-width: 600px) { .sp-pie-rejilla { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 1000px) { .sp-pie-rejilla { grid-template-columns: 1.4fr 1.2fr 1.1fr 1fr 1.1fr; } }
+.sp-pie-logo { display: inline-flex; text-decoration: none; border-radius: var(--radio-sm); }
+.sp-pie-lema { font-family: var(--display); font-size: 1.3rem; line-height: 1.25; color: var(--tinta); margin: 12px 0; max-width: 26ch; }
+.sp-pie-cita, .sp-pie-apertura { display: flex; align-items: center; gap: 8px; color: var(--tinta-2); margin: 0 0 6px; }
+.sp-pie-apertura { font-weight: 700; color: var(--verde); }
+.sp-pie-titulo {
+  font-family: var(--cuerpo);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--oro-osc);
+  margin: 4px 0 12px;
+}
+.sp-pie-dato { display: flex; gap: 8px; align-items: flex-start; color: var(--tinta); margin: 0 0 8px; text-decoration: none; }
+.sp-pie-dato .sp-icono { flex: none; margin-top: 2px; color: var(--verde); }
+a.sp-pie-dato:hover { color: var(--verde); }
+.sp-pie-whatsapp { font-weight: 700; }
+.sp-nowrap { white-space: nowrap; }
+.sp-pie-enlace { font-weight: 700; display: inline-flex; min-height: 32px; align-items: center; }
+.sp-pie-nota { color: var(--tinta-2); font-size: 0.88rem; margin: 0; }
+.sp-pie-lista { list-style: none; margin: 0; padding: 0; }
+.sp-pie-lista a { display: inline-flex; min-height: 34px; align-items: center; color: var(--tinta-2); text-decoration: none; }
+.sp-pie-lista a:hover { color: var(--verde); text-decoration: underline; }
+.sitio-publico .sp-pie-legal { margin-top: 36px; color: var(--tinta-2); font-size: 0.85rem; }
+.sp-pie-legal p { margin: 0; padding-top: 18px; border-top: 1px solid var(--linea); }
+
+/* ---------- WhatsApp flotante ---------- */
+.sp-whatsapp {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 60;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--verde);
+  color: var(--fondo);
+  box-shadow: var(--sombra-fuerte);
+  text-decoration: none;
+  transition: transform 0.15s, background 0.15s;
+}
+.sp-whatsapp:hover { background: var(--verde-osc); color: var(--fondo); transform: translateY(-2px); }
+.sp-whatsapp::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1.5px solid var(--oro);
+  opacity: 0.6;
+  pointer-events: none;
+}
+@media (min-width: 720px) { .sp-whatsapp { right: 24px; bottom: 24px; } }
+
+/* ---------- Aviso "agregaste al carrito" ---------- */
+.sp-aviso-carrito-region {
+  position: fixed;
+  left: 16px;
+  right: 84px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 70;
+  pointer-events: none;
+  display: flex;
+  justify-content: flex-start;
+}
+@media (min-width: 720px) { .sp-aviso-carrito-region { left: 24px; right: auto; bottom: 24px; max-width: 460px; } }
+.sp-aviso-carrito {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px 10px;
+  flex-wrap: wrap;
+  background: var(--superficie);
+  color: var(--tinta);
+  border: 1px solid var(--linea);
+  border-left: 4px solid var(--verde);
+  border-radius: var(--radio);
+  box-shadow: var(--sombra-fuerte);
+  padding: 10px 8px 10px 14px;
+  font-size: 0.92rem;
+  animation: aparecer 0.22s ease-out;
+}
+.sp-aviso-carrito > .sp-icono { color: var(--verde); flex: none; }
+.sp-aviso-carrito p { margin: 0; flex: 1 1 160px; }
+.sp-aviso-carrito-cerrar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--tinta-2);
+  cursor: pointer;
+}
+.sp-aviso-carrito-cerrar:hover { background: var(--fondo-alt); }
+@keyframes aparecer { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* Impresión (políticas): sólo el contenido. */
+@media print {
+  .sp-encabezado, .sp-pie, .sp-whatsapp, .sp-aviso-carrito-region, .banner-demo, .sp-saltar { display: none !important; }
+  .sitio-publico { display: block; }
+}

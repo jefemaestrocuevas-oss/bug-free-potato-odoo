@@ -1,0 +1,125 @@
+/* Servicios y Tienda. Sólo tokens. */
+
+/* Filtros por categoría */
+.srv-filtros { margin: 0 0 18px; }
+.srv-filtros ul {
+  list-style: none;
+  margin: 0;
+  padding: 2px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.srv-filtro {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--linea);
+  background: var(--superficie);
+  color: var(--tinta-2);
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.srv-filtro:hover { border-color: var(--verde); color: var(--verde); }
+.srv-filtro[aria-pressed='true'] { background: var(--verde); border-color: var(--verde); color: var(--fondo); }
+
+.srv-leyenda {
+  font-size: 0.9rem;
+  color: var(--tinta-2);
+  background: var(--fondo-alt);
+  border-radius: var(--radio);
+  padding: 12px 16px;
+  margin: 0 0 8px;
+  max-width: 80ch;
+}
+.srv-leyenda strong { color: var(--tinta); }
+
+/* Secciones por categoría */
+.srv-seccion { padding: clamp(28px, 5vw, 48px) 0 8px; scroll-margin-top: 90px; }
+.srv-seccion-cabeza { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
+.srv-seccion-cabeza h2 { margin: 0 0 4px; color: var(--verde); }
+.srv-seccion-cabeza p { margin: 0; color: var(--tinta-2); max-width: 62ch; }
+
+.srv-nota-complementos {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  margin: 0 0 16px;
+  border-radius: var(--radio);
+  background: var(--oro-suave);
+  color: var(--tinta);
+}
+.srv-nota-complementos .sp-icono { flex: none; color: var(--oro-osc); margin-top: 2px; }
+.srv-nota-complementos p { margin: 0; font-size: 0.95rem; }
+
+/* Cierre: tienda y WhatsApp */
+.srv-cierre {
+  margin-top: clamp(40px, 6vw, 64px);
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+}
+.srv-cierre-item {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 22px 20px;
+  border-radius: var(--radio-lg);
+  background: var(--fondo-alt);
+  border: 1px solid var(--linea-2);
+}
+.srv-cierre-item > .sp-icono { flex: none; color: var(--oro-osc); }
+.srv-cierre-item h2 { font-size: 1.4rem; margin: 0 0 6px; color: var(--verde); }
+.srv-cierre-item p { margin: 0 0 12px; color: var(--tinta-2); }
+
+/* ---------- Tienda ---------- */
+.sitio-publico .tda-como { margin-top: -22px; position: relative; z-index: 1; }
+.tda-pasos {
+  list-style: none;
+  margin: 0;
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  border-radius: var(--radio-lg);
+  box-shadow: var(--sombra);
+}
+.tda-pasos li { display: flex; gap: 12px; align-items: flex-start; }
+.tda-pasos .sp-icono { flex: none; color: var(--verde); margin-top: 2px; }
+.tda-pasos strong { display: block; color: var(--tinta); }
+.tda-pasos span { display: block; color: var(--tinta-2); font-size: 0.9rem; line-height: 1.4; }
+.sitio-publico .tda { padding-top: 24px; }
+
+.tda-rejilla {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+}
+.tda-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 20px;
+  border-radius: var(--radio-lg);
+  background: var(--superficie);
+  border: 1px solid var(--linea-2);
+  box-shadow: var(--sombra);
+}
+.tda-item-tipo { margin: 0; font-size: 0.75rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--oro-osc); }
+.tda-item-nombre { margin: 0; font-size: 1.45rem; color: var(--tinta); }
+.tda-item-detalle { margin: 0; font-size: 0.9rem; color: var(--tinta-2); }
+.tda-item-precio { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 8px 0 4px; }
+.tda-item-precio .sp-precio { font-family: var(--display); font-size: 1.8rem; line-height: 1.1; font-weight: 700; }
+.tda-item-ahorro { font-size: 0.78rem; font-weight: 800; padding: 3px 10px; border-radius: 999px; background: var(--verde-suave); color: var(--verde); }
+.tda-item-vigencia { margin: 0 0 8px; font-size: 0.85rem; color: var(--tinta-2); }
+.tda-item-agotado { margin: auto 0 0; font-size: 0.88rem; color: var(--tinta-2); }
+.tda-item .sp-comprar { margin-top: auto; padding-top: 10px; border-top: 1px dashed var(--linea); }
+.tda .srv-leyenda { margin-top: 20px; }

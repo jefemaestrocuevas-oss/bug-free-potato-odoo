@@ -1,0 +1,1345 @@
+-- =============================================================================
+-- Ópalo · 0900 · Funciones RPC (reglas de negocio R1–R13)
+-- Contrato: opalo/docs/ESPEC.md §5 y §6 (firmas exactas)
+--
+-- Todas son security definer con search_path fijo y validan el rol de quien llama.
+-- Los errores para la persona usuaria usan los mensajes canónicos, errcode P0001.
+-- Las funciones "*_interna" no se exponen (ver 1100_seguridad).
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- Auxiliares internas
+-- -----------------------------------------------------------------------------
+
+-- ¿Puede este miembro del personal hacer todos estos servicios? (sin filas = hace todo)
+create or replace function public.personal_puede_hacer(p_personal_id uuid, p_servicios uuid[])
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+  select not exists (select 1 from public.personal_servicios ps where ps.personal_id = p_personal_id)
+      or not exists (
+           select 1
+             from unnest(coalesce(p_servicios, '{}'::uuid[])) as s(id)
+            where not exists (select 1 from public.personal_servicios ps
+                               where ps.personal_id = p_personal_id and ps.servicio_id = s.id))
+$$;
+
+-- Edad cumplida en una fecha.
+create or replace function public.edad_en(p_fecha_nacimiento date, p_fecha date)
+returns int
+language sql
+immutable
+set search_path = public, extensions, pg_temp
+as $$
+  select date_part('year', age(p_fecha::timestamp, p_fecha_nacimiento::timestamp))::int
+$$;
+
+-- -----------------------------------------------------------------------------
+-- R2 · duracion_reserva
+-- -----------------------------------------------------------------------------
+create or replace function public.duracion_reserva(p_items jsonb)
+returns int
+language plpgsql
+stable
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_cfg        public.configuracion := public.configuracion_actual();
+  v_intervalo  int := greatest(coalesce(v_cfg.intervalo_slots_min, 60), 1);
+  v_item       jsonb;
+  v_dur        int;
+  v_total      int := 0;
+begin
+  if p_items is not null and jsonb_typeof(p_items) = 'array' then
+    for v_item in select e.value from jsonb_array_elements(p_items) as e(value) loop
+      v_dur := 0;
+      if nullif(v_item ->> 'servicio_id', '') is not null then
+        select coalesce(s.duracion_min, 0) into v_dur
+          from public.servicios s
+         where s.id = (v_item ->> 'servicio_id')::uuid;
+      elsif nullif(v_item ->> 'paquete_id', '') is not null then
+        select coalesce(p.duracion_min,
+                        (select sum(coalesce(s.duracion_min, 0) * ps.cantidad)
+                           from public.paquete_servicios ps
+                           join public.servicios s on s.id = ps.servicio_id
+                          where ps.paquete_id = p.id),
+                        0)
+          into v_dur
+          from public.paquetes p
+         where p.id = (v_item ->> 'paquete_id')::uuid;
+      end if;
+      v_total := v_total + coalesce(v_dur, 0);
+    end loop;
+  end if;
+
+  -- hacia arriba al múltiplo del intervalo, nunca menos que la sesión estándar
+  v_total := (ceil(v_total::numeric / v_intervalo))::int * v_intervalo;
+  return greatest(v_total, coalesce(v_cfg.duracion_sesion_min, 60));
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- R3 · horarios_disponibles (hora local America/Mexico_City)
+-- -----------------------------------------------------------------------------
+create or replace function public.horarios_disponibles(
+  p_fecha date,
+  p_duracion_min int default null,
+  p_personal_id uuid default null
+)
+returns table (inicio timestamptz, fin timestamptz, personal_id uuid, personal_nombre text)
+language plpgsql
+stable
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+#variable_conflict use_column
+declare
+  v_cfg       public.configuracion := public.configuracion_actual();
+  v_tz        text := coalesce(v_cfg.zona_horaria, 'America/Mexico_City');
+  v_hoy       date := (now() at time zone v_tz)::date;
+  v_dur       int;
+  v_paso      int := greatest(coalesce(v_cfg.intervalo_slots_min, 60), 1);
+  v_minimo    timestamptz := now() + make_interval(hours => coalesce(v_cfg.anticipacion_min_horas, 0));
+begin
+  v_dur := coalesce(p_duracion_min, v_cfg.duracion_sesion_min, 60);
+  if v_dur <= 0 then
+    v_dur := coalesce(v_cfg.duracion_sesion_min, 60);
+  end if;
+
+  if p_fecha is null
+     or p_fecha < v_hoy
+     or p_fecha > v_hoy + coalesce(v_cfg.ventana_reserva_dias, 60) then
+    return;
+  end if;
+
+  return query
+  with candidatos as (
+    select p.id as pid, p.nombre as pnombre, p.orden as porden, gs.local as ini_local
+      from public.personal p
+      join public.horarios h
+        on h.personal_id = p.id
+       and h.dia_semana = extract(dow from p_fecha)::int
+      cross join lateral generate_series(
+             p_fecha + h.hora_inicio,
+             p_fecha + h.hora_fin - make_interval(mins => v_dur),
+             make_interval(mins => v_paso)) as gs(local)
+     where p.activo
+       and (p_personal_id is null or p.id = p_personal_id)
+  ),
+  bloques as (
+    select c.pid, c.pnombre, c.porden,
+           (c.ini_local at time zone v_tz) as b_ini,
+           ((c.ini_local + make_interval(mins => v_dur)) at time zone v_tz) as b_fin
+      from candidatos c
+  )
+  select b.b_ini, b.b_fin, b.pid, b.pnombre
+    from bloques b
+   where b.b_ini >= v_minimo
+     and not exists (
+           select 1 from public.citas ct
+            where ct.personal_id = b.pid
+              and ct.estado not in ('cancelada', 'no_asistio')
+              and tstzrange(ct.inicio, ct.fin) && tstzrange(b.b_ini, b.b_fin))
+     and not exists (
+           select 1 from public.bloqueos_agenda bl
+            where (bl.personal_id is null or bl.personal_id = b.pid)
+              and tstzrange(bl.inicio, bl.fin) && tstzrange(b.b_ini, b.b_fin))
+     and exists (
+           select 1 from public.cabinas cb
+            where cb.activa
+              and not exists (
+                    select 1 from public.citas ct2
+                     where ct2.cabina_id = cb.id
+                       and ct2.estado not in ('cancelada', 'no_asistio')
+                       and tstzrange(ct2.inicio, ct2.fin) && tstzrange(b.b_ini, b.b_fin)))
+   order by b.b_ini, b.porden, b.pnombre;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Ficha de salud y aceptación de políticas (clienta)
+-- -----------------------------------------------------------------------------
+create or replace function public.guardar_ficha_salud(
+  p_respuestas jsonb,
+  p_detalles jsonb,
+  p_alergias text,
+  p_medicamentos text,
+  p_observaciones text,
+  p_acepta_datos_sensibles boolean
+)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_cliente uuid;
+  v_id uuid;
+begin
+  if auth.uid() is null then
+    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+  v_cliente := public.mi_cliente_id();
+  if v_cliente is null then
+    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+  if not coalesce(p_acepta_datos_sensibles, false) then
+    raise exception using
+      message = 'Para guardar tu ficha de salud necesitamos tu consentimiento expreso para tratar datos de salud.',
+      errcode = 'P0001';
+  end if;
+
+  -- clock_timestamp(): la "última ficha" debe ser la última aunque se guarden dos en la misma transacción.
+  insert into public.fichas_salud (cliente_id, respuestas, detalles, alergias, medicamentos, observaciones,
+                                   acepta_datos_sensibles, creado_en)
+  values (v_cliente,
+          case when jsonb_typeof(p_respuestas) = 'object' then p_respuestas else '{}'::jsonb end,
+          case when jsonb_typeof(p_detalles) = 'object' then p_detalles else '{}'::jsonb end,
+          nullif(btrim(p_alergias), ''),
+          nullif(btrim(p_medicamentos), ''),
+          nullif(btrim(p_observaciones), ''),
+          true,
+          clock_timestamp())
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+create or replace function public.aceptar_politicas(p_politica_ids uuid[], p_user_agent text default null)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_cliente uuid;
+begin
+  if auth.uid() is null then
+    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+  v_cliente := public.mi_cliente_id();
+  if v_cliente is null then
+    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+
+  insert into public.aceptaciones_politica (cliente_id, politica_id, ip, user_agent)
+  select v_cliente, p.id, public.ip_solicitud(), p_user_agent
+    from public.politicas p
+   where p.id = any (coalesce(p_politica_ids, '{}'::uuid[]))
+  on conflict (cliente_id, politica_id) do nothing;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- R1 + R4 · creación de citas (núcleo compartido por reservar_cita y reservar_cita_staff)
+-- -----------------------------------------------------------------------------
+create or replace function public.crear_cita_interna(
+  p_cliente_id uuid,
+  p_items jsonb,
+  p_inicio timestamptz,
+  p_personal_id uuid,
+  p_origen public.origen_cita,
+  p_notas text,
+  p_es_staff boolean,
+  p_nombre_firmante text,
+  p_firma_svg text,
+  p_tutor_nombre text,
+  p_user_agent text
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_cfg          public.configuracion := public.configuracion_actual();
+  v_tz           text := coalesce(v_cfg.zona_horaria, 'America/Mexico_City');
+  v_hoy          date := public.hoy_local();
+  v_cliente      public.clientes;
+  v_item         jsonb;
+  v_serv         public.servicios;
+  v_paq          public.paquetes;
+  v_cred         public.creditos;
+  v_cred_id      uuid;
+  v_precio       numeric(10,2);
+  v_items        jsonb := '[]'::jsonb;
+  v_servicios    uuid[] := '{}';
+  v_categorias   text[] := '{}';
+  v_tipos        public.tipo_politica[] := '{}';
+  v_hay_principal boolean := false;
+  v_total        numeric(10,2) := 0;
+  v_dur          int;
+  v_fin          timestamptz;
+  v_personal     uuid;
+  v_cabina       uuid;
+  v_ficha        public.fichas_salud;
+  v_alertas      text[] := '{}';
+  v_estado       public.estado_cita;
+  v_es_menor     boolean := false;
+  v_cita         uuid;
+begin
+  select * into v_cliente from public.clientes c where c.id = p_cliente_id;
+  if not found then
+    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
+    raise exception using message = 'Elige al menos un servicio.', errcode = 'P0001';
+  end if;
+
+  -- Ítems: validar, tomar precios del servidor, aplicar créditos.
+  for v_item in select e.value from jsonb_array_elements(p_items) as e(value) loop
+    if jsonb_typeof(v_item) <> 'object' then
+      raise exception using message = 'Elige al menos un servicio.', errcode = 'P0001';
+    end if;
+    v_cred_id := nullif(v_item ->> 'credito_id', '')::uuid;
+
+    if nullif(v_item ->> 'servicio_id', '') is not null then
+      select * into v_serv from public.servicios s where s.id = (v_item ->> 'servicio_id')::uuid;
+      if not found
+         or not v_serv.activo
+         or v_serv.etapa <> 'disponible'
+         or (not p_es_staff and not v_serv.reservable_en_linea) then
+        raise exception using message = 'Uno de los servicios elegidos no se puede reservar en línea.', errcode = 'P0001';
+      end if;
+      v_precio := v_serv.precio;
+
+      if v_cred_id is not null then
+        select * into v_cred from public.creditos cr where cr.id = v_cred_id for update;
+        if not found
+           or v_cred.cliente_id <> p_cliente_id
+           or v_cred.servicio_id is distinct from v_serv.id
+           or v_cred.codigo_regalo is not null
+           or v_cred.usados >= v_cred.cantidad
+           or (v_cred.vence_en is not null and v_cred.vence_en < v_hoy) then
+          raise exception using message = 'Ese crédito no es válido o ya se usó.', errcode = 'P0001';
+        end if;
+        update public.creditos set usados = usados + 1 where id = v_cred_id;
+        v_precio := 0;
+      end if;
+
+      v_servicios := v_servicios || v_serv.id;
+      v_categorias := v_categorias || (select cs.slug from public.categorias_servicio cs where cs.id = v_serv.categoria_id);
+      if v_serv.tipo_consentimiento is not null then
+        v_tipos := v_tipos || v_serv.tipo_consentimiento;
+      end if;
+      if not v_serv.es_complemento then
+        v_hay_principal := true;
+      end if;
+      v_items := v_items || jsonb_build_array(jsonb_build_object(
+        'servicio_id', v_serv.id, 'paquete_id', null, 'credito_id', v_cred_id,
+        'nombre', v_serv.nombre, 'precio', v_precio, 'duracion_min', v_serv.duracion_min));
+
+    elsif nullif(v_item ->> 'paquete_id', '') is not null then
+      select * into v_paq from public.paquetes p where p.id = (v_item ->> 'paquete_id')::uuid;
+      if not found or not v_paq.activo then
+        raise exception using message = 'Uno de los servicios elegidos no se puede reservar en línea.', errcode = 'P0001';
+      end if;
+      v_precio := v_paq.precio;
+
+      if v_cred_id is not null then
+        select * into v_cred from public.creditos cr where cr.id = v_cred_id for update;
+        if not found
+           or v_cred.cliente_id <> p_cliente_id
+           or v_cred.paquete_id is distinct from v_paq.id
+           or v_cred.codigo_regalo is not null
+           or v_cred.usados >= v_cred.cantidad
+           or (v_cred.vence_en is not null and v_cred.vence_en < v_hoy) then
+          raise exception using message = 'Ese crédito no es válido o ya se usó.', errcode = 'P0001';
+        end if;
+        update public.creditos set usados = usados + 1 where id = v_cred_id;
+        v_precio := 0;
+      end if;
+
+      v_servicios := v_servicios || coalesce(
+        (select array_agg(ps.servicio_id) from public.paquete_servicios ps where ps.paquete_id = v_paq.id), '{}');
+      v_categorias := v_categorias || coalesce(
+        (select array_agg(distinct cs.slug)
+           from public.paquete_servicios ps
+           join public.servicios s on s.id = ps.servicio_id
+           join public.categorias_servicio cs on cs.id = s.categoria_id
+          where ps.paquete_id = v_paq.id), '{}');
+      v_tipos := v_tipos || coalesce(
+        (select array_agg(distinct s.tipo_consentimiento)
+           from public.paquete_servicios ps
+           join public.servicios s on s.id = ps.servicio_id
+          where ps.paquete_id = v_paq.id and s.tipo_consentimiento is not null), '{}');
+      v_hay_principal := true;
+      v_items := v_items || jsonb_build_array(jsonb_build_object(
+        'servicio_id', null, 'paquete_id', v_paq.id, 'credito_id', v_cred_id,
+        'nombre', v_paq.nombre, 'precio', v_precio, 'duracion_min', v_paq.duracion_min));
+    else
+      raise exception using message = 'Elige al menos un servicio.', errcode = 'P0001';
+    end if;
+
+    v_total := v_total + coalesce(v_precio, 0);
+  end loop;
+
+  if not v_hay_principal then
+    raise exception using
+      message = 'Los complementos se agregan a un servicio; elige al menos un servicio.',
+      errcode = 'P0001';
+  end if;
+
+  if p_inicio is null then
+    raise exception using message = 'Ese horario no está disponible.', errcode = 'P0001';
+  end if;
+
+  v_dur := public.duracion_reserva(p_items);
+  v_fin := p_inicio + make_interval(mins => v_dur);
+
+  -- Quién atiende
+  if p_es_staff then
+    -- El personal puede agendar fuera de la rejilla; sólo se cuida que no se empalme.
+    if p_personal_id is not null then
+      select p.id into v_personal from public.personal p where p.id = p_personal_id and p.activo;
+      if v_personal is null then
+        raise exception using message = 'Ese horario no está disponible.', errcode = 'P0001';
+      end if;
+    else
+      select p.id into v_personal
+        from public.personal p
+       where p.activo
+         and public.personal_puede_hacer(p.id, v_servicios)
+         and not exists (select 1 from public.citas ct
+                          where ct.personal_id = p.id
+                            and ct.estado not in ('cancelada', 'no_asistio')
+                            and tstzrange(ct.inicio, ct.fin) && tstzrange(p_inicio, v_fin))
+       order by exists (select 1 from public.horarios h
+                         where h.personal_id = p.id
+                           and h.dia_semana = extract(dow from (p_inicio at time zone v_tz))::int
+                           and (p_inicio at time zone v_tz)::time >= h.hora_inicio
+                           and (v_fin at time zone v_tz)::time <= h.hora_fin) desc,
+                p.orden, p.nombre
+       limit 1;
+      if v_personal is null then
+        raise exception using message = 'Ese horario se acaba de ocupar, elige otro.', errcode = 'P0001';
+      end if;
+    end if;
+  else
+    -- La clienta sólo reserva inicios que ofrece horarios_disponibles.
+    select h.personal_id into v_personal
+      from public.horarios_disponibles((p_inicio at time zone v_tz)::date, v_dur, p_personal_id) h
+      join public.personal p on p.id = h.personal_id
+     where h.inicio = p_inicio
+       and public.personal_puede_hacer(h.personal_id, v_servicios)
+     order by p.orden, p.nombre
+     limit 1;
+    if v_personal is null then
+      if exists (select 1 from public.citas ct
+                  where ct.estado not in ('cancelada', 'no_asistio')
+                    and (p_personal_id is null or ct.personal_id = p_personal_id)
+                    and tstzrange(ct.inicio, ct.fin) && tstzrange(p_inicio, v_fin)) then
+        raise exception using message = 'Ese horario se acaba de ocupar, elige otro.', errcode = 'P0001';
+      end if;
+      raise exception using message = 'Ese horario no está disponible.', errcode = 'P0001';
+    end if;
+  end if;
+
+  -- Cabina libre
+  select cb.id into v_cabina
+    from public.cabinas cb
+   where cb.activa
+     and not exists (select 1 from public.citas ct
+                      where ct.cabina_id = cb.id
+                        and ct.estado not in ('cancelada', 'no_asistio')
+                        and tstzrange(ct.inicio, ct.fin) && tstzrange(p_inicio, v_fin))
+   order by cb.orden, cb.nombre
+   limit 1;
+  if v_cabina is null then
+    raise exception using message = 'Ese horario se acaba de ocupar, elige otro.', errcode = 'P0001';
+  end if;
+
+  -- Ficha vigente → alertas (R4)
+  select * into v_ficha
+    from public.fichas_salud f
+   where f.cliente_id = p_cliente_id
+   order by f.creado_en desc, f.id desc
+   limit 1;
+  if v_ficha.id is not null then
+    select coalesce(array_agg(ci.pregunta order by ci.orden, ci.clave), '{}')
+      into v_alertas
+      from public.contraindicaciones ci
+     where ci.activa
+       and ci.accion in ('revisar', 'no_se_realiza')
+       and (v_ficha.respuestas -> ci.clave) = 'true'::jsonb
+       and (ci.categorias is null or ci.categorias && v_categorias);
+  end if;
+  v_estado := case when cardinality(v_alertas) > 0 then 'pendiente' else 'confirmada' end;
+
+  if v_cliente.fecha_nacimiento is not null then
+    v_es_menor := public.edad_en(v_cliente.fecha_nacimiento, (p_inicio at time zone v_tz)::date)
+                  < coalesce(v_cfg.edad_mayoria, 18);
+  end if;
+
+  begin
+    insert into public.citas (cliente_id, personal_id, cabina_id, inicio, fin, estado, origen,
+                              primera_vez, requiere_revision, alertas, notas_cliente, total, creada_por)
+    values (p_cliente_id, v_personal, v_cabina, p_inicio, v_fin, v_estado, p_origen,
+            not exists (select 1 from public.citas c2
+                         where c2.cliente_id = p_cliente_id and c2.estado = 'completada'),
+            cardinality(v_alertas) > 0, v_alertas, nullif(btrim(p_notas), ''), v_total, auth.uid())
+    returning id into v_cita;
+  exception when exclusion_violation then
+    raise exception using message = 'Ese horario se acaba de ocupar, elige otro.', errcode = 'P0001';
+  end;
+
+  insert into public.cita_items (cita_id, servicio_id, paquete_id, credito_id, nombre, precio, duracion_min)
+  select v_cita,
+         (e.value ->> 'servicio_id')::uuid,
+         (e.value ->> 'paquete_id')::uuid,
+         (e.value ->> 'credito_id')::uuid,
+         e.value ->> 'nombre',
+         (e.value ->> 'precio')::numeric,
+         (e.value ->> 'duracion_min')::int
+    from jsonb_array_elements(v_items) as e(value);
+
+  -- Un consentimiento por cada tipo distinto (política activa de ese tipo), con la firma recibida.
+  if p_firma_svg is not null then
+    insert into public.consentimientos (cliente_id, cita_id, politica_id, ficha_salud_id, nombre_firmante,
+                                        firma_svg, es_menor, tutor_nombre, ip, user_agent)
+    select p_cliente_id, v_cita, po.id, v_ficha.id, btrim(p_nombre_firmante), p_firma_svg,
+           v_es_menor, case when v_es_menor then nullif(btrim(p_tutor_nombre), '') end,
+           public.ip_solicitud(), p_user_agent
+      from public.politicas po
+     where po.activa and po.tipo = any (v_tipos);
+  end if;
+
+  return jsonb_build_object(
+    'id', v_cita,
+    'estado', v_estado,
+    'requiere_revision', cardinality(v_alertas) > 0,
+    'alertas', to_jsonb(v_alertas));
+end;
+$$;
+
+-- R4 · la clienta reserva (con firma del consentimiento)
+create or replace function public.reservar_cita(
+  p_items jsonb,
+  p_inicio timestamptz,
+  p_nombre_firmante text,
+  p_firma_svg text,
+  p_personal_id uuid default null,
+  p_notas text default null,
+  p_tutor_nombre text default null,
+  p_user_agent text default null
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_cfg     public.configuracion := public.configuracion_actual();
+  v_tz      text := coalesce(v_cfg.zona_horaria, 'America/Mexico_City');
+  v_cliente public.clientes;
+  v_edad    int;
+begin
+  if auth.uid() is null then
+    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+  select * into v_cliente from public.clientes c where c.usuario_id = auth.uid();
+  if not found then
+    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+
+  if exists (select 1 from public.politicas po
+              where po.activa
+                and po.tipo in ('terminos', 'privacidad', 'cancelacion')
+                and not exists (select 1 from public.aceptaciones_politica a
+                                 where a.politica_id = po.id and a.cliente_id = v_cliente.id)) then
+    raise exception using
+      message = 'Antes de reservar necesitas aceptar los términos, el aviso de privacidad y la política de cancelación.',
+      errcode = 'P0001';
+  end if;
+
+  if not exists (select 1 from public.fichas_salud f where f.cliente_id = v_cliente.id) then
+    raise exception using message = 'Antes de reservar necesitas llenar tu ficha de salud.', errcode = 'P0001';
+  end if;
+
+  if v_cliente.fecha_nacimiento is not null then
+    v_edad := public.edad_en(v_cliente.fecha_nacimiento,
+                             coalesce((p_inicio at time zone v_tz)::date, public.hoy_local()));
+    if v_edad < coalesce(v_cfg.edad_minima, 15) then
+      raise exception using
+        message = format('Atendemos a partir de los %s años.', coalesce(v_cfg.edad_minima, 15)),
+        errcode = 'P0001';
+    end if;
+    if v_edad < coalesce(v_cfg.edad_mayoria, 18) and nullif(btrim(p_tutor_nombre), '') is null then
+      raise exception using
+        message = 'Por ser menor de edad, escribe el nombre de mamá, papá o tutor que te acompañará.',
+        errcode = 'P0001';
+    end if;
+  end if;
+
+  if nullif(btrim(p_nombre_firmante), '') is null or nullif(btrim(p_firma_svg), '') is null then
+    raise exception using message = 'Falta tu firma o tu nombre completo.', errcode = 'P0001';
+  end if;
+
+  return public.crear_cita_interna(v_cliente.id, p_items, p_inicio, p_personal_id, 'web', p_notas, false,
+                                   p_nombre_firmante, p_firma_svg, p_tutor_nombre, p_user_agent);
+end;
+$$;
+
+-- El personal agenda por WhatsApp / mostrador / teléfono (la cita nace sin firma).
+create or replace function public.reservar_cita_staff(
+  p_cliente_id uuid,
+  p_items jsonb,
+  p_inicio timestamptz,
+  p_personal_id uuid default null,
+  p_origen public.origen_cita default 'whatsapp',
+  p_notas text default null
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_cfg     public.configuracion := public.configuracion_actual();
+  v_tz      text := coalesce(v_cfg.zona_horaria, 'America/Mexico_City');
+  v_cliente public.clientes;
+begin
+  if not public.es_personal() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  select * into v_cliente from public.clientes c where c.id = p_cliente_id;
+  if not found then
+    raise exception using message = 'No encontramos a esa clienta.', errcode = 'P0001';
+  end if;
+  if v_cliente.fecha_nacimiento is not null
+     and public.edad_en(v_cliente.fecha_nacimiento, coalesce((p_inicio at time zone v_tz)::date, public.hoy_local()))
+         < coalesce(v_cfg.edad_minima, 15) then
+    raise exception using
+      message = format('Atendemos a partir de los %s años.', coalesce(v_cfg.edad_minima, 15)),
+      errcode = 'P0001';
+  end if;
+
+  return public.crear_cita_interna(p_cliente_id, p_items, p_inicio, p_personal_id,
+                                   coalesce(p_origen, 'whatsapp'), p_notas, true,
+                                   null, null, null, null);
+end;
+$$;
+
+-- R6 · firma posterior (portal de la clienta o tablet de la cabina)
+create or replace function public.firmar_consentimiento_cita(
+  p_cita_id uuid,
+  p_nombre_firmante text,
+  p_firma_svg text,
+  p_tutor_nombre text default null,
+  p_user_agent text default null
+)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_cfg      public.configuracion := public.configuracion_actual();
+  v_tz       text := coalesce(v_cfg.zona_horaria, 'America/Mexico_City');
+  v_cita     public.citas;
+  v_cliente  public.clientes;
+  v_ficha    uuid;
+  v_es_menor boolean := false;
+begin
+  if auth.uid() is null then
+    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+  select * into v_cita from public.citas c where c.id = p_cita_id;
+  if not found then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  select * into v_cliente from public.clientes c where c.id = v_cita.cliente_id;
+  if not public.es_personal() and v_cliente.usuario_id is distinct from auth.uid() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  if v_cita.estado in ('cancelada', 'no_asistio') then
+    raise exception using message = 'Esta cita está cancelada.', errcode = 'P0001';
+  end if;
+
+  if v_cliente.fecha_nacimiento is not null then
+    v_es_menor := public.edad_en(v_cliente.fecha_nacimiento, (v_cita.inicio at time zone v_tz)::date)
+                  < coalesce(v_cfg.edad_mayoria, 18);
+    if v_es_menor and nullif(btrim(p_tutor_nombre), '') is null then
+      raise exception using
+        message = 'Por ser menor de edad, escribe el nombre de mamá, papá o tutor que te acompañará.',
+        errcode = 'P0001';
+    end if;
+  end if;
+
+  if nullif(btrim(p_nombre_firmante), '') is null or nullif(btrim(p_firma_svg), '') is null then
+    raise exception using message = 'Falta tu firma o tu nombre completo.', errcode = 'P0001';
+  end if;
+
+  select f.id into v_ficha
+    from public.fichas_salud f
+   where f.cliente_id = v_cita.cliente_id
+   order by f.creado_en desc, f.id desc
+   limit 1;
+
+  insert into public.consentimientos (cliente_id, cita_id, politica_id, ficha_salud_id, nombre_firmante,
+                                      firma_svg, es_menor, tutor_nombre, ip, user_agent)
+  select v_cita.cliente_id, v_cita.id, po.id, v_ficha, btrim(p_nombre_firmante), p_firma_svg,
+         v_es_menor, case when v_es_menor then nullif(btrim(p_tutor_nombre), '') end,
+         public.ip_solicitud(), p_user_agent
+    from public.politicas po
+   where po.activa
+     and po.tipo in (
+           select s.tipo_consentimiento
+             from public.cita_items ci
+             join public.servicios s on s.id = ci.servicio_id
+            where ci.cita_id = v_cita.id and s.tipo_consentimiento is not null
+           union
+           select s.tipo_consentimiento
+             from public.cita_items ci
+             join public.paquete_servicios ps on ps.paquete_id = ci.paquete_id
+             join public.servicios s on s.id = ps.servicio_id
+            where ci.cita_id = v_cita.id and s.tipo_consentimiento is not null)
+     and not exists (select 1 from public.consentimientos co
+                      where co.cita_id = v_cita.id and co.politica_id = po.id);
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- R5 · cancelar (dueña con anticipación; personal siempre). Devuelve créditos.
+-- -----------------------------------------------------------------------------
+create or replace function public.cancelar_cita_interna(p_cita_id uuid, p_motivo text)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+begin
+  update public.citas
+     set estado = 'cancelada',
+         cancelada_en = now(),
+         motivo_cancelacion = nullif(btrim(p_motivo), '')
+   where id = p_cita_id;
+
+  update public.creditos cr
+     set usados = greatest(cr.usados - x.n, 0)
+    from (select ci.credito_id, count(*)::int as n
+            from public.cita_items ci
+           where ci.cita_id = p_cita_id and ci.credito_id is not null
+           group by ci.credito_id) x
+   where cr.id = x.credito_id;
+end;
+$$;
+
+create or replace function public.cancelar_cita(p_cita_id uuid, p_motivo text default null)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_cfg  public.configuracion := public.configuracion_actual();
+  v_cita public.citas;
+begin
+  if auth.uid() is null then
+    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+  select * into v_cita from public.citas c where c.id = p_cita_id for update;
+  if not found then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+
+  if public.es_personal() then
+    if v_cita.estado in ('cancelada', 'completada', 'no_asistio') then
+      raise exception using message = 'Esta cita ya no se puede cancelar.', errcode = 'P0001';
+    end if;
+  else
+    if v_cita.cliente_id is distinct from public.mi_cliente_id() then
+      raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+    end if;
+    if v_cita.estado not in ('pendiente', 'confirmada') then
+      raise exception using message = 'Esta cita ya no se puede cancelar.', errcode = 'P0001';
+    end if;
+    if v_cita.inicio - now() < make_interval(hours => coalesce(v_cfg.horas_cancelacion, 24)) then
+      raise exception using
+        message = format('Faltan menos de %s horas para tu cita. Escríbenos por WhatsApp al %s.',
+                         coalesce(v_cfg.horas_cancelacion, 24),
+                         coalesce(public.telefono_legible(v_cfg.telefono_whatsapp), '442 170 1466')),
+        errcode = 'P0001';
+    end if;
+  end if;
+
+  perform public.cancelar_cita_interna(p_cita_id, p_motivo);
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- R7 · completar (consumo de insumos según recetas; idempotente)
+-- -----------------------------------------------------------------------------
+create or replace function public.completar_cita_interna(p_cita_id uuid)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_cita public.citas;
+begin
+  select * into v_cita from public.citas c where c.id = p_cita_id for update;
+  if not found then
+    raise exception using message = 'No encontramos esa cita.', errcode = 'P0001';
+  end if;
+  if v_cita.estado in ('cancelada', 'no_asistio') then
+    raise exception using message = 'Esta cita está cancelada.', errcode = 'P0001';
+  end if;
+  if not exists (select 1 from public.consentimientos co where co.cita_id = p_cita_id) then
+    raise exception using
+      message = 'Sin consentimiento firmado no hay servicio: pide a la clienta que firme primero.',
+      errcode = 'P0001';
+  end if;
+  if v_cita.estado = 'completada' then
+    return;   -- ya estaba completada: no se descuenta dos veces
+  end if;
+
+  update public.citas set estado = 'completada' where id = p_cita_id;
+
+  if exists (select 1 from public.movimientos_inventario m
+              where m.cita_id = p_cita_id and m.tipo = 'consumo') then
+    return;
+  end if;
+
+  insert into public.movimientos_inventario (producto_id, tipo, cantidad, costo_unitario, cita_id, nota, creado_por)
+  select r.producto_id,
+         'consumo',
+         -sum(r.cantidad * x.veces),
+         pr.costo_unitario,
+         p_cita_id,
+         'Consumo de la cita',
+         auth.uid()
+    from (
+          select ci.servicio_id, 1 as veces
+            from public.cita_items ci
+           where ci.cita_id = p_cita_id and ci.servicio_id is not null
+          union all
+          select ps.servicio_id, ps.cantidad as veces
+            from public.cita_items ci
+            join public.paquete_servicios ps on ps.paquete_id = ci.paquete_id
+           where ci.cita_id = p_cita_id and ci.paquete_id is not null
+         ) x
+    join public.recetas_servicio r on r.servicio_id = x.servicio_id
+    join public.productos pr on pr.id = r.producto_id
+   group by r.producto_id, pr.costo_unitario;
+end;
+$$;
+
+create or replace function public.completar_cita(p_cita_id uuid)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+begin
+  if not public.es_personal() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  perform public.completar_cita_interna(p_cita_id);
+end;
+$$;
+
+-- R6 · cambio de estado por el personal
+create or replace function public.cambiar_estado_cita(p_cita_id uuid, p_estado public.estado_cita)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_cita public.citas;
+begin
+  if not public.es_personal() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  select * into v_cita from public.citas c where c.id = p_cita_id for update;
+  if not found then
+    raise exception using message = 'No encontramos esa cita.', errcode = 'P0001';
+  end if;
+  if p_estado is null or p_estado = v_cita.estado then
+    return;
+  end if;
+  if v_cita.estado = 'cancelada' then
+    raise exception using message = 'Esta cita está cancelada.', errcode = 'P0001';
+  end if;
+  if v_cita.estado = 'completada' then
+    raise exception using message = 'Esta cita ya se completó.', errcode = 'P0001';
+  end if;
+
+  if p_estado = 'completada' then
+    perform public.completar_cita_interna(p_cita_id);
+    return;
+  end if;
+  if p_estado = 'cancelada' then
+    perform public.cancelar_cita_interna(p_cita_id, null);
+    return;
+  end if;
+  if p_estado = 'en_curso'
+     and not exists (select 1 from public.consentimientos co where co.cita_id = p_cita_id) then
+    raise exception using
+      message = 'Sin consentimiento firmado no hay servicio: pide a la clienta que firme primero.',
+      errcode = 'P0001';
+  end if;
+
+  begin
+    update public.citas
+       set estado = p_estado,
+           requiere_revision = case when p_estado = 'confirmada' then false else requiere_revision end
+     where id = p_cita_id;
+  exception when exclusion_violation then
+    raise exception using message = 'Ese horario se acaba de ocupar, elige otro.', errcode = 'P0001';
+  end;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- R8 · pedidos (tienda en línea; se paga en el spa o por transferencia)
+-- -----------------------------------------------------------------------------
+create or replace function public.crear_pedido(
+  p_items jsonb,
+  p_metodo_pago public.metodo_pago default 'efectivo',
+  p_notas text default null
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_cliente   uuid;
+  v_item      jsonb;
+  v_tipo      text;
+  v_id        uuid;
+  v_cantidad  int;
+  v_regalo    text;
+  v_desc      text;
+  v_precio    numeric(10,2);
+  v_pedido    uuid;
+  v_folio     text;
+  v_total     numeric(10,2) := 0;
+  v_lineas    jsonb := '[]'::jsonb;
+begin
+  if auth.uid() is null then
+    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+  v_cliente := public.mi_cliente_id();
+  if v_cliente is null then
+    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
+    raise exception using message = 'Tu carrito está vacío.', errcode = 'P0001';
+  end if;
+
+  for v_item in select e.value from jsonb_array_elements(p_items) as e(value) loop
+    v_tipo := v_item ->> 'tipo';
+    v_id := nullif(v_item ->> 'id', '')::uuid;
+    v_cantidad := coalesce(nullif(v_item ->> 'cantidad', '')::int, 1);
+    v_regalo := nullif(btrim(v_item ->> 'regalo_para'), '');
+    v_desc := null;
+    v_precio := null;
+
+    if v_cantidad < 1 then
+      raise exception using message = 'La cantidad debe ser al menos 1.', errcode = 'P0001';
+    end if;
+
+    if v_tipo = 'servicio' then
+      select s.nombre, s.precio into v_desc, v_precio
+        from public.servicios s
+       where s.id = v_id and s.activo and s.etapa = 'disponible' and s.vendible_en_linea and s.precio is not null;
+    elsif v_tipo = 'paquete' then
+      select p.nombre, p.precio into v_desc, v_precio
+        from public.paquetes p
+       where p.id = v_id and p.activo and p.precio is not null;
+    elsif v_tipo = 'producto' then
+      select pr.nombre || coalesce(' · ' || pr.presentacion, ''), pr.precio_venta into v_desc, v_precio
+        from public.productos pr
+       where pr.id = v_id and pr.activo and pr.vendible_en_linea and pr.precio_venta is not null;
+    end if;
+
+    if v_desc is null or v_precio is null then
+      raise exception using message = 'Uno de los productos ya no está disponible para compra en línea.', errcode = 'P0001';
+    end if;
+
+    v_total := v_total + v_cantidad * v_precio;
+    v_lineas := v_lineas || jsonb_build_array(jsonb_build_object(
+      'tipo', v_tipo, 'id', v_id, 'cantidad', v_cantidad, 'descripcion', v_desc,
+      'precio', v_precio, 'regalo_para', v_regalo));
+  end loop;
+
+  insert into public.pedidos (cliente_id, total, metodo_pago_preferido, notas)
+  values (v_cliente, v_total, coalesce(p_metodo_pago, 'efectivo'), nullif(btrim(p_notas), ''))
+  returning id, folio into v_pedido, v_folio;
+
+  insert into public.pedido_items (pedido_id, tipo, servicio_id, paquete_id, producto_id, descripcion,
+                                   cantidad, precio_unitario, regalo_para)
+  select v_pedido,
+         (l.value ->> 'tipo')::public.tipo_item_pedido,
+         case when l.value ->> 'tipo' = 'servicio' then (l.value ->> 'id')::uuid end,
+         case when l.value ->> 'tipo' = 'paquete'  then (l.value ->> 'id')::uuid end,
+         case when l.value ->> 'tipo' = 'producto' then (l.value ->> 'id')::uuid end,
+         l.value ->> 'descripcion',
+         (l.value ->> 'cantidad')::int,
+         (l.value ->> 'precio')::numeric,
+         l.value ->> 'regalo_para'
+    from jsonb_array_elements(v_lineas) as l(value);
+
+  return jsonb_build_object('id', v_pedido, 'folio', v_folio, 'total', v_total);
+end;
+$$;
+
+create or replace function public.cancelar_pedido(p_pedido_id uuid)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_pedido public.pedidos;
+begin
+  if auth.uid() is null then
+    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+  select * into v_pedido from public.pedidos p where p.id = p_pedido_id for update;
+  if not found
+     or (not public.es_personal() and v_pedido.cliente_id is distinct from public.mi_cliente_id()) then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  if v_pedido.estado <> 'pendiente_pago' then
+    raise exception using message = 'Este pedido ya no se puede cancelar.', errcode = 'P0001';
+  end if;
+  update public.pedidos set estado = 'cancelado', cancelado_en = now() where id = p_pedido_id;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- R9 · pagos (personal). Al liquidar un pedido: créditos y salida de productos.
+-- -----------------------------------------------------------------------------
+create or replace function public.liquidar_pedido_interna(p_pedido_id uuid)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_cfg     public.configuracion := public.configuracion_actual();
+  v_hoy     date := public.hoy_local();
+  v_pedido  public.pedidos;
+  v_it      record;
+  v_ps      record;
+  v_regalo  boolean;
+begin
+  select * into v_pedido from public.pedidos p where p.id = p_pedido_id for update;
+  if v_pedido.estado <> 'pendiente_pago' then
+    return;
+  end if;
+  update public.pedidos set estado = 'pagado', pagado_en = now() where id = p_pedido_id;
+
+  for v_it in
+    select pi.*, pa.tipo as paquete_tipo, pa.vigencia_dias
+      from public.pedido_items pi
+      left join public.paquetes pa on pa.id = pi.paquete_id
+     where pi.pedido_id = p_pedido_id
+     order by pi.id
+  loop
+    v_regalo := nullif(btrim(v_it.regalo_para), '') is not null;
+
+    if v_it.tipo = 'servicio' then
+      insert into public.creditos (cliente_id, servicio_id, cantidad, pedido_item_id, codigo_regalo, regalo_para, vence_en)
+      values (v_pedido.cliente_id, v_it.servicio_id, v_it.cantidad, v_it.id,
+              case when v_regalo then public.generar_codigo_regalo() end,
+              case when v_regalo then btrim(v_it.regalo_para) end,
+              v_hoy + coalesce(v_cfg.vigencia_creditos_dias, 365));
+
+    elsif v_it.tipo = 'paquete' and v_it.paquete_tipo = 'combo' then
+      insert into public.creditos (cliente_id, paquete_id, cantidad, pedido_item_id, codigo_regalo, regalo_para, vence_en)
+      values (v_pedido.cliente_id, v_it.paquete_id, v_it.cantidad, v_it.id,
+              case when v_regalo then public.generar_codigo_regalo() end,
+              case when v_regalo then btrim(v_it.regalo_para) end,
+              v_hoy + coalesce(v_it.vigencia_dias, v_cfg.vigencia_creditos_dias, 365));
+
+    elsif v_it.tipo = 'paquete' then   -- bono: N sesiones de su(s) servicio(s)
+      for v_ps in select ps.servicio_id, ps.cantidad from public.paquete_servicios ps where ps.paquete_id = v_it.paquete_id loop
+        insert into public.creditos (cliente_id, servicio_id, cantidad, pedido_item_id, codigo_regalo, regalo_para, vence_en)
+        values (v_pedido.cliente_id, v_ps.servicio_id, v_it.cantidad * v_ps.cantidad, v_it.id,
+                case when v_regalo then public.generar_codigo_regalo() end,
+                case when v_regalo then btrim(v_it.regalo_para) end,
+                v_hoy + coalesce(v_it.vigencia_dias, v_cfg.vigencia_creditos_dias, 365));
+      end loop;
+
+    elsif v_it.tipo = 'producto' then
+      insert into public.movimientos_inventario (producto_id, tipo, cantidad, costo_unitario, pedido_id, nota, creado_por)
+      select pr.id, 'venta', -v_it.cantidad, pr.costo_unitario, p_pedido_id,
+             'Venta del pedido ' || coalesce(v_pedido.folio, ''), auth.uid()
+        from public.productos pr
+       where pr.id = v_it.producto_id;
+    end if;
+  end loop;
+end;
+$$;
+
+create or replace function public.registrar_pago(
+  p_monto numeric,
+  p_metodo public.metodo_pago,
+  p_pedido_id uuid default null,
+  p_cita_id uuid default null,
+  p_referencia text default null,
+  p_propina numeric default 0
+)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_pedido public.pedidos;
+  v_pago   uuid;
+  v_pagado numeric;
+begin
+  if not public.es_personal() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  if p_pedido_id is null and p_cita_id is null then
+    raise exception using message = 'Indica el pedido o la cita que se está pagando.', errcode = 'P0001';
+  end if;
+  if p_monto is null or p_monto <= 0 then
+    raise exception using message = 'El monto debe ser mayor a cero.', errcode = 'P0001';
+  end if;
+  if coalesce(p_propina, 0) < 0 then
+    raise exception using message = 'La propina no puede ser negativa.', errcode = 'P0001';
+  end if;
+  if p_metodo is null then
+    raise exception using message = 'Elige el método de pago.', errcode = 'P0001';
+  end if;
+
+  if p_pedido_id is not null then
+    select * into v_pedido from public.pedidos p where p.id = p_pedido_id for update;
+    if not found then
+      raise exception using message = 'No encontramos ese pedido.', errcode = 'P0001';
+    end if;
+    if v_pedido.estado in ('cancelado', 'reembolsado') then
+      raise exception using message = 'Ese pedido está cancelado.', errcode = 'P0001';
+    end if;
+  end if;
+  if p_cita_id is not null and not exists (select 1 from public.citas c where c.id = p_cita_id) then
+    raise exception using message = 'No encontramos esa cita.', errcode = 'P0001';
+  end if;
+
+  insert into public.pagos (pedido_id, cita_id, monto, propina, metodo, referencia, recibido_por)
+  values (p_pedido_id, p_cita_id, round(p_monto, 2), round(coalesce(p_propina, 0), 2), p_metodo,
+          nullif(btrim(p_referencia), ''), auth.uid())
+  returning id into v_pago;
+
+  if p_pedido_id is not null and v_pedido.estado = 'pendiente_pago' then
+    select coalesce(sum(pg.monto), 0) into v_pagado from public.pagos pg where pg.pedido_id = p_pedido_id;
+    if v_pagado >= v_pedido.total then
+      perform public.liquidar_pedido_interna(p_pedido_id);
+    end if;
+  end if;
+
+  return v_pago;
+end;
+$$;
+
+-- R10 · canjear un regalo: el crédito pasa a la clienta que canjea.
+create or replace function public.canjear_regalo(p_codigo text)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_cliente uuid;
+  v_codigo  text := upper(regexp_replace(coalesce(p_codigo, ''), '[^A-Za-z0-9]', '', 'g'));
+  v_credito uuid;
+begin
+  if auth.uid() is null then
+    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+  v_cliente := public.mi_cliente_id();
+  if v_cliente is null then
+    raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+
+  select cr.id into v_credito
+    from public.creditos cr
+   where v_codigo <> '' and cr.codigo_regalo = v_codigo
+   for update;
+  if v_credito is null then
+    raise exception using message = 'Ese código de regalo no existe o ya se canjeó.', errcode = 'P0001';
+  end if;
+
+  update public.creditos
+     set cliente_id = v_cliente,
+         codigo_regalo = null
+   where id = v_credito;
+  return v_credito;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- R11 · compras e inventario (personal)
+-- -----------------------------------------------------------------------------
+create or replace function public.registrar_compra(
+  p_items jsonb,
+  p_proveedor_id uuid default null,
+  p_fecha date default public.hoy_local(),   -- "hoy" en Querétaro (current_date sería UTC)
+  p_folio text default null,
+  p_notas text default null
+)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_compra uuid;
+  v_item   jsonb;
+  v_prod   public.productos;
+  v_pres   numeric;
+  v_costo  numeric;
+  v_total  numeric(10,2) := 0;
+begin
+  if not public.es_personal() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
+    raise exception using message = 'Agrega al menos un producto a la compra.', errcode = 'P0001';
+  end if;
+  if p_proveedor_id is not null and not exists (select 1 from public.proveedores pv where pv.id = p_proveedor_id) then
+    raise exception using message = 'No encontramos ese proveedor.', errcode = 'P0001';
+  end if;
+
+  insert into public.compras (proveedor_id, fecha, folio, notas, registrada_por)
+  values (p_proveedor_id, coalesce(p_fecha, public.hoy_local()), nullif(btrim(p_folio), ''),
+          nullif(btrim(p_notas), ''), auth.uid())
+  returning id into v_compra;
+
+  for v_item in select e.value from jsonb_array_elements(p_items) as e(value) loop
+    select * into v_prod from public.productos pr
+     where pr.id = nullif(v_item ->> 'producto_id', '')::uuid
+     for update;
+    if not found then
+      raise exception using message = 'Uno de los productos de la compra no existe.', errcode = 'P0001';
+    end if;
+    v_pres := nullif(v_item ->> 'presentaciones', '')::numeric;
+    v_costo := coalesce(nullif(v_item ->> 'costo_presentacion', '')::numeric, v_prod.costo_presentacion);
+    if v_pres is null or v_pres <= 0 then
+      raise exception using message = 'Las presentaciones compradas deben ser más de cero.', errcode = 'P0001';
+    end if;
+    if v_costo < 0 then
+      raise exception using message = 'El costo no puede ser negativo.', errcode = 'P0001';
+    end if;
+
+    insert into public.compra_items (compra_id, producto_id, presentaciones, costo_presentacion)
+    values (v_compra, v_prod.id, v_pres, v_costo);
+
+    -- El costo vigente es el de la última compra.
+    update public.productos set costo_presentacion = v_costo where id = v_prod.id;
+
+    insert into public.movimientos_inventario (producto_id, tipo, cantidad, costo_unitario, compra_id, nota, creado_por)
+    select pr.id, 'compra', v_pres * pr.contenido_presentacion, pr.costo_unitario, v_compra,
+           'Compra' || coalesce(' ' || nullif(btrim(p_folio), ''), ''), auth.uid()
+      from public.productos pr
+     where pr.id = v_prod.id;
+
+    v_total := v_total + round(v_pres * v_costo, 2);
+  end loop;
+
+  update public.compras set total = v_total where id = v_compra;
+  return v_compra;
+end;
+$$;
+
+create or replace function public.ajustar_inventario(
+  p_producto_id uuid,
+  p_cantidad numeric,
+  p_tipo public.tipo_movimiento,
+  p_nota text default null
+)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_cantidad numeric := p_cantidad;
+begin
+  if not public.es_personal() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  if p_tipo is null or p_tipo not in ('ajuste', 'merma') then
+    raise exception using message = 'Sólo se registran ajustes o mermas.', errcode = 'P0001';
+  end if;
+  if v_cantidad is null or v_cantidad = 0 then
+    raise exception using message = 'La cantidad no puede ser cero.', errcode = 'P0001';
+  end if;
+  if p_tipo = 'merma' then
+    v_cantidad := -abs(v_cantidad);   -- una merma siempre resta
+  end if;
+  if not exists (select 1 from public.productos pr where pr.id = p_producto_id) then
+    raise exception using message = 'No encontramos ese producto.', errcode = 'P0001';
+  end if;
+
+  insert into public.movimientos_inventario (producto_id, tipo, cantidad, costo_unitario, nota, creado_por)
+  select pr.id, p_tipo, v_cantidad, pr.costo_unitario, nullif(btrim(p_nota), ''), auth.uid()
+    from public.productos pr
+   where pr.id = p_producto_id;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- R13 · publicar una versión nueva de una política (admin)
+-- -----------------------------------------------------------------------------
+create or replace function public.publicar_politica(p_tipo public.tipo_politica, p_titulo text, p_contenido_md text)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_id uuid;
+  v_version int;
+begin
+  if not public.es_admin() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  if p_tipo is null or nullif(btrim(p_titulo), '') is null or nullif(btrim(p_contenido_md), '') is null then
+    raise exception using message = 'Escribe el título y el contenido de la política.', errcode = 'P0001';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext('opalo.politica.' || p_tipo::text));
+
+  select coalesce(max(p.version), 0) + 1 into v_version from public.politicas p where p.tipo = p_tipo;
+  update public.politicas set activa = false where tipo = p_tipo and activa;
+
+  insert into public.politicas (tipo, version, titulo, contenido_md, activa, vigente_desde)
+  values (p_tipo, v_version, btrim(p_titulo), p_contenido_md, true, now())
+  returning id into v_id;
+  return v_id;
+end;
+$$;
