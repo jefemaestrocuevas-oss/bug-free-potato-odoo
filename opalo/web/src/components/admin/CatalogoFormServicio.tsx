@@ -48,6 +48,9 @@ export function CatalogoFormServicio({ servicio, categorias, slugsUsados, catego
   const nOrden = orden.trim() === '' ? 0 : Number(orden);
   const ordenInvalido = !Number.isInteger(nOrden);
 
+  // Igual que la base: un servicio activo y disponible necesita su consentimiento (sin firma no hay servicio).
+  const pideConsentimiento = activo && etapa === 'disponible';
+
   const errores = {
     nombre: !nombre.trim() ? 'Escribe el nombre del servicio.' : null,
     slug: !s && !slugFinal ? 'El identificador necesita al menos una letra o número.' : slugOcupado ? `Ya hay otro registro con el identificador «${slugFinal}»: ${slugsUsados.get(slugFinal)}. Escribe otro.` : null,
@@ -56,6 +59,7 @@ export function CatalogoFormServicio({ servicio, categorias, slugsUsados, catego
     durPrimera: Number.isNaN(nDurPrimera) ? 'La duración de la primera vez va en minutos enteros (o vacía).' : null,
     precio: precioInvalido ? 'Revisa el precio: un número mayor o igual a cero, o vacío si está por confirmar.' : null,
     orden: ordenInvalido ? 'El orden es un número entero.' : null,
+    consentimiento: pideConsentimiento && !consentimiento ? 'Elige qué consentimiento firma la clienta para este servicio.' : null,
   };
   const primerError = Object.values(errores).find(Boolean) ?? null;
 
@@ -261,16 +265,29 @@ export function CatalogoFormServicio({ servicio, categorias, slugsUsados, catego
               <label className="etiqueta" htmlFor="srv-consentimiento">
                 Consentimiento que firma la clienta
               </label>
-              <select id="srv-consentimiento" className="input" value={consentimiento} onChange={(e) => setConsentimiento(e.target.value as TipoPolitica | '')} aria-describedby="srv-consentimiento-ayuda">
-                <option value="">Ninguno</option>
+              <select
+                id="srv-consentimiento"
+                className="input"
+                value={consentimiento}
+                onChange={(e) => setConsentimiento(e.target.value as TipoPolitica | '')}
+                aria-invalid={marca('consentimiento')}
+                aria-describedby={marca('consentimiento') ? 'srv-consentimiento-error srv-consentimiento-ayuda' : 'srv-consentimiento-ayuda'}
+              >
+                <option value="">{pideConsentimiento ? 'Elige un consentimiento' : 'Ninguno'}</option>
                 {opcionesConsentimiento.map((t) => (
                   <option key={t} value={t}>
                     {ETIQUETA_POLITICA[t] ?? t}
                   </option>
                 ))}
               </select>
+              {marca('consentimiento') && (
+                <span className="cat-error-campo" id="srv-consentimiento-error">
+                  {errores.consentimiento}
+                </span>
+              )}
               <span className="ayuda" id="srv-consentimiento-ayuda">
                 Se firma al reservar o en cabina. Sin consentimiento firmado la cita no puede iniciar.
+                {pideConsentimiento ? ' Es obligatorio mientras el servicio esté activo y disponible.' : ''}
               </span>
             </div>
           </div>

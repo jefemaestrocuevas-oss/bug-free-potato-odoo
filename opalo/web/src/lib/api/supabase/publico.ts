@@ -12,6 +12,7 @@ import {
   aProductoTienda,
   aServicio,
   aSlot,
+  COLUMNAS_CONFIGURACION,
   compararPoliticas,
   num,
   texto,
@@ -55,7 +56,7 @@ export function crearApiPublica(ctx: Contexto): ApiPublica {
 
   return {
     async getConfiguracion() {
-      const f = await ctx.fila(sb.from('configuracion').select('*').eq('id', 1).maybeSingle());
+      const f = await ctx.fila(sb.from('configuracion').select(COLUMNAS_CONFIGURACION).eq('id', 1).maybeSingle());
       return aConfiguracion(f);
     },
 

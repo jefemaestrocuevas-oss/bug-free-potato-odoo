@@ -1,7 +1,9 @@
 // Paso 6: resumen final + firma del consentimiento en pantalla + confirmar.
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { DatosFirma, Slot, TipoPolitica } from '../../lib/api/tipos';
-import { duracion, ETIQUETA_POLITICA, fechaLarga, hora } from '../../lib/format';
+import { duracion, enlaceWhatsApp, ETIQUETA_POLITICA, fechaLarga, hora } from '../../lib/format';
+import { useContacto } from '../publico/contacto';
 import { PanelFirma } from '../ui/PanelFirma';
 import { PieAsistente, type LineaResumen } from './Piezas';
 import { notaPago, unirConY, type Total } from './utilidades';
@@ -27,8 +29,14 @@ interface Props {
 export function PasoFirma(p: Props) {
   const [firma, setFirma] = useState<DatosFirma | null>(null);
   const [errorLocal, setErrorLocal] = useState<string | null>(null);
-  const errorRef = useRef<HTMLParagraphElement>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
   const error = errorLocal ?? p.error;
+  const contacto = useContacto();
+
+  // Un error del servidor (p. ej. 'Ya tienes 3 citas próximas…') también se enfoca para que no pase desapercibido.
+  useEffect(() => {
+    if (p.error) requestAnimationFrame(() => errorRef.current?.focus());
+  }, [p.error]);
 
   const documentos = p.tipos.map((t) => (ETIQUETA_POLITICA[t] ?? t).replace(/^Consentimiento informado · /, '').toLowerCase());
   const leyenda = documentos.length
@@ -111,9 +119,27 @@ export function PasoFirma(p: Props) {
       </section>
 
       {error && (
-        <p className="aviso aviso-error rv-error" role="alert" tabIndex={-1} ref={errorRef}>
-          {error}
-        </p>
+        <div className="aviso aviso-error rv-error" role="alert" tabIndex={-1} ref={errorRef}>
+          <span>
+            {error}
+            {/citas próximas/.test(error) && (
+              <>
+                {' '}
+                <Link to="/cuenta/citas">Ver mis citas</Link>
+              </>
+            )}
+          </span>
+          {/WhatsApp/.test(error) && (
+            <a
+              className="btn btn-secundario btn-sm"
+              href={enlaceWhatsApp(contacto.telefono_whatsapp, 'Hola, Ópalo. Necesito ayuda con mi reserva en línea.')}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Escribir por WhatsApp<span className="sr-only"> (se abre en otra pestaña)</span>
+            </a>
+          )}
+        </div>
       )}
 
       <PieAsistente

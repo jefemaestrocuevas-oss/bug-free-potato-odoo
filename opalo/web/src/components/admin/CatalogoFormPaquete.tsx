@@ -10,6 +10,10 @@ import { Casilla } from './Piezas';
 import { CatalogoEntrada, enteroDe, slugDe, sumaPorSeparado } from './CatalogoPiezas';
 import { ETIQUETA_ETAPA, aNumero, aTexto, textoONulo } from './util';
 
+/** Igual que guardar_paquete (ESPEC §5.1: cantidades enteras 1–99). */
+const CANTIDAD_MAXIMA = 99;
+const MSG_BONO = 'Un bono es de un solo servicio: elige sólo uno y cuántas sesiones incluye.';
+
 interface Linea {
   k: number;
   servicio_id: string;
@@ -64,16 +68,19 @@ export function CatalogoFormPaquete({ paquete, servicios, categorias, slugsUsado
   const repetidos = new Set(lineas.map((l) => l.servicio_id).filter((id, i, arr) => id && arr.indexOf(id) !== i));
   const cantidadMala = (l: Linea) => {
     const n = enteroDe(l.cantidad, 1);
-    return n === null || Number.isNaN(n);
+    return n === null || Number.isNaN(n) || n > CANTIDAD_MAXIMA;
   };
+  const serviciosElegidos = new Set(lineas.map((l) => l.servicio_id).filter(Boolean)).size;
+  const bonoDeVarios = tipo === 'bono' && serviciosElegidos > 1;
 
   const errores = {
     nombre: !nombre.trim() ? 'Escribe el nombre del paquete.' : null,
     slug: !p && !slugFinal ? 'El identificador necesita al menos una letra o número.' : slugOcupado ? `Ya hay otro registro con el identificador «${slugFinal}»: ${slugsUsados.get(slugFinal)}. Escribe otro.` : null,
     items: !lineas.some((l) => l.servicio_id) ? 'Agrega al menos un servicio al paquete.' : null,
+    bono: bonoDeVarios ? MSG_BONO : null,
     lineasVacias: lineas.some((l) => !l.servicio_id) && lineas.some((l) => l.servicio_id) ? 'Hay una línea sin servicio: elige uno o quítala.' : null,
     repetidos: repetidos.size ? 'Un servicio aparece dos veces: deja una sola línea y sube la cantidad.' : null,
-    cantidades: lineas.some((l) => l.servicio_id && cantidadMala(l)) ? 'Cada cantidad debe ser un número entero de 1 en adelante.' : null,
+    cantidades: lineas.some((l) => l.servicio_id && cantidadMala(l)) ? `Cada cantidad debe ser un número entero de 1 a ${CANTIDAD_MAXIMA}.` : null,
     precio: precioInvalido ? 'Revisa el precio: un número mayor o igual a cero, o vacío si está por confirmar.' : null,
     dur: Number.isNaN(nDur) ? 'La duración va en minutos enteros (o vacía).' : null,
     vigencia: Number.isNaN(nVigencia) ? 'La vigencia va en días enteros, de 1 en adelante (o vacía).' : null,
@@ -239,7 +246,9 @@ export function CatalogoFormPaquete({ paquete, servicios, categorias, slugsUsado
                       className="input"
                       value={l.servicio_id}
                       onChange={(e) => cambiarLinea(l.k, { servicio_id: e.target.value })}
-                      aria-invalid={(intentado && !l.servicio_id && !!errores.items) || repetidos.has(l.servicio_id) ? true : undefined}
+                      aria-invalid={
+                        (intentado && !l.servicio_id && !!errores.items) || repetidos.has(l.servicio_id) || (intentado && bonoDeVarios && !!l.servicio_id) ? true : undefined
+                      }
                     >
                       <option value="">Elige un servicio</option>
                       {grupos.map((g) => (
@@ -286,9 +295,7 @@ export function CatalogoFormPaquete({ paquete, servicios, categorias, slugsUsado
           <button type="button" className="btn btn-secundario btn-sm cat-agregar-linea" onClick={() => setLineas((ls) => [...ls, nueva()])}>
             <IconoMas tam={18} /> Agregar servicio
           </button>
-          {tipo === 'bono' && items.length > 1 && (
-            <p className="ayuda cat-nota">Un bono suele ser de un solo servicio. Si incluyes varios, la clienta recibe sesiones de cada uno.</p>
-          )}
+          {bonoDeVarios && <p className={intentado ? 'cat-error-campo cat-nota' : 'ayuda cat-nota'}>{MSG_BONO}</p>}
           {noReservables.length > 0 && (
             <div className="aviso aviso-alerta cat-aviso-compacto">
               <span>

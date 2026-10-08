@@ -37,6 +37,7 @@ import {
 } from '../tipos';
 import type {
   CabinaFila,
+  CanalFirma,
   CitaFila,
   ClienteFila,
   CreditoFila,
@@ -56,6 +57,7 @@ import {
   exigirAdmin,
   exigirPersonal,
   exigirSesion,
+  LIMITES,
   miCliente,
   miClienteOpcional,
   MSG,
@@ -66,6 +68,7 @@ import {
   esFecha,
   falla,
   fechaEnMes,
+  firmaValida,
   iso,
   ms,
   MS_HORA,
@@ -89,6 +92,8 @@ import {
 
 const ahoraIso = (ctx: Ctx) => ctx.ahora.toISOString();
 const hoyDe = (ctx: Ctx) => fechaLocal(ctx.ahora);
+/** WhatsApp de la configuración, legible ('442 170 1466'), como public.telefono_legible. */
+const telefonoWhatsApp = (db: Db) => telefonoBonito(db.configuracion.telefono_whatsapp) || '442 170 1466';
 
 // ======================================================================
 // Usuarios (auth.users + trigger tg_nuevo_usuario)
@@ -104,12 +109,15 @@ export interface DatosNuevoUsuario {
   fecha_nacimiento?: string | null;
 }
 
+/** Mínimo de la contraseña, igual que el adaptador de Supabase y el formulario de registro. */
+const PASSWORD_MIN = 8;
+
 /** Crea el usuario, su perfil y crea o vincula su fila de clientes (como el trigger). */
 export function crearUsuario(ctx: Ctx, d: DatosNuevoUsuario): UsuarioFila {
   const { db } = ctx;
   const email = (d.email ?? '').trim().toLowerCase();
   if (!emailValido(email)) falla(MSG_EXTRA.correoInvalido);
-  if ((d.password ?? '').length < 6) falla(MSG_EXTRA.password);
+  if ((d.password ?? '').length < PASSWORD_MIN) falla(MSG_EXTRA.password);
   if (!(d.nombre ?? '').trim()) falla(MSG_EXTRA.nombre);
   if (db.usuarios.some((u) => u.email === email)) falla(MSG_EXTRA.correoUsado);
   const t = ahoraIso(ctx);
@@ -149,10 +157,14 @@ export function crearUsuario(ctx: Ctx, d: DatosNuevoUsuario): UsuarioFila {
 export function actualizarMisDatos(ctx: Ctx, d: DatosCliente): ClienteFila {
   const c = miCliente(ctx);
   if (!(d.nombre ?? '').trim()) falla(MSG_EXTRA.nombre);
+  const fechaNacimiento = textoONulo(d.fecha_nacimiento);
+  // tg_clientes_proteger: la clienta captura su fecha de nacimiento una sola vez; después la corrige el personal.
+  if (!esPersonal(ctx) && c.fecha_nacimiento !== null && fechaNacimiento !== c.fecha_nacimiento)
+    falla(MSG.nacimientoRegistrado(telefonoWhatsApp(ctx.db)));
   c.nombre = d.nombre.trim();
   c.apellidos = textoONulo(d.apellidos);
   c.telefono = textoONulo(d.telefono);
-  c.fecha_nacimiento = textoONulo(d.fecha_nacimiento);
+  c.fecha_nacimiento = fechaNacimiento;
   c.acepta_promociones = !!d.acepta_promociones;
   c.actualizado_en = ahoraIso(ctx);
   return c;
@@ -162,6 +174,13 @@ export function actualizarMisDatos(ctx: Ctx, d: DatosCliente): ClienteFila {
 export function guardarFicha(ctx: Ctx, f: FichaSalud): string {
   const c = miCliente(ctx);
   if (f.acepta_datos_sensibles !== true) falla(MSG.datosSensibles);
+  const largo = (t: unknown) => (typeof t === 'string' ? t.length : 0);
+  if (
+    [f.alergias, f.medicamentos, f.observaciones].some((t) => largo(t) > LIMITES.campoFicha) ||
+    JSON.stringify(f.respuestas ?? {}).length > LIMITES.jsonFicha ||
+    JSON.stringify(f.detalles ?? {}).length > LIMITES.jsonFicha
+  )
+    falla(MSG.fichaLarga);
   const respuestas: Record<string, boolean> = {};
   for (const [k, v] of Object.entries(f.respuestas ?? {})) respuestas[k] = v === true;
   const detalles: Record<string, string> = {};
@@ -202,7 +221,7 @@ export function aceptarPoliticas(ctx: Ctx, ids: string[]): void {
 /** R13 publicar_politica: versión = max + 1, se activa y desactiva la anterior. */
 export function publicarPolitica(ctx: Ctx, tipo: TipoPolitica, titulo: string, contenido_md: string): string {
   exigirAdmin(ctx);
-  if (!ORDEN_POLITICAS.includes(tipo) || !(titulo ?? '').trim() || !(contenido_md ?? '').trim()) falla(MSG_EXTRA.datoFaltante);
+  if (!ORDEN_POLITICAS.includes(tipo) || !(titulo ?? '').trim() || !(contenido_md ?? '').trim()) falla(MSG.politicaDatos);
   return insertarPolitica(ctx.db, tipo, titulo.trim(), contenido_md, ahoraIso(ctx));
 }
 
@@ -266,7 +285,8 @@ export function duracionReserva(db: Db, items: ItemReserva[]): number {
   return Math.max(Math.ceil(total / paso) * paso, conf.duracion_sesion_min);
 }
 
-function resolverItems(db: Db, items: ItemReserva[], clienteId: string, hoy: string, staff: boolean): ItemResuelto[] {
+/** `vigencia`: el crédito debe estar vigente ese día (greatest(hoy, fecha local de la cita)). */
+function resolverItems(db: Db, items: ItemReserva[], clienteId: string, vigencia: string, staff: boolean): ItemResuelto[] {
   if (!Array.isArray(items) || items.length === 0) falla(MSG.sinServicios);
   const usos = new Map<string, number>();
   const res = items.map((it): ItemResuelto => {
@@ -291,7 +311,7 @@ function resolverItems(db: Db, items: ItemReserva[], clienteId: string, hoy: str
         !credito ||
         credito.cliente_id !== clienteId ||
         credito.codigo_regalo !== null || // regalo sin canjear: aún no es de nadie para reservar
-        (credito.vence_en !== null && credito.vence_en < hoy) ||
+        (credito.vence_en !== null && credito.vence_en < vigencia) ||
         credito.cantidad - credito.usados < usar ||
         (sid ? credito.servicio_id !== sid : credito.paquete_id !== pid)
       )
@@ -348,6 +368,12 @@ export function alertasPara(db: Db, clienteId: string, slugs: Set<string>): { al
   return { alertas, requiereRevision: alertas.length > 0 };
 }
 
+/** ¿La fecha local 'YYYY-MM-DD' es anterior a configuracion.fecha_apertura? */
+export function antesDeApertura(db: Db, fecha: string): boolean {
+  const apertura = db.configuracion.fecha_apertura;
+  return !!apertura && fecha < apertura;
+}
+
 // ======================================================================
 // R3 horarios disponibles
 // ======================================================================
@@ -394,6 +420,8 @@ export function horariosDisponibles(
   const paso = conf.intervalo_slots_min > 0 ? conf.intervalo_slots_min : 60;
   const hoy = hoyDe(ctx);
   if (fecha > sumarDias(hoy, conf.ventana_reserva_dias)) return [];
+  // Antes de la apertura, visitantes y clientas no ven horarios; el personal sí (puede agendar el ensayo de apertura).
+  if (antesDeApertura(db, fecha) && !esPersonal(ctx)) return [];
   const limite = ctx.ahora.getTime() + conf.anticipacion_min_horas * MS_HORA;
   const dow = diaSemana(fecha);
   if (!db.cabinas.some((c) => c.activa)) return [];
@@ -507,17 +535,61 @@ function validarEdadMinima(db: Db, cliente: ClienteFila, fechaCita: string): voi
     falla(MSG.edadMinima(db.configuracion.edad_minima));
 }
 
-function firmaCompleta(f: DatosFirma | null | undefined): boolean {
-  return !!f && !!(f.nombre_firmante ?? '').trim() && !!(f.firma_svg ?? '').trim();
+/** public.validar_firma: nombre y trazo presentes, nombres de 200 caracteres o menos y un SVG sólo de trazos. */
+function validarFirma(f: DatosFirma | null | undefined): asserts f is DatosFirma {
+  const nombre = (f?.nombre_firmante ?? '').trim();
+  if (!f || !nombre || !(f.firma_svg ?? '').trim()) falla(MSG.firma);
+  if (nombre.length > LIMITES.nombre || (f.tutor_nombre ?? '').trim().length > LIMITES.nombre) falla(MSG.nombreLargo);
+  if (!firmaValida(f.firma_svg, LIMITES.firmaSvg)) falla(MSG.firmaInvalida);
 }
 
-/** Un consentimiento por cada tipo distinto de los servicios de la cita (si esa versión aún no está firmada). */
-export function crearConsentimientos(ctx: Ctx, cita: CitaFila, firma: DatosFirma, esMenor: boolean): number {
+function validarNotas(notas: string | null | undefined): void {
+  if ((notas ?? '').trim().length > LIMITES.notas) falla(MSG.notasLargas);
+}
+
+/**
+ * documento_hash (trigger tg_consentimiento_hash): sha256 de, separados por '|', política, clienta, cita,
+ * ficha, firmante, tutor, menor ('t'/'f'), sha256 de la firma y firmado_en en UTC con microsegundos.
+ */
+export function documentoHash(k: {
+  hash_politica: string | null;
+  cliente_id: string;
+  cita_id: string | null;
+  ficha_salud_id: string | null;
+  nombre_firmante: string;
+  tutor_nombre: string | null;
+  es_menor: boolean;
+  firma_svg: string;
+  firmado_en: string;
+}): string {
+  const utc = new Date(k.firmado_en).toISOString().replace(/Z$/, '000Z'); // 'YYYY-MM-DDTHH:MI:SS.US' + 'Z'
+  return sha256(
+    [
+      k.hash_politica ?? '',
+      k.cliente_id,
+      k.cita_id ?? '',
+      k.ficha_salud_id ?? '',
+      k.nombre_firmante,
+      k.tutor_nombre ?? '',
+      k.es_menor ? 't' : 'f',
+      sha256(k.firma_svg),
+      utc,
+    ].join('|'),
+  );
+}
+
+/**
+ * Un consentimiento por cada tipo distinto de los servicios de la cita (si esa versión aún no está firmada).
+ * `canal`: 'reserva_web' al reservar, 'portal' si firma la clienta desde su cuenta, 'cabina' si firma en la tablet del personal.
+ */
+export function crearConsentimientos(ctx: Ctx, cita: CitaFila, firma: DatosFirma, esMenor: boolean, canal: CanalFirma): number {
   const { db } = ctx;
   const items = db.cita_items.filter((i) => i.cita_id === cita.id);
   const tipos = tiposConsentimiento(db, expandirServicios(db, items).keys());
   const ficha = fichaVigenteFila(db, cita.cliente_id);
   const firmado_en = ahoraIso(ctx);
+  const nombre_firmante = firma.nombre_firmante.trim();
+  const tutor_nombre = esMenor ? textoONulo(firma.tutor_nombre) : null;
   let n = 0;
   for (const tipo of tipos) {
     const pol = politicaActiva(db, tipo);
@@ -529,13 +601,25 @@ export function crearConsentimientos(ctx: Ctx, cita: CitaFila, firma: DatosFirma
       cita_id: cita.id,
       politica_id: pol.id,
       ficha_salud_id: ficha?.id ?? null,
-      nombre_firmante: firma.nombre_firmante.trim(),
+      nombre_firmante,
       firma_svg: firma.firma_svg,
       es_menor: esMenor,
-      tutor_nombre: esMenor ? textoONulo(firma.tutor_nombre) : null,
-      documento_hash: sha256(`${pol.hash_sha256 ?? ''}${ficha?.id ?? ''}${firmado_en}`),
+      tutor_nombre,
+      documento_hash: documentoHash({
+        hash_politica: pol.hash_sha256,
+        cliente_id: cita.cliente_id,
+        cita_id: cita.id,
+        ficha_salud_id: ficha?.id ?? null,
+        nombre_firmante,
+        tutor_nombre,
+        es_menor: esMenor,
+        firma_svg: firma.firma_svg,
+        firmado_en,
+      }),
       ip: null,
       user_agent: ctx.userAgent,
+      capturado_por: ctx.usuarioId,
+      canal,
       firmado_en,
     });
     n++;
@@ -543,29 +627,54 @@ export function crearConsentimientos(ctx: Ctx, cita: CitaFila, firma: DatosFirma
   return n;
 }
 
-/** reservar_cita (clienta). */
+/**
+ * Núcleo de crear_cita_interna (clienta y personal): ítems, notas, créditos vigentes el día de la cita,
+ * complementos y que la cita tenga algún consentimiento que firmar (si no, nunca se podría iniciar).
+ */
+function prepararCita(ctx: Ctx, clienteId: string, items: ItemReserva[], notas: string | null | undefined, inicio: number, staff: boolean) {
+  const { db } = ctx;
+  if (!Array.isArray(items) || items.length === 0) falla(MSG.sinServicios);
+  validarNotas(notas);
+  const hoy = hoyDe(ctx);
+  const fechaCita = fechaDeCita(inicio, hoy);
+  const resueltos = resolverItems(db, items, clienteId, fechaCita > hoy ? fechaCita : hoy, staff);
+  const servicioIds = [...expandirServicios(db, items).keys()];
+  if (!tiposConsentimiento(db, servicioIds).some((t) => politicaActiva(db, t) !== null)) falla(MSG.noReservable);
+  if (!Number.isFinite(inicio)) falla(MSG.noDisponible);
+  return { resueltos, servicioIds, dur: duracionReserva(db, items) };
+}
+
+/** Citas próximas (pendientes o confirmadas que aún no empiezan) de una clienta. */
+function citasProximas(ctx: Ctx, clienteId: string): number {
+  const t = ctx.ahora.getTime();
+  return ctx.db.citas.filter((c) => c.cliente_id === clienteId && (c.estado === 'pendiente' || c.estado === 'confirmada') && ms(c.inicio) > t)
+    .length;
+}
+
+/** reservar_cita (clienta). Mismo orden de validaciones que SQL. */
 export function reservarCita(ctx: Ctx, s: SolicitudReserva): ResultadoReserva {
   const { db } = ctx;
   const cliente = miCliente(ctx);
   const hoy = hoyDe(ctx);
+  const inicio = ms(s.inicio);
+  const fechaCita = fechaDeCita(inicio, hoy);
 
+  // Antes de la apertura no se reserva en línea (vale para cualquier cuenta; el personal agenda con reservarParaCliente).
+  if (Number.isFinite(inicio) && antesDeApertura(db, fechaCita)) falla(MSG.noDisponible);
   for (const tipo of POLITICAS_GENERALES) {
     const pol = politicaActiva(db, tipo);
     if (pol && !db.aceptaciones_politica.some((a) => a.cliente_id === cliente.id && a.politica_id === pol.id)) falla(MSG.politicas);
   }
   if (!fichaVigenteFila(db, cliente.id)) falla(MSG.ficha);
-  const inicio = ms(s.inicio);
-  const fechaCita = fechaDeCita(inicio, hoy);
+  if (!cliente.fecha_nacimiento) falla(MSG.nacimientoReservar);
   validarEdadMinima(db, cliente, fechaCita);
   const esMenor = esMenorDeEdad(db, cliente, fechaCita);
   if (esMenor && !(s.firma?.tutor_nombre ?? '').trim()) falla(MSG.tutor);
-  if (!firmaCompleta(s.firma)) falla(MSG.firma);
+  validarFirma(s.firma);
+  // Una sola cuenta no acapara la agenda; para más citas, el personal agenda por WhatsApp (sin límite).
+  if (citasProximas(ctx, cliente.id) >= LIMITES.citasProximas) falla(MSG.maxCitas(LIMITES.citasProximas, telefonoWhatsApp(db)));
 
-  const resueltos = resolverItems(db, s.items, cliente.id, hoy, false);
-  const dur = duracionReserva(db, s.items);
-  const servicioIds = [...expandirServicios(db, s.items).keys()];
-
-  if (!Number.isFinite(inicio)) falla(MSG.noDisponible);
+  const { resueltos, servicioIds, dur } = prepararCita(ctx, cliente.id, s.items, s.notas, inicio, false);
   const fecha = fechaLocal(new Date(inicio));
   const personalPedido = s.personal_id || null;
   const coincide = (sl: Slot) => ms(sl.inicio) === inicio && puedeHacer(db, sl.personal_id, servicioIds);
@@ -593,11 +702,14 @@ export function reservarCita(ctx: Ctx, s: SolicitudReserva): ResultadoReserva {
     alertas,
     notas_cliente: textoONulo(s.notas),
   });
-  crearConsentimientos(ctx, cita, s.firma, esMenor);
+  crearConsentimientos(ctx, cita, s.firma, esMenor, 'reserva_web');
   return { id: cita.id, estado: cita.estado, requiere_revision: cita.requiere_revision, alertas: [...cita.alertas] };
 }
 
-/** reservar_cita_staff (personal): sin firma; respeta citas, cabinas y bloqueos, no el horario publicado. */
+/**
+ * reservar_cita_staff (personal): sin firma ni límite de citas; puede agendar antes de la apertura.
+ * Respeta citas, cabinas y bloqueos, no el horario publicado.
+ */
 export function reservarCitaStaff(ctx: Ctx, s: SolicitudReservaStaff): ResultadoReserva {
   exigirPersonal(ctx);
   const { db } = ctx;
@@ -606,10 +718,7 @@ export function reservarCitaStaff(ctx: Ctx, s: SolicitudReservaStaff): Resultado
   const hoy = hoyDe(ctx);
   const inicio = ms(s.inicio);
   validarEdadMinima(db, cliente, fechaDeCita(inicio, hoy));
-  const resueltos = resolverItems(db, s.items, cliente.id, hoy, true);
-  const dur = duracionReserva(db, s.items);
-  const servicioIds = [...expandirServicios(db, s.items).keys()];
-  if (!Number.isFinite(inicio)) falla(MSG.noDisponible);
+  const { resueltos, servicioIds, dur } = prepararCita(ctx, cliente.id, s.items, s.notas, inicio, true);
   const fin = inicio + dur * MS_MIN;
 
   const candidatos = personalOrdenado(db).filter((p) => (!s.personal_id || p.id === s.personal_id) && puedeHacer(db, p.id, servicioIds));
@@ -644,19 +753,23 @@ function buscarCita(db: Db, id: string): CitaFila {
   return c;
 }
 
-/** firmar_consentimiento_cita: dueña de la cita o personal (tablet de cabina). */
+/**
+ * firmar_consentimiento_cita: dueña de la cita (portal) o personal (tablet de cabina).
+ * Desde su cuenta, la clienta necesita su fecha de nacimiento; en cabina el personal verifica la edad en persona.
+ */
 export function firmarConsentimientoCita(ctx: Ctx, citaId: string, firma: DatosFirma): void {
   exigirSesion(ctx);
   const { db } = ctx;
   const cita = buscarCita(db, citaId);
-  const mia = miClienteOpcional(ctx)?.id === cita.cliente_id;
-  if (!mia && !esPersonal(ctx)) falla(MSG.permiso);
-  if (cita.estado === 'cancelada' || cita.estado === 'no_asistio') falla(MSG_EXTRA.citaNoFirmable);
   const cliente = db.clientes.find((c) => c.id === cita.cliente_id)!;
+  const propia = ctx.usuarioId !== null && cliente.usuario_id === ctx.usuarioId;
+  if (!propia && !esPersonal(ctx)) falla(MSG.permiso);
+  if (cita.estado === 'cancelada' || cita.estado === 'no_asistio') falla(MSG.citaCancelada);
+  if (propia && !cliente.fecha_nacimiento) falla(MSG.nacimientoFirmar);
   const esMenor = esMenorDeEdad(db, cliente, fechaLocal(new Date(cita.inicio)));
   if (esMenor && !(firma?.tutor_nombre ?? '').trim()) falla(MSG.tutor);
-  if (!firmaCompleta(firma)) falla(MSG.firma);
-  crearConsentimientos(ctx, cita, firma, esMenor);
+  validarFirma(firma);
+  crearConsentimientos(ctx, cita, firma, esMenor, propia ? 'portal' : 'cabina');
 }
 
 // ======================================================================
@@ -722,7 +835,8 @@ export function completarCita(ctx: Ctx, citaId: string): void {
   exigirPersonal(ctx);
   const { db } = ctx;
   const cita = buscarCita(db, citaId);
-  if (cita.estado === 'cancelada' || cita.estado === 'no_asistio') falla(MSG_EXTRA.citaCancelada);
+  if (cita.estado === 'cancelada') falla(MSG.citaCancelada);
+  if (cita.estado === 'no_asistio') falla(MSG.noAsistio);
   if (!tieneConsentimiento(db, cita.id)) falla(MSG.sinConsentimiento);
   const yaConsumida = cita.estado === 'completada' || db.movimientos_inventario.some((m) => m.cita_id === cita.id && m.tipo === 'consumo');
   if (!yaConsumida) {
@@ -754,7 +868,7 @@ export function cambiarEstadoCita(ctx: Ctx, citaId: string, estado: EstadoCita):
   const { db } = ctx;
   const cita = buscarCita(db, citaId);
   if (cita.estado === estado) return;
-  if (cita.estado === 'cancelada') falla(MSG_EXTRA.citaCancelada);
+  if (cita.estado === 'cancelada') falla(MSG.citaCancelada);
   if (cita.estado === 'completada') falla(MSG_EXTRA.citaCompletada);
   if (estado === 'cancelada') return cancelarCita(ctx, citaId, null);
   if (estado === 'completada') return completarCita(ctx, citaId);
@@ -777,13 +891,31 @@ export function cambiarEstadoCita(ctx: Ctx, citaId: string, estado: EstadoCita):
 // R8 pedidos · R9 pagos · R10 regalos
 // ======================================================================
 
+/** La clienta elige uno de estos; cortesía y Mercado Pago los registra el personal al cobrar. */
+const METODOS_PEDIDO: MetodoPago[] = ['efectivo', 'tarjeta', 'transferencia'];
+
+/** Cantidad de una línea de pedido: entera de 1 a 99 (número o texto); si falta, 1. */
+function cantidadDePedido(v: unknown): number {
+  if (v === null || v === undefined || (typeof v === 'string' && !v.trim())) return 1;
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v.trim()) : NaN;
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n > LIMITES.cantidadMaxima) falla(MSG_EXTRA.cantidad);
+  if (n < 1) falla(MSG.cantidadMinima);
+  return n;
+}
+
 export function crearPedido(ctx: Ctx, items: ItemPedidoNuevo[], metodo: MetodoPago, notas?: string | null): ResultadoPedido {
   const c = miCliente(ctx);
   const { db } = ctx;
   if (!Array.isArray(items) || items.length === 0) falla(MSG_EXTRA.carritoVacio);
+  const metodoPago: MetodoPago = metodo ?? 'efectivo';
+  if (!METODOS_PEDIDO.includes(metodoPago)) falla(MSG.metodoPago);
+  validarNotas(notas);
+  if (db.pedidos.filter((p) => p.cliente_id === c.id && p.estado === 'pendiente_pago').length >= LIMITES.pedidosPorPagar)
+    falla(MSG.maxPedidos(LIMITES.pedidosPorPagar));
   const filas = items.map((it) => {
-    const cantidad = Number(it.cantidad);
-    if (!Number.isInteger(cantidad) || cantidad < 1) falla(MSG_EXTRA.cantidad);
+    const cantidad = cantidadDePedido(it.cantidad);
+    const regalo_para = textoONulo(it.regalo_para);
+    if (regalo_para && regalo_para.length > LIMITES.regaloPara) falla(MSG.regaloLargo);
     let precio: number | null = null;
     let descripcion = '';
     if (it.tipo === 'servicio') {
@@ -802,7 +934,7 @@ export function crearPedido(ctx: Ctx, items: ItemPedidoNuevo[], metodo: MetodoPa
       precio = p.precio_venta;
       descripcion = p.presentacion ? `${p.nombre} · ${p.presentacion}` : p.nombre;
     } else falla(MSG.noVendible);
-    return { it, cantidad, precio: precio as number, descripcion };
+    return { it, cantidad, regalo_para, precio: precio as number, descripcion };
   });
   db.folio_pedidos += 1;
   const t = ahoraIso(ctx);
@@ -812,7 +944,7 @@ export function crearPedido(ctx: Ctx, items: ItemPedidoNuevo[], metodo: MetodoPa
     cliente_id: c.id,
     estado: 'pendiente_pago',
     total: redondear(filas.reduce((s, f) => s + f.cantidad * f.precio, 0), 2),
-    metodo_pago_preferido: metodo ?? 'efectivo',
+    metodo_pago_preferido: metodoPago,
     notas: textoONulo(notas),
     creado_en: t,
     pagado_en: null,
@@ -830,7 +962,7 @@ export function crearPedido(ctx: Ctx, items: ItemPedidoNuevo[], metodo: MetodoPa
       descripcion: f.descripcion,
       cantidad: f.cantidad,
       precio_unitario: f.precio,
-      regalo_para: textoONulo(f.it.regalo_para),
+      regalo_para: f.regalo_para,
     });
   return { id: pedido.id, folio: pedido.folio, total: pedido.total };
 }
@@ -878,6 +1010,9 @@ function marcarPedidoPagado(ctx: Ctx, pedido: PedidoFila): void {
     }
     const paquete = it.paquete_id ? db.paquetes.find((x) => x.id === it.paquete_id) ?? null : null;
     const vence_en = sumarDias(hoy, paquete?.vigencia_dias ?? db.configuracion.vigencia_creditos_dias);
+    // Un solo código por regalo (ítem), aunque genere varios créditos (bono de varios servicios).
+    const regalo_para = textoONulo(it.regalo_para);
+    const codigo_regalo = regalo_para ? codigoRegaloUnico(db) : null;
     const nuevo = (servicio_id: string | null, paquete_id: string | null, cantidad: number) => {
       db.creditos.push({
         id: uuid(),
@@ -887,8 +1022,8 @@ function marcarPedidoPagado(ctx: Ctx, pedido: PedidoFila): void {
         cantidad,
         usados: 0,
         pedido_item_id: it.id,
-        codigo_regalo: it.regalo_para ? codigoRegaloUnico(db) : null,
-        regalo_para: it.regalo_para,
+        codigo_regalo,
+        regalo_para,
         vence_en,
         creado_en: t,
       });
@@ -907,9 +1042,11 @@ export function registrarPago(ctx: Ctx, p: NuevoPago): string {
   const { db } = ctx;
   const monto = Number(p.monto);
   const propina = Number(p.propina ?? 0);
+  // Mismo orden y textos que registrar_pago en SQL.
+  if (!p.pedido_id && !p.cita_id) falla(MSG.pagoSinDestino);
   if (!Number.isFinite(monto) || monto <= 0) falla(MSG_EXTRA.monto);
   if (!Number.isFinite(propina) || propina < 0) falla(MSG_EXTRA.propina);
-  if (!p.pedido_id && !p.cita_id) falla(MSG_EXTRA.pagoSinDestino);
+  if (!p.metodo) falla(MSG.metodoPagoFalta);
   const pedido = p.pedido_id ? db.pedidos.find((x) => x.id === p.pedido_id) : null;
   if (p.pedido_id && !pedido) falla(MSG_EXTRA.pedidoNoExiste);
   if (pedido && (pedido.estado === 'cancelado' || pedido.estado === 'reembolsado')) falla(MSG_EXTRA.pedidoCancelado);
@@ -931,15 +1068,21 @@ export function registrarPago(ctx: Ctx, p: NuevoPago): string {
   return id;
 }
 
-/** R10 canjear_regalo: el crédito pasa a la clienta y se limpia el código. */
+/**
+ * R10 canjear_regalo: los créditos con ese código (uno, o varios si es un bono de varios servicios)
+ * pasan a la clienta que canjea y se limpia el código. Devuelve el id del primero.
+ */
 export function canjearRegalo(ctx: Ctx, codigo: string): string {
   const c = miCliente(ctx);
   const cod = (codigo ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const cr = cod ? ctx.db.creditos.find((x) => x.codigo_regalo === cod) : undefined;
-  if (!cr) falla(MSG.regalo);
-  cr.cliente_id = c.id;
-  cr.codigo_regalo = null;
-  return cr.id;
+  const creditos = cod ? ctx.db.creditos.filter((x) => x.codigo_regalo === cod) : [];
+  if (creditos.length === 0) falla(MSG.regalo);
+  for (const cr of creditos) {
+    cr.cliente_id = c.id;
+    cr.codigo_regalo = null;
+  }
+  creditos.sort((a, b) => a.creado_en.localeCompare(b.creado_en) || a.id.localeCompare(b.id));
+  return creditos[0].id;
 }
 
 // ======================================================================
@@ -949,13 +1092,19 @@ export function canjearRegalo(ctx: Ctx, codigo: string): string {
 export function registrarCompra(ctx: Ctx, c: NuevaCompra): string {
   const u = exigirPersonal(ctx);
   const { db } = ctx;
+  // Mismo orden y textos que registrar_compra en SQL.
   if (!Array.isArray(c.items) || c.items.length === 0) falla(MSG_EXTRA.compraVacia);
+  if (c.proveedor_id && !db.proveedores.some((x) => x.id === c.proveedor_id)) falla(MSG.proveedorNoExiste);
   const items = c.items.map((it) => {
     const p = db.productos.find((x) => x.id === it.producto_id);
-    if (!p) falla(MSG_EXTRA.productoNoExiste);
-    const presentaciones = Number(it.presentaciones);
-    const costo = Number(it.costo_presentacion);
-    if (!Number.isFinite(presentaciones) || presentaciones <= 0 || !Number.isFinite(costo) || costo < 0) falla(MSG_EXTRA.cantidad);
+    if (!p) falla(MSG.compraProductoNoExiste);
+    const vacio = (v: unknown) => v === null || v === undefined || v === '';
+    const presentaciones = vacio(it.presentaciones) ? NaN : Number(it.presentaciones);
+    // Sin costo, se toma el último costo del producto (como coalesce en SQL).
+    const costo = vacio(it.costo_presentacion) ? p.costo_presentacion : Number(it.costo_presentacion);
+    if (!Number.isFinite(presentaciones) || presentaciones <= 0) falla(MSG.compraPresentaciones);
+    if (!Number.isFinite(costo)) falla(MSG_EXTRA.cantidad);
+    if (costo < 0) falla(MSG.costoNegativo);
     return { p, presentaciones, costo };
   });
   const compraId = uuid();
@@ -987,12 +1136,13 @@ export function registrarCompra(ctx: Ctx, c: NuevaCompra): string {
 
 export function ajustarInventario(ctx: Ctx, productoId: string, cantidad: number, tipo: TipoMovimiento, nota?: string | null): void {
   exigirPersonal(ctx);
-  if (tipo !== 'ajuste' && tipo !== 'merma') falla(MSG.permiso);
-  const p = ctx.db.productos.find((x) => x.id === productoId);
-  if (!p) falla(MSG_EXTRA.productoNoExiste);
+  // Mismo orden y textos que ajustar_inventario en SQL.
+  if (tipo !== 'ajuste' && tipo !== 'merma') falla(MSG.soloAjusteMerma);
   let cant = Number(cantidad);
   if (!Number.isFinite(cant) || cant === 0) falla(MSG_EXTRA.cantidadCero);
   if (tipo === 'merma') cant = -Math.abs(cant);
+  const p = ctx.db.productos.find((x) => x.id === productoId);
+  if (!p) falla(MSG_EXTRA.productoNoExiste);
   insertarMovimiento(ctx, { producto_id: p.id, tipo, cantidad: cant, costo_unitario: costoUnitario(p), nota: textoONulo(nota) });
 }
 
@@ -1052,17 +1202,26 @@ export function guardarProveedor(ctx: Ctx, e: Omit<Proveedor, 'id'> & { id?: str
   return p;
 }
 
+/**
+ * guardar_receta (personal): reemplaza la receta completa. Si un producto se repite, se suman las
+ * cantidades y se conserva la primera nota. '[]' deja la receta vacía.
+ */
 export function guardarReceta(ctx: Ctx, servicioId: string, items: RecetaItem[]): void {
   exigirPersonal(ctx);
   const { db } = ctx;
-  if (!db.servicios.some((s) => s.id === servicioId)) falla(MSG_EXTRA.noExiste);
+  if (!db.servicios.some((s) => s.id === servicioId)) falla(MSG.servicioNoExiste);
+  if (!Array.isArray(items)) falla(MSG.receta);
   const juntos = new Map<string, { cantidad: number; notas: string | null }>();
-  for (const it of items ?? []) {
-    const cant = Number(it.cantidad);
-    if (!db.productos.some((p) => p.id === it.producto_id)) falla(MSG_EXTRA.productoNoExiste);
-    if (!Number.isFinite(cant) || cant <= 0) falla(MSG_EXTRA.cantidad);
+  for (const it of items) {
+    if (!it || !db.productos.some((p) => p.id === it.producto_id)) falla(MSG.recetaProductoNoExiste);
+    const cant = it.cantidad === null || (it.cantidad as unknown) === '' ? NaN : redondear(Number(it.cantidad), 3);
+    if (!Number.isFinite(cant) || cant <= 0 || cant >= 1e9) falla(MSG.recetaCantidad);
+    const notas = textoONulo(it.notas);
+    if (notas && notas.length > LIMITES.notas) falla(MSG.notasLargas);
     const prev = juntos.get(it.producto_id);
-    juntos.set(it.producto_id, { cantidad: (prev?.cantidad ?? 0) + cant, notas: textoONulo(it.notas) ?? prev?.notas ?? null });
+    const cantidad = (prev?.cantidad ?? 0) + cant;
+    if (cantidad >= 1e9) falla(MSG.recetaCantidad);
+    juntos.set(it.producto_id, { cantidad, notas: prev ? prev.notas ?? notas : notas });
   }
   db.recetas_servicio = db.recetas_servicio.filter((r) => r.servicio_id !== servicioId);
   for (const [producto_id, v] of juntos)
@@ -1149,14 +1308,12 @@ export function guardarGastoRecurrente(ctx: Ctx, g: GastoRecurrenteEditable): vo
 // Catálogo, equipo, agenda y clientas (escrituras directas de ESPEC §6.1)
 // ======================================================================
 
-function slugLimpio(s: string): string {
-  return (s ?? '')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+/** Slug sin acentos; `guionBajo` lo conserva como en guardar_paquete ([^a-z0-9_-]+ → '-'). */
+function slugLimpio(s: string, guionBajo = false): string {
+  const base = (s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  return guionBajo
+    ? base.replace(/[^a-z0-9_-]+/g, '-').replace(/^[-_]+|[-_]+$/g, '')
+    : base.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
 export function guardarServicio(ctx: Ctx, s: ServicioEditable): void {
@@ -1183,6 +1340,8 @@ export function guardarServicio(ctx: Ctx, s: ServicioEditable): void {
     activo: s.activo !== false,
     orden: Number(s.orden) || 0,
   };
+  // R6: un servicio que se puede agendar debe decir qué consentimiento firma la clienta (tg_servicios_consentimiento).
+  if (datos.activo && datos.etapa === 'disponible' && !datos.tipo_consentimiento) falla(MSG.servicioSinConsentimiento);
   if (s.id) {
     const fila = db.servicios.find((x) => x.id === s.id);
     if (!fila) falla(MSG_EXTRA.noExiste);
@@ -1190,42 +1349,68 @@ export function guardarServicio(ctx: Ctx, s: ServicioEditable): void {
   } else db.servicios.push({ id: uuid(), ...datos });
 }
 
+/** Número opcional del formulario: null si viene vacío; NaN si no es número. */
+function numeroOpcional(v: unknown): number | null {
+  if (v === null || v === undefined || (typeof v === 'string' && !v.trim())) return null;
+  return typeof v === 'number' ? v : typeof v === 'string' ? Number(v.trim()) : NaN;
+}
+
+/**
+ * guardar_paquete (admin): upsert del paquete + reemplazo de sus servicios en un solo paso.
+ * Cantidades enteras 1–99 (repetidos se suman); un bono es N sesiones de un solo servicio.
+ */
 export function guardarPaquete(ctx: Ctx, p: PaqueteEditable): void {
   exigirAdmin(ctx);
   const { db } = ctx;
-  const slug = slugLimpio(p.slug || p.nombre);
-  if (!slug || !(p.nombre ?? '').trim()) falla(MSG_EXTRA.datoFaltante);
-  if (db.paquetes.some((x) => x.slug === slug && x.id !== p.id)) falla(MSG_EXTRA.slugUsado);
+  const fila = p.id ? db.paquetes.find((x) => x.id === p.id) : undefined;
+  if (p.id && !fila) falla(MSG.paqueteNoExiste);
+  const nombre = textoONulo(p.nombre);
+  if (!nombre) falla(MSG.paqueteNombre);
+  if (nombre.length > LIMITES.nombre) falla(MSG.nombreLargo);
+  const slug = slugLimpio(textoONulo(p.slug) ?? nombre, true);
+  if (!slug) falla(MSG.paqueteSlug);
+  if (db.paquetes.some((x) => x.slug === slug && x.id !== p.id)) falla(MSG.paqueteSlugUsado);
+  const tipo = p.tipo ?? 'combo';
+  if (tipo !== 'combo' && tipo !== 'bono') falla(MSG.paqueteTipo);
+  const precio = numeroOpcional(p.precio);
+  if (precio !== null && !Number.isFinite(precio)) falla(MSG.precio);
+  if (precio !== null && precio < 0) falla(MSG.precioNegativo);
+  const duracion = numeroOpcional(p.duracion_min);
+  if (duracion !== null && !(Number.isInteger(duracion) && duracion >= 0)) falla(MSG.duracion);
+  const vigencia = numeroOpcional(p.vigencia_dias);
+  if (vigencia !== null && !(Number.isInteger(vigencia) && vigencia > 0)) falla(MSG.vigencia);
+
+  if (!Array.isArray(p.items) || p.items.length === 0) falla(MSG.paqueteSinServicios);
   const items = new Map<string, number>();
-  for (const it of p.items ?? []) {
-    const cant = Math.round(Number(it.cantidad));
-    if (!db.servicios.some((s) => s.id === it.servicio_id)) falla(MSG_EXTRA.noExiste);
-    if (!(cant >= 1)) falla(MSG_EXTRA.cantidad);
-    items.set(it.servicio_id, (items.get(it.servicio_id) ?? 0) + cant);
+  for (const it of p.items) {
+    if (!it || !db.servicios.some((s) => s.id === it.servicio_id)) falla(MSG.paqueteServicioNoExiste);
+    const cant = numeroOpcional(it.cantidad) ?? 1;
+    if (!Number.isInteger(cant) || cant < 1 || cant > LIMITES.cantidadMaxima) falla(MSG_EXTRA.cantidad);
+    const total = (items.get(it.servicio_id) ?? 0) + cant;
+    if (total > LIMITES.cantidadMaxima) falla(MSG_EXTRA.cantidad);
+    items.set(it.servicio_id, total);
   }
-  const num = (v: unknown) => (v === null || v === undefined || v === '' ? null : Math.max(0, Number(v)));
+  if (tipo === 'bono' && items.size !== 1) falla(MSG.bonoUnServicio);
+
   const datos = {
     slug,
-    nombre: p.nombre.trim(),
+    nombre,
     descripcion: textoONulo(p.descripcion),
-    tipo: p.tipo ?? 'combo',
-    precio: num(p.precio),
-    duracion_min: num(p.duracion_min),
-    vigencia_dias: num(p.vigencia_dias),
+    tipo,
+    precio: precio === null ? null : redondear(precio, 2),
+    duracion_min: duracion,
+    vigencia_dias: vigencia,
     activo: p.activo !== false,
-    orden: Number(p.orden) || 0,
+    orden: Math.trunc(Number(p.orden)) || 0,
   };
   let id = p.id;
-  if (id) {
-    const fila = db.paquetes.find((x) => x.id === id);
-    if (!fila) falla(MSG_EXTRA.noExiste);
-    Object.assign(fila, datos);
-  } else {
+  if (fila) Object.assign(fila, datos);
+  else {
     id = uuid();
     db.paquetes.push({ id, ...datos });
   }
   db.paquete_servicios = db.paquete_servicios.filter((x) => x.paquete_id !== id);
-  for (const [servicio_id, cantidad] of items) db.paquete_servicios.push({ paquete_id: id, servicio_id, cantidad });
+  for (const [servicio_id, cantidad] of items) db.paquete_servicios.push({ paquete_id: id!, servicio_id, cantidad });
 }
 
 export function guardarPersonal(ctx: Ctx, p: PersonalEditable): void {
@@ -1252,18 +1437,59 @@ export function guardarPersonal(ctx: Ctx, p: PersonalEditable): void {
   } else db.personal.push({ id: uuid(), usuario_id: null, ...datos, creado_en: ahoraIso(ctx) });
 }
 
+const NOMBRES_DIA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
+/** Hora 'H:MM', 'HH:MM' o 'HH:MM:SS' → 'HH:MM' (o null si no es una hora válida). */
+function horaDe(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(v.trim());
+  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59 || Number(m[3] ?? 0) > 59) return null;
+  return `${m[1].padStart(2, '0')}:${m[2]}`;
+}
+
+/** Día de la semana entero 0–6 (número o texto); si no, null. */
+function diaDe(v: unknown): number | null {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v.trim()) : NaN;
+  return Number.isInteger(n) && n >= 0 && n <= 6 ? n : null;
+}
+
+/**
+ * guardar_horarios (admin): reemplaza todos los rangos de la persona. Puede haber varios por día
+ * (comida), pero no encimados: 10–14 y 14–19 sí; 10–14 y 13–19 no.
+ */
 export function guardarHorarios(ctx: Ctx, personalId: string, horarios: Horario[]): void {
   exigirAdmin(ctx);
   const { db } = ctx;
-  if (!db.personal.some((p) => p.id === personalId)) falla(MSG_EXTRA.noExiste);
-  const limpios = (horarios ?? []).map((h) => {
-    const ini = (h.hora_inicio ?? '').slice(0, 5);
-    const fin = (h.hora_fin ?? '').slice(0, 5);
-    if (!(h.dia_semana >= 0 && h.dia_semana <= 6) || !/^\d{2}:\d{2}$/.test(ini) || !/^\d{2}:\d{2}$/.test(fin)) falla(MSG_EXTRA.datoFaltante);
-    if (fin <= ini) falla(MSG_EXTRA.rangoHorario);
-    return { id: uuid(), personal_id: personalId, dia_semana: h.dia_semana, hora_inicio: ini, hora_fin: fin };
+  if (!db.personal.some((p) => p.id === personalId)) falla(MSG.personalNoExiste);
+  if (!Array.isArray(horarios)) falla(MSG.horarios);
+  const rangos = horarios.map((h, n) => {
+    const dia = diaDe(h?.dia_semana);
+    if (dia === null) falla(MSG.diaSemana);
+    const ini = horaDe(h.hora_inicio);
+    const fin = horaDe(h.hora_fin);
+    if (ini === null || fin === null) falla(MSG.horasFaltantes);
+    if (fin <= ini) falla(MSG.rangoHorario);
+    return { n, dia, ini, fin };
   });
-  db.horarios = db.horarios.filter((h) => h.personal_id !== personalId).concat(limpios);
+  // Primer par encimado el mismo día (por día, inicio del primero e inicio del segundo), como en SQL.
+  let choque: { a: (typeof rangos)[number]; b: (typeof rangos)[number] } | null = null;
+  for (const a of rangos)
+    for (const b of rangos) {
+      if (a.n === b.n || a.dia !== b.dia) continue;
+      if (!(a.ini < b.ini || (a.ini === b.ini && a.n < b.n))) continue;
+      if (!(b.ini < a.fin && a.ini < b.fin)) continue;
+      const antes =
+        !choque ||
+        a.dia < choque.a.dia ||
+        (a.dia === choque.a.dia && (a.ini < choque.a.ini || (a.ini === choque.a.ini && b.ini < choque.b.ini)));
+      if (antes) choque = { a, b };
+    }
+  if (choque)
+    falla(MSG.horariosEncimados(NOMBRES_DIA[choque.a.dia], `${choque.a.ini}–${choque.a.fin}`, `${choque.b.ini}–${choque.b.fin}`));
+  const nuevos = [...rangos]
+    .sort((x, y) => x.dia - y.dia || x.ini.localeCompare(y.ini))
+    .map((r) => ({ id: uuid(), personal_id: personalId, dia_semana: r.dia, hora_inicio: r.ini, hora_fin: r.fin }));
+  db.horarios = db.horarios.filter((h) => h.personal_id !== personalId).concat(nuevos);
 }
 
 export function guardarCapacitacion(ctx: Ctx, c: CapacitacionEditable): void {

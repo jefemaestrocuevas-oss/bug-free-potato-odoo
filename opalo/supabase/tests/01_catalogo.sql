@@ -27,6 +27,12 @@ begin
   perform pruebas.igual((select horas_cancelacion from public.configuracion), 24, 'horas de cancelación');
   perform pruebas.igual((select telefono_whatsapp from public.configuracion), '4421701466', 'WhatsApp');
   perform pruebas.igual((select zona_horaria from public.configuracion), 'America/Mexico_City', 'zona horaria');
+  perform pruebas.igual((select fecha_apertura from public.configuracion), '2026-10-31'::date,
+                        'fecha de apertura de catalogo.json (seed_demo la deja como estaba)');
+  perform pruebas.igual((select nombre from public.servicios where slug = 'facial-anti-acne'), 'Tratamiento antiacné',
+                        'nombre del servicio actualizado desde catalogo.json');
+  perform pruebas.igual((select descripcion from public.paquetes where slug = 'media'), 'Media pierna, axila y bigote.',
+                        'descripción del Paquete Media sin notas internas');
   perform pruebas.igual((select count(*)::int from public.cabinas), 1, 'una cabina (seed idempotente)');
   perform pruebas.igual((select count(*)::int from public.personal where slug = 'especialista'), 1, 'especialista');
   perform pruebas.igual((select count(*)::int from public.horarios), 5, 'horarios sin duplicar al correr el seed dos veces');

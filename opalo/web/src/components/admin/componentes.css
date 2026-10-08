@@ -69,6 +69,8 @@
 .adm-totales div { display: flex; flex-direction: column; }
 .adm-totales dt { font-size: 0.78rem; font-weight: 700; color: var(--tinta-3); }
 .adm-totales dd { margin: 0; font-size: 1.1rem; }
+/* Registrar pago: aviso de cortesía junto al método. */
+.adm-pago-cortesia { color: var(--tinta-2); font-weight: 700; }
 
 /* ---------- Modal ---------- */
 /* El fondo es el que hace scroll. Sin relleno abajo: así el pie fijo (sticky) queda pegado al
@@ -156,7 +158,7 @@
 .adm-ley-linea { display: inline-block; width: 16px; height: 2px; background: var(--g-utilidad); border-radius: 2px; flex: none; position: relative; }
 .adm-ley-linea::after { content: ''; position: absolute; left: 4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--g-utilidad); }
 .adm-grafica-caja { position: relative; width: 100%; }
-.adm-grafica-svg { display: block; overflow: visible; }
+.adm-grafica-svg { display: block; overflow: visible; max-width: 100%; height: auto; }
 .adm-g-rejilla { stroke: var(--linea-2); stroke-width: 1; }
 .adm-g-base { stroke: var(--linea); stroke-width: 1; }
 .adm-g-eje { fill: var(--tinta-3); font-size: 11.5px; font-family: var(--cuerpo); font-variant-numeric: tabular-nums; }

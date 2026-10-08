@@ -218,6 +218,10 @@ export const ORDEN_POLITICAS: TipoPolitica[] = [
   'consentimiento_corporal',
 ];
 
+/** Columnas de configuracion (ESPEC §4.1); se piden por nombre, nunca con '*'. */
+export const COLUMNAS_CONFIGURACION =
+  'nombre_negocio, lema, telefono_whatsapp, direccion, zona_horaria, duracion_sesion_min, intervalo_slots_min, anticipacion_min_horas, ventana_reserva_dias, horas_cancelacion, tolerancia_retraso_min, edad_minima, edad_mayoria, vigencia_creditos_dias, fecha_apertura';
+
 export function aConfiguracion(f: Fila | null): Configuracion {
   const x = f ?? {};
   return {
@@ -235,6 +239,7 @@ export function aConfiguracion(f: Fila | null): Configuracion {
     edad_minima: num(x.edad_minima, 15),
     edad_mayoria: num(x.edad_mayoria, 18),
     vigencia_creditos_dias: num(x.vigencia_creditos_dias, 365),
+    fecha_apertura: fechaONula(x.fecha_apertura),
   };
 }
 
@@ -412,6 +417,10 @@ export function aItemCita(f: Fila): ItemCita {
   };
 }
 
+/** Columnas de v_citas_detalle (ESPEC §7). */
+export const COLUMNAS_CITA_DETALLE =
+  'id, cliente_id, cliente_nombre, cliente_telefono, inicio, fin, duracion_min, estado, origen, primera_vez, requiere_revision, alertas, notas_cliente, total, personal_id, personal_nombre, personal_titulo, cabina_nombre, consentimientos_firmados, pagado, items';
+
 /** Fila de v_citas_detalle. */
 export function aCitaDetalle(f: Fila): CitaDetalle {
   return {
@@ -452,6 +461,10 @@ export function aItemPedido(f: Fila): ItemPedido {
   };
 }
 
+/** Columnas de v_pedidos_detalle (ESPEC §7). */
+export const COLUMNAS_PEDIDO_DETALLE =
+  'id, folio, cliente_id, cliente_nombre, estado, total, pagado, metodo_pago_preferido, notas, creado_en, pagado_en, items';
+
 /** Fila de v_pedidos_detalle. */
 export function aPedidoDetalle(f: Fila): PedidoDetalle {
   return {
@@ -469,6 +482,10 @@ export function aPedidoDetalle(f: Fila): PedidoDetalle {
     items: filas(f.items).map(aItemPedido),
   };
 }
+
+/** Columnas de v_creditos (ESPEC §7). */
+export const COLUMNAS_CREDITO =
+  'id, cliente_id, nombre, servicio_id, paquete_id, cantidad, usados, restantes, vence_en, vigente, codigo_regalo, regalo_para, creado_en';
 
 /** Fila de v_creditos. */
 export function aCredito(f: Fila): Credito {
@@ -515,6 +532,10 @@ export function aConsentimiento(f: Fila): ConsentimientoFirmado {
 // Interno
 // ---------------------------------------------------------------------------
 
+/** Columnas de v_clientes_resumen (ESPEC §7). Las notas internas van aparte, en v_clientes_notas. */
+export const COLUMNAS_CLIENTE_RESUMEN =
+  'id, nombre, apellidos, telefono, email, fecha_nacimiento, tiene_cuenta, citas_completadas, ultima_visita, proxima_cita, total_pagado, creado_en, es_personal';
+
 /** Fila de v_clientes_resumen. */
 export function aClienteResumen(f: Fila): ClienteResumen {
   return {
@@ -530,6 +551,7 @@ export function aClienteResumen(f: Fila): ClienteResumen {
     proxima_cita: instanteONulo(f.proxima_cita),
     total_pagado: num(f.total_pagado),
     creado_en: instante(f.creado_en),
+    es_personal: bool(f.es_personal),
   };
 }
 
@@ -586,6 +608,10 @@ export function aProducto(f: Fila): Producto {
   };
 }
 
+/** Columnas de v_reposicion (ESPEC §7). */
+export const COLUMNAS_REPOSICION =
+  'id, nombre, marca, unidad_medida, stock_actual, stock_minimo, faltante, presentacion, contenido_presentacion, presentaciones_sugeridas, costo_estimado, proveedor_nombre';
+
 /** Fila de v_reposicion. */
 export function aProductoReposicion(f: Fila): ProductoReposicion {
   return {
@@ -616,6 +642,9 @@ export function aMovimiento(f: Fila): MovimientoInventario {
     creado_en: instante(f.creado_en),
   };
 }
+
+/** Columnas de v_costo_servicio (ESPEC §7). */
+export const COLUMNAS_COSTO_SERVICIO = 'servicio_id, slug, nombre, categoria, precio, costo_material, margen, margen_pct, tiene_receta';
 
 /** Fila de v_costo_servicio. */
 export function aCostoServicio(f: Fila): CostoServicio {
@@ -672,6 +701,10 @@ export function aGastoRecurrente(f: Fila): GastoRecurrente {
   };
 }
 
+/** Columnas de v_gastos_por_vencer (ESPEC §7). */
+export const COLUMNAS_GASTO_POR_VENCER =
+  'id, concepto, categoria, monto_estimado, frecuencia, proximo_vencimiento, dias_restantes, estado';
+
 /** Fila de v_gastos_por_vencer. */
 export function aGastoPorVencer(f: Fila): GastoPorVencer {
   const estado = texto(f.estado, 'al_corriente');
@@ -690,6 +723,9 @@ export function aGastoPorVencer(f: Fila): GastoPorVencer {
 export function resultadoVacio(mes: string): ResultadoMensual {
   return { mes, ingresos: 0, propinas: 0, costo_insumos: 0, compras: 0, gastos: 0, utilidad: 0, flujo: 0, citas_completadas: 0 };
 }
+
+/** Columnas de v_resultado_mensual (ESPEC §7). */
+export const COLUMNAS_RESULTADO_MENSUAL = 'mes, ingresos, propinas, costo_insumos, compras, gastos, utilidad, flujo, citas_completadas';
 
 /** Fila de v_resultado_mensual. */
 export function aResultadoMensual(f: Fila): ResultadoMensual {

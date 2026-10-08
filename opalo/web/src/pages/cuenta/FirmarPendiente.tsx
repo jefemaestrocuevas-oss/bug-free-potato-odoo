@@ -96,6 +96,8 @@ export default function FirmarPendiente() {
         .filter((p) => tipos.has(p.tipo))
         .sort((a, b) => ORDEN_TIPOS.indexOf(a.tipo) - ORDEN_TIPOS.indexOf(b.tipo));
       const anios = sesion?.cliente?.fecha_nacimiento ? edad(sesion.cliente.fecha_nacimiento, fechaLocal()) : null;
+      // La base no deja firmar sin fecha de nacimiento (decide si firma también mamá, papá o tutor).
+      const sinFecha = !!sesion?.cliente && !sesion.cliente.fecha_nacimiento;
       const requiereTutor = anios !== null && anios < config.edad_mayoria;
       const nombresDocs = documentos.map((d) => (ETIQUETA_POLITICA[d.tipo] ?? d.titulo).replace(/^Consentimiento informado · /, '').toLowerCase());
 
@@ -104,6 +106,11 @@ export default function FirmarPendiente() {
         if (documentos.length > 0 && !leido) {
           setErrorLeido(true);
           leidoRef.current?.focus();
+          return;
+        }
+        if (sinFecha) {
+          setError('Para firmar necesitamos tu fecha de nacimiento.');
+          requestAnimationFrame(() => errorRef.current?.focus());
           return;
         }
         if (!firma) {
@@ -214,6 +221,14 @@ export default function FirmarPendiente() {
             <h2 className="rv-subtitulo" id="cu-firmar-firma">
               Tu firma
             </h2>
+            {sinFecha && (
+              <p className="aviso aviso-alerta">
+                <span>
+                  Para firmar necesitamos tu fecha de nacimiento. <Link to="/cuenta/datos">Agrégala en «Mis datos»</Link> y vuelve a esta
+                  cita desde «Mis citas».
+                </span>
+              </p>
+            )}
             <PanelFirma
               onCambio={setFirma}
               requiereTutor={requiereTutor}
@@ -228,7 +243,15 @@ export default function FirmarPendiente() {
 
           {error && (
             <p className="aviso aviso-error rv-error" role="alert" tabIndex={-1} ref={errorRef}>
-              {error}
+              <span>
+                {error}
+                {/necesitamos tu fecha de nacimiento/.test(error) && (
+                  <>
+                    {' '}
+                    <Link to="/cuenta/datos">Ir a «Mis datos»</Link>
+                  </>
+                )}
+              </span>
             </p>
           )}
 

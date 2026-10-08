@@ -1,11 +1,11 @@
 // Paso 3: sesión y datos de la clienta (nombre, teléfono, fecha de nacimiento) + validación de edad.
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import type { Configuracion, Sesion } from '../../lib/api/tipos';
 import { edad, enlaceWhatsApp, fechaLocal, mensajeError, telefonoBonito } from '../../lib/format';
 import { Aviso } from '../ui/Estado';
-import { PieAsistente } from './Piezas';
+import { FechaNacimientoFija, PieAsistente } from './Piezas';
 import { errorFechaNacimiento, normalizarTelefono, telefonoValido } from './utilidades';
 
 interface Props {
@@ -17,6 +17,28 @@ interface Props {
 }
 
 type Campo = 'nombre' | 'telefono' | 'fecha_nacimiento';
+
+/** Límite de la base (ESPEC §5.1): citas próximas activas (pendiente o confirmada) por clienta. */
+const MAX_CITAS_PROXIMAS = 3;
+
+/** Cuántas citas próximas activas tiene la clienta (null mientras carga o si no se pudo saber). */
+function useCitasProximas(usuario: string): number | null {
+  const [n, setN] = useState<number | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    api
+      .getMisCitas()
+      .then((citas) => {
+        const ahora = Date.now();
+        if (vivo) setN(citas.filter((c) => (c.estado === 'pendiente' || c.estado === 'confirmada') && new Date(c.inicio).getTime() > ahora).length);
+      })
+      .catch(() => vivo && setN(null)); // El servidor vuelve a revisar al reservar.
+    return () => {
+      vivo = false;
+    };
+  }, [usuario]);
+  return n;
+}
 
 export function PasoDatos({ config, sesion, refrescar, onAtras, onListo }: Props) {
   const volver = `/entrar?volver=${encodeURIComponent('/reservar')}`;
@@ -63,6 +85,8 @@ export function PasoDatos({ config, sesion, refrescar, onAtras, onListo }: Props
 
 function FormularioDatos({ config, sesion, refrescar, onAtras, onListo }: Props & { sesion: Sesion }) {
   const c = sesion.cliente!;
+  // Ya registrada: no se cambia desde aquí (la corrige el equipo; la base la rechaza).
+  const fechaFija = c.fecha_nacimiento;
   const [nombre, setNombre] = useState(c.nombre ?? '');
   const [apellidos, setApellidos] = useState(c.apellidos ?? '');
   const [telefono, setTelefono] = useState(c.telefono ? telefonoBonito(c.telefono) : '');
@@ -71,11 +95,14 @@ function FormularioDatos({ config, sesion, refrescar, onAtras, onListo }: Props 
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
-  const errorRef = useRef<HTMLParagraphElement>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
+  const proximas = useCitasProximas(sesion.user_id);
+  const sinLugar = proximas !== null && proximas >= MAX_CITAS_PROXIMAS;
 
   const hoy = fechaLocal();
-  const fechaOk = !errorFechaNacimiento(nacimiento, hoy);
-  const anios = fechaOk ? edad(nacimiento, hoy) : null;
+  const fechaUsada = fechaFija ?? nacimiento;
+  const fechaOk = !errorFechaNacimiento(fechaUsada, hoy);
+  const anios = fechaOk ? edad(fechaUsada, hoy) : null;
   const muyJoven = anios !== null && anios < config.edad_minima;
   const menor = anios !== null && !muyJoven && anios < config.edad_mayoria;
 
@@ -85,12 +112,18 @@ function FormularioDatos({ config, sesion, refrescar, onAtras, onListo }: Props 
     const errs: Partial<Record<Campo, string>> = {};
     if (!nombre.trim()) errs.nombre = 'Escribe tu nombre.';
     if (!telefonoValido(telefono)) errs.telefono = 'Escribe tu celular a 10 dígitos, por ejemplo 442 123 4567.';
-    const ef = errorFechaNacimiento(nacimiento, hoy);
-    if (ef) errs.fecha_nacimiento = ef;
+    if (!fechaFija) {
+      const ef = errorFechaNacimiento(nacimiento, hoy);
+      if (ef) errs.fecha_nacimiento = ef;
+    }
     setErrores(errs);
     const primero = (Object.keys(errs) as Campo[])[0];
     if (primero) {
       formRef.current?.querySelector<HTMLInputElement>(`#rv-dato-${primero}`)?.focus();
+      return;
+    }
+    if (sinLugar) {
+      requestAnimationFrame(() => errorRef.current?.focus());
       return;
     }
     if (muyJoven) {
@@ -103,7 +136,7 @@ function FormularioDatos({ config, sesion, refrescar, onAtras, onListo }: Props 
       nombre.trim() !== (c.nombre ?? '') ||
       (apellidos.trim() || null) !== (c.apellidos || null) ||
       tel !== normalizarTelefono(c.telefono ?? '') ||
-      nacimiento !== (c.fecha_nacimiento ?? '');
+      (!fechaFija && nacimiento !== '');
     setEnviando(true);
     try {
       if (cambio) {
@@ -111,14 +144,18 @@ function FormularioDatos({ config, sesion, refrescar, onAtras, onListo }: Props 
           nombre: nombre.trim(),
           apellidos: apellidos.trim() || null,
           telefono: tel,
-          fecha_nacimiento: nacimiento,
+          // Si ya estaba registrada se manda la misma (nunca otra).
+          fecha_nacimiento: fechaFija ?? nacimiento,
           acepta_promociones: c.acepta_promociones,
         });
         await refrescar();
       }
       onListo();
     } catch (err) {
-      setError(mensajeError(err));
+      const msg = mensajeError(err);
+      setError(msg);
+      // Alguien del equipo ya la registró: recargamos la sesión para mostrarla como dato fijo.
+      if (msg.startsWith('Tu fecha de nacimiento ya está registrada')) await refrescar().catch(() => {});
       requestAnimationFrame(() => errorRef.current?.focus());
     } finally {
       setEnviando(false);
@@ -128,7 +165,12 @@ function FormularioDatos({ config, sesion, refrescar, onAtras, onListo }: Props 
   const props = (campo: Campo) => ({
     id: `rv-dato-${campo}`,
     'aria-invalid': errores[campo] ? true : undefined,
-    'aria-describedby': errores[campo] ? `rv-dato-${campo}-error` : campo === 'fecha_nacimiento' ? 'rv-dato-fecha-ayuda' : undefined,
+    'aria-describedby':
+      campo === 'fecha_nacimiento'
+        ? [errores[campo] ? `rv-dato-${campo}-error` : null, 'rv-dato-fecha-ayuda'].filter(Boolean).join(' ')
+        : errores[campo]
+          ? `rv-dato-${campo}-error`
+          : undefined,
   });
   const errorDe = (campo: Campo) =>
     errores[campo] ? (
@@ -176,26 +218,30 @@ function FormularioDatos({ config, sesion, refrescar, onAtras, onListo }: Props 
             />
             {errorDe('telefono')}
           </div>
-          <div className="campo">
-            <label className="etiqueta" htmlFor="rv-dato-fecha_nacimiento">
-              Fecha de nacimiento
-            </label>
-            <input
-              className="input"
-              {...props('fecha_nacimiento')}
-              type="date"
-              max={hoy}
-              value={nacimiento}
-              onChange={(e) => setNacimiento(e.target.value)}
-              autoComplete="bday"
-              required
-            />
-            {errorDe('fecha_nacimiento') ?? (
+          {fechaFija ? (
+            <FechaNacimientoFija id="rv-dato-fecha_nacimiento" fecha={fechaFija} telefono={config.telefono_whatsapp} />
+          ) : (
+            <div className="campo">
+              <label className="etiqueta" htmlFor="rv-dato-fecha_nacimiento">
+                Fecha de nacimiento
+              </label>
+              <input
+                className="input"
+                {...props('fecha_nacimiento')}
+                type="date"
+                max={hoy}
+                value={nacimiento}
+                onChange={(e) => setNacimiento(e.target.value)}
+                autoComplete="bday"
+                required
+              />
+              {errorDe('fecha_nacimiento')}
               <span className="ayuda" id="rv-dato-fecha-ayuda">
-                Atendemos a partir de los {config.edad_minima} años.
+                Es obligatoria para reservar: atendemos a partir de los {config.edad_minima} años y, si eres menor de {config.edad_mayoria}, tu
+                mamá, papá o tutor firma contigo. Revísala bien: una vez guardada, sólo el equipo puede corregirla.
               </span>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {muyJoven && (
@@ -221,13 +267,25 @@ function FormularioDatos({ config, sesion, refrescar, onAtras, onListo }: Props 
         <button type="submit" hidden tabIndex={-1} aria-hidden="true" />
       </form>
 
-      {error && (
-        <p className="aviso aviso-error rv-error" role="alert" tabIndex={-1} ref={errorRef}>
-          {error}
-        </p>
+      {sinLugar ? (
+        <div className="aviso aviso-alerta rv-error" role="alert" tabIndex={-1} ref={errorRef}>
+          <span>
+            Ya tienes {proximas} citas próximas; para agendar otra escríbenos por WhatsApp al {telefonoBonito(config.telefono_whatsapp)}.{' '}
+            <a href={enlaceWhatsApp(config.telefono_whatsapp, 'Hola, Ópalo. Quiero agendar otra cita.')} target="_blank" rel="noopener noreferrer">
+              Escribir por WhatsApp<span className="sr-only"> (se abre en otra pestaña)</span>
+            </a>{' '}
+            · <Link to="/cuenta/citas">Ver mis citas</Link>
+          </span>
+        </div>
+      ) : (
+        error && (
+          <div className="aviso aviso-error rv-error" role="alert" tabIndex={-1} ref={errorRef}>
+            {error}
+          </div>
+        )
       )}
 
-      <PieAsistente onAtras={onAtras} onContinuar={() => void enviar()} enviando={enviando} deshabilitado={muyJoven} />
+      <PieAsistente onAtras={onAtras} onContinuar={() => void enviar()} enviando={enviando} deshabilitado={muyJoven || sinLugar} />
     </div>
   );
 }

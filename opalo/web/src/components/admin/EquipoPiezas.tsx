@@ -71,6 +71,25 @@ export interface RangoEditable {
   fin: string;
 }
 
+/**
+ * Minutos de atención de un día: la unión de sus rangos completos (los encimados no se cuentan dos
+ * veces; los incompletos o al revés no cuentan).
+ */
+export function minutosDelDia(rangos: RangoEditable[]): number {
+  const validos = rangos
+    .filter((r) => /^\d{2}:\d{2}/.test(r.inicio) && /^\d{2}:\d{2}/.test(r.fin) && aMinutos(r.fin) > aMinutos(r.inicio))
+    .map((r) => [aMinutos(r.inicio), aMinutos(r.fin)] as const)
+    .sort((a, b) => a[0] - b[0]);
+  let total = 0;
+  let hasta = -1;
+  for (const [ini, fin] of validos) {
+    const desde = Math.max(ini, hasta);
+    if (fin > desde) total += fin - desde;
+    hasta = Math.max(hasta, fin);
+  }
+  return total;
+}
+
 /** Errores por rango de un día: incompleto, fin ≤ inicio o traslape con otro rango. */
 export function erroresDelDia(rangos: RangoEditable[]): Map<number, string> {
   const errores = new Map<number, string>();
@@ -102,5 +121,5 @@ export function horarioPorDia(horarios: Horario[]): Horario[][] {
 }
 
 export function minutosSemana(horarios: Horario[]): number {
-  return horarios.reduce((s, h) => s + Math.max(0, aMinutos(h.hora_fin) - aMinutos(h.hora_inicio)), 0);
+  return horarioPorDia(horarios).reduce((s, d) => s + minutosDelDia(d.map((h, k) => ({ k, inicio: h.hora_inicio, fin: h.hora_fin }))), 0);
 }

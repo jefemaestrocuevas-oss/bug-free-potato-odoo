@@ -91,13 +91,10 @@ create policy paquetes_leer_anon on public.paquetes
   for select to anon using (activo);
 create policy paquetes_leer on public.paquetes
   for select to authenticated using (activo or (select public.es_personal()));
-create policy paquetes_admin on public.paquetes
-  for all to authenticated using ((select public.es_admin())) with check ((select public.es_admin()));
 
+-- paquetes y paquete_servicios: sólo lectura; el admin los escribe con guardar_paquete (atómico).
 create policy paquete_servicios_leer on public.paquete_servicios
   for select to anon, authenticated using (true);
-create policy paquete_servicios_admin on public.paquete_servicios
-  for all to authenticated using ((select public.es_admin())) with check ((select public.es_admin()));
 
 create policy contraindicaciones_leer_anon on public.contraindicaciones
   for select to anon using (activa);
@@ -112,10 +109,9 @@ create policy cabinas_leer on public.cabinas
 create policy cabinas_admin on public.cabinas
   for all to authenticated using ((select public.es_admin())) with check ((select public.es_admin()));
 
+-- horarios: sólo lectura; el admin los escribe con guardar_horarios (reemplazo atómico).
 create policy horarios_leer on public.horarios
   for select to authenticated using (true);
-create policy horarios_admin on public.horarios
-  for all to authenticated using ((select public.es_admin())) with check ((select public.es_admin()));
 
 create policy bloqueos_agenda_personal on public.bloqueos_agenda
   for all to authenticated using ((select public.es_personal())) with check ((select public.es_personal()));
@@ -193,8 +189,9 @@ create policy productos_crear on public.productos
 create policy productos_editar on public.productos
   for update to authenticated using ((select public.es_personal())) with check ((select public.es_personal()));
 
-create policy recetas_servicio_personal on public.recetas_servicio
-  for all to authenticated using ((select public.es_personal())) with check ((select public.es_personal()));
+-- recetas: el personal las lee; las escribe con guardar_receta (reemplazo atómico).
+create policy recetas_servicio_leer on public.recetas_servicio
+  for select to authenticated using ((select public.es_personal()));
 
 create policy compras_leer on public.compras
   for select to authenticated using ((select public.es_personal()));
@@ -266,12 +263,14 @@ grant update (id, nombre, marca, categoria, unidad_medida, presentacion, conteni
               costo_presentacion, stock_minimo, proveedor_id, uso, precio_venta, vendible_en_linea,
               activo, notas)
   on public.productos to authenticated;
-grant insert, update, delete on public.recetas_servicio to authenticated;
+-- recetas_servicio, paquetes, paquete_servicios y horarios: sin escritura directa (sólo SELECT);
+-- se escriben con guardar_receta, guardar_paquete y guardar_horarios, que reemplazan el conjunto
+-- completo en una transacción.
 
 grant insert, update, delete on
-  public.categorias_servicio, public.servicios, public.paquetes, public.paquete_servicios,
+  public.categorias_servicio, public.servicios,
   public.contraindicaciones, public.cabinas,
-  public.personal, public.horarios, public.personal_servicios, public.capacitaciones,
+  public.personal, public.personal_servicios, public.capacitaciones,
   public.categorias_gasto, public.gastos, public.gastos_recurrentes
 to authenticated;
 
@@ -319,6 +318,9 @@ grant execute on function
   public.registrar_compra(jsonb, uuid, date, text, text),
   public.ajustar_inventario(uuid, numeric, public.tipo_movimiento, text),
   public.publicar_politica(public.tipo_politica, text, text),
+  public.guardar_paquete(uuid, jsonb, jsonb),
+  public.guardar_horarios(uuid, jsonb),
+  public.guardar_receta(uuid, jsonb),
   public.primer_vencimiento(int, date),
   public.avanzar_vencimiento(date, public.frecuencia_gasto, int),
   public.dias_del_mes(date)

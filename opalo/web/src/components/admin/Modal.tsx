@@ -11,6 +11,22 @@ let overflowPrevio = '';
 
 const ENFOCABLES = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+/**
+ * Tras un intento de guardar que no pasó, lleva la vista y el foco al primer campo marcado
+ * (aria-invalid) o, si no hay, al aviso de error. Sin esto, en un formulario largo el error queda
+ * fuera de vista y el foco se pierde (el botón se desactiva mientras "guarda"): parece un botón muerto.
+ * Devuelve false si no hay nada que señalar (p. ej., se guardó bien).
+ */
+export function enfocarError(contenedor: HTMLElement): boolean {
+  const campo = contenedor.querySelector<HTMLElement>('[aria-invalid="true"]');
+  const destino = campo ?? contenedor.querySelector<HTMLElement>('[role="alert"]');
+  if (!destino) return false;
+  if (!campo && !destino.hasAttribute('tabindex')) destino.setAttribute('tabindex', '-1');
+  destino.scrollIntoView?.({ block: 'center' });
+  destino.focus({ preventScroll: true });
+  return true;
+}
+
 interface PropsModal {
   titulo: string;
   onCerrar: () => void;
@@ -30,6 +46,17 @@ export function Modal({ titulo, onCerrar, children, pie, ancho = 'normal', bloqu
   cerrar.current = onCerrar;
   const bloq = useRef(bloqueado);
   bloq.current = bloqueado;
+  // Hubo un envío del formulario del modal y falta ver cómo terminó.
+  const envioPendiente = useRef(false);
+
+  // Cuando termina el envío (ya no está "guardando") y el modal sigue abierto, si quedó un campo
+  // marcado o un aviso de error, se llevan ahí la vista y el foco.
+  useEffect(() => {
+    if (!envioPendiente.current || bloqueado) return;
+    envioPendiente.current = false;
+    const cuerpo = ref.current?.querySelector<HTMLElement>('.modal-cuerpo');
+    if (cuerpo) enfocarError(cuerpo);
+  });
 
   useEffect(() => {
     const previo = document.activeElement as HTMLElement | null;
@@ -83,7 +110,18 @@ export function Modal({ titulo, onCerrar, children, pie, ancho = 'normal', bloqu
         if (e.target === e.currentTarget && !bloq.current) cerrar.current();
       }}
     >
-      <div ref={ref} className={`modal adm-modal adm-modal-${ancho}`} role="dialog" aria-modal="true" aria-labelledby={`${id}-titulo`} tabIndex={-1}>
+      <div
+        ref={ref}
+        className={`modal adm-modal adm-modal-${ancho}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`${id}-titulo`}
+        tabIndex={-1}
+        onSubmit={(e) => {
+          // Sólo los formularios de este modal (un modal anidado llega aquí por el árbol de React).
+          if (ref.current?.contains(e.target as Node)) envioPendiente.current = true;
+        }}
+      >
         <div className="modal-cabeza">
           <h3 id={`${id}-titulo`}>{titulo}</h3>
           <button type="button" className="adm-modal-cerrar" onClick={() => !bloq.current && cerrar.current()} aria-label="Cerrar ventana">

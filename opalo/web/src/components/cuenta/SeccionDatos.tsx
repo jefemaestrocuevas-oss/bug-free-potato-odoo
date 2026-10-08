@@ -5,7 +5,9 @@ import { api } from '../../lib/api';
 import type { Cliente } from '../../lib/api/tipos';
 import { fechaLocal, mensajeError, telefonoBonito } from '../../lib/format';
 import { useSesion } from '../../lib/sesion';
+import { useContacto } from '../publico/contacto';
 import { borrarEstado } from '../reserva/estado';
+import { FechaNacimientoFija } from '../reserva/Piezas';
 import { errorFechaNacimiento, normalizarTelefono, telefonoValido } from '../reserva/utilidades';
 
 type Campo = 'nombre' | 'telefono' | 'fecha_nacimiento';
@@ -55,6 +57,9 @@ export function SeccionDatos() {
 }
 
 function FormularioDatos({ cliente: c, email, refrescar }: { cliente: Cliente; email: string | null; refrescar: () => Promise<void> }) {
+  const contacto = useContacto();
+  // Ya registrada: no se cambia desde aquí (la corrige el equipo; la base la rechaza).
+  const fechaFija = c.fecha_nacimiento;
   const [nombre, setNombre] = useState(c.nombre ?? '');
   const [apellidos, setApellidos] = useState(c.apellidos ?? '');
   const [telefono, setTelefono] = useState(c.telefono ? telefonoBonito(c.telefono) : '');
@@ -74,7 +79,7 @@ function FormularioDatos({ cliente: c, email, refrescar }: { cliente: Cliente; e
     const errs: Partial<Record<Campo, string>> = {};
     if (!nombre.trim()) errs.nombre = 'Escribe tu nombre.';
     if (telefono.trim() && !telefonoValido(telefono)) errs.telefono = 'Escribe tu celular a 10 dígitos, por ejemplo 442 123 4567.';
-    if (nacimiento) {
+    if (!fechaFija && nacimiento) {
       const ef = errorFechaNacimiento(nacimiento, hoy);
       if (ef) errs.fecha_nacimiento = ef;
     }
@@ -90,13 +95,17 @@ function FormularioDatos({ cliente: c, email, refrescar }: { cliente: Cliente; e
         nombre: nombre.trim(),
         apellidos: apellidos.trim() || null,
         telefono: telefono.trim() ? normalizarTelefono(telefono) : null,
-        fecha_nacimiento: nacimiento || null,
+        // Si ya estaba registrada se manda la misma (nunca otra).
+        fecha_nacimiento: fechaFija ?? (nacimiento || null),
         acepta_promociones: promos,
       });
       await refrescar();
       setExito('Guardamos tus datos.');
     } catch (err) {
-      setError(mensajeError(err));
+      const msg = mensajeError(err);
+      setError(msg);
+      // Alguien del equipo ya la registró: recargamos la sesión para mostrarla como dato fijo.
+      if (msg.startsWith('Tu fecha de nacimiento ya está registrada')) await refrescar().catch(() => {});
     } finally {
       setEnviando(false);
     }
@@ -105,7 +114,12 @@ function FormularioDatos({ cliente: c, email, refrescar }: { cliente: Cliente; e
   const props = (campo: Campo) => ({
     id: `cu-dato-${campo}`,
     'aria-invalid': errores[campo] ? true : undefined,
-    'aria-describedby': errores[campo] ? `cu-dato-${campo}-error` : undefined,
+    'aria-describedby':
+      campo === 'fecha_nacimiento'
+        ? [errores[campo] ? `cu-dato-${campo}-error` : null, 'cu-dato-fecha-ayuda'].filter(Boolean).join(' ')
+        : errores[campo]
+          ? `cu-dato-${campo}-error`
+          : undefined,
   });
   const errorDe = (campo: Campo) =>
     errores[campo] ? (
@@ -146,21 +160,29 @@ function FormularioDatos({ cliente: c, email, refrescar }: { cliente: Cliente; e
           />
           {errorDe('telefono')}
         </div>
-        <div className="campo">
-          <label className="etiqueta" htmlFor="cu-dato-fecha_nacimiento">
-            Fecha de nacimiento
-          </label>
-          <input
-            className="input"
-            {...props('fecha_nacimiento')}
-            type="date"
-            max={hoy}
-            value={nacimiento}
-            onChange={(e) => setNacimiento(e.target.value)}
-            autoComplete="bday"
-          />
-          {errorDe('fecha_nacimiento')}
-        </div>
+        {fechaFija ? (
+          <FechaNacimientoFija id="cu-dato-fecha_nacimiento" fecha={fechaFija} telefono={contacto.telefono_whatsapp} />
+        ) : (
+          <div className="campo">
+            <label className="etiqueta" htmlFor="cu-dato-fecha_nacimiento">
+              Fecha de nacimiento
+            </label>
+            <input
+              className="input"
+              {...props('fecha_nacimiento')}
+              type="date"
+              max={hoy}
+              value={nacimiento}
+              onChange={(e) => setNacimiento(e.target.value)}
+              autoComplete="bday"
+            />
+            {errorDe('fecha_nacimiento')}
+            <span className="ayuda" id="cu-dato-fecha-ayuda">
+              La necesitamos para reservar: atendemos a partir de los {contacto.edad_minima} años. Revísala bien: una vez guardada, sólo el equipo
+              puede corregirla.
+            </span>
+          </div>
+        )}
       </div>
       <div className="campo">
         <span className="etiqueta">Correo</span>

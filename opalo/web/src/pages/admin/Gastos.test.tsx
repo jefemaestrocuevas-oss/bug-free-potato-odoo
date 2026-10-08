@@ -158,6 +158,8 @@ describe('Gastos', () => {
     });
     expect(dialogo.querySelector('[role=alert]')?.textContent).toContain('Elige una categoría.');
     expect(admin.guardarGasto).not.toHaveBeenCalled();
+    // Sin campos marcados, el foco va al aviso de error (que queda a la vista).
+    expect(document.activeElement).toBe(dialogo.querySelector('[role=alert]'));
   });
 
   it('pide confirmación antes de borrar y no convierte en enlace un comprobante inseguro', async () => {

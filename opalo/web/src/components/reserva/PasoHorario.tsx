@@ -4,7 +4,6 @@ import { api } from '../../lib/api';
 import type { Configuracion, Slot } from '../../lib/api/tipos';
 import { fechaLarga, fechaLocal, hora, isoDesdeLocal, mensajeError, sumarDias } from '../../lib/format';
 import { useAsync } from '../../lib/useAsync';
-import { FECHA_APERTURA } from '../publico/contacto';
 import { Cargando, MensajeError } from '../ui/Estado';
 import { Calendario } from './Calendario';
 import { PieAsistente } from './Piezas';
@@ -23,9 +22,12 @@ interface Props {
 /** Cuántos días del mes se revisan a la vez para marcar los que no tienen lugar. */
 const CONSULTAS_A_LA_VEZ = 4;
 
-/** Primer día que se puede reservar: hoy o, si todavía no abrimos, el día de apertura. */
-export function primerDiaReservable(hoy: string = fechaLocal()): string {
-  return hoy < FECHA_APERTURA ? FECHA_APERTURA : hoy;
+/**
+ * Primer día que se puede reservar: hoy o, si todavía no abrimos, el día de apertura
+ * (`configuracion.fecha_apertura`; null = sin restricción).
+ */
+export function primerDiaReservable(apertura: string | null, hoy: string = fechaLocal()): string {
+  return apertura && hoy < apertura ? apertura : hoy;
 }
 
 /** Días del mes `ym` ('YYYY-MM') dentro de [min, max]. */
@@ -57,7 +59,7 @@ function enOtraZona(): boolean {
 
 export function PasoHorario({ config, duracionMin, fecha, slot, onFecha, onSlot, onAtras, onContinuar }: Props) {
   const hoy = fechaLocal();
-  const min = primerDiaReservable(hoy);
+  const min = primerDiaReservable(config.fecha_apertura, hoy);
   const max = sumarDias(hoy, Math.max(0, config.ventana_reserva_dias));
   const antesDeAbrir = min > hoy;
   // Un día guardado antes (p. ej. anterior a la apertura o ya pasado) no cuenta.

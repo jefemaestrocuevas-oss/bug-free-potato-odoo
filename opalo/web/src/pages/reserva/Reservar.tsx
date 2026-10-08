@@ -58,7 +58,13 @@ const MSG = {
 /** A qué paso hay que regresar según el error del servidor. */
 function pasoDelError(msg: string): Paso | null {
   if (msg === MSG.ocupado || msg === MSG.noDisponible) return 2;
-  if (msg.startsWith('Inicia sesión') || msg.startsWith('Atendemos a partir')) return 3;
+  if (
+    msg.startsWith('Inicia sesión') ||
+    msg.startsWith('Atendemos a partir') ||
+    msg.startsWith('Para reservar necesitamos tu fecha de nacimiento') ||
+    msg.startsWith('Tu fecha de nacimiento ya está registrada')
+  )
+    return 3;
   if (msg.startsWith('Antes de reservar necesitas llenar') || msg.startsWith('Para guardar tu ficha')) return 4;
   if (msg.startsWith('Antes de reservar necesitas aceptar')) return 5;
   if (
@@ -73,6 +79,8 @@ function pasoDelError(msg: string): Paso | null {
 
 export default function Reservar() {
   const base = useAsync(() => Promise.all([api.getConfiguracion(), api.getCatalogo()]), []);
+  // Con la cita ya creada, la invitación de arriba ("Elige tus servicios…") ya no aplica.
+  const [reservada, setReservada] = useState(false);
 
   useEffect(() => {
     const anterior = document.title;
@@ -88,19 +96,21 @@ export default function Reservar() {
         <div className="contenedor">
           <p className="eyebrow">Reserva en línea</p>
           <h1 className="rv-titulo">Reserva tu cita</h1>
-          <p className="texto-2 rv-intro">Elige tus servicios, el día y la hora. Toma unos minutos y tu lugar queda apartado al terminar.</p>
+          {!reservada && (
+            <p className="texto-2 rv-intro">Elige tus servicios, el día y la hora. Toma unos minutos y tu lugar queda apartado al terminar.</p>
+          )}
         </div>
       </header>
       <div className="contenedor rv-contenido">
         {base.cargando && <Cargando texto="Preparando la reserva…" />}
         <MensajeError error={base.error} onReintentar={base.recargar} />
-        {base.datos && <Asistente config={base.datos[0]} cat={base.datos[1]} />}
+        {base.datos && <Asistente config={base.datos[0]} cat={base.datos[1]} onReservada={setReservada} />}
       </div>
     </div>
   );
 }
 
-function Asistente({ config, cat }: { config: Configuracion; cat: Catalogo }) {
+function Asistente({ config, cat, onReservada }: { config: Configuracion; cat: Catalogo; onReservada?: (si: boolean) => void }) {
   const { sesion, cargando: cargandoSesion, refrescar } = useSesion();
   const [params, setParams] = useSearchParams();
   const [estado, setEstado] = useState<EstadoReserva>(cargarEstado);
@@ -280,7 +290,7 @@ function Asistente({ config, cat }: { config: Configuracion; cat: Catalogo }) {
   // ¿Qué pasos están completos?
   const okServicios = items.length > 0 && tieneServicioBase(items, cat);
   // Un horario guardado antes del día de apertura (o ya pasado) no cuenta.
-  const slotVigente = !!estado.slot && fechaLocal(new Date(estado.slot.inicio)) >= primerDiaReservable();
+  const slotVigente = !!estado.slot && fechaLocal(new Date(estado.slot.inicio)) >= primerDiaReservable(config.fecha_apertura);
   const okHorario = okServicios && slotVigente && estado.slotPara === firmaSel;
   const okDatos = okHorario && !!sesion?.cliente && estado.datosListos && estado.usuario === usuario;
   const okFicha = okDatos && !!ficha && estado.fichaPara === firmaFicha;
@@ -314,7 +324,7 @@ function Asistente({ config, cat }: { config: Configuracion; cat: Catalogo }) {
       const n = { ...e, ...patch };
       // Los ítems no cambian al avanzar: la firma de la selección es la actual.
       const s1 = okServicios;
-      const s2 = s1 && !!n.slot && fechaLocal(new Date(n.slot.inicio)) >= primerDiaReservable() && n.slotPara === firmaSel;
+      const s2 = s1 && !!n.slot && fechaLocal(new Date(n.slot.inicio)) >= primerDiaReservable(config.fecha_apertura) && n.slotPara === firmaSel;
       const s3 = s2 && !!sesion?.cliente && n.datosListos && n.usuario === usuario;
       const s4 = s3 && !!fichaNueva && n.fichaPara === firmaFicha;
       const s5 = s4 && n.politicasPara === firmaPoliticas;
@@ -398,7 +408,11 @@ function Asistente({ config, cat }: { config: Configuracion; cat: Catalogo }) {
       } else {
         const patch: Partial<EstadoReserva> = { paso: destino };
         if (destino === 2) Object.assign(patch, { slot: null, slotPara: null });
-        if (destino === 3) Object.assign(patch, { datosListos: false });
+        if (destino === 3) {
+          Object.assign(patch, { datosListos: false });
+          // Los datos de la sesión pueden estar viejos (p. ej. el equipo registró la fecha de nacimiento).
+          void refrescar().catch(() => {});
+        }
         if (destino === 4) Object.assign(patch, { fichaPara: null });
         if (destino === 5) Object.assign(patch, { politicasPara: null });
         setEstado((x) => ({ ...x, ...patch }));
@@ -419,7 +433,10 @@ function Asistente({ config, cat }: { config: Configuracion; cat: Catalogo }) {
     setEstado(estadoInicial());
   }
 
-  const titulo = confirmacion ? 'Tu cita está reservada' : TITULOS_PASOS[paso];
+  const titulo = confirmacion ? '¡Listo! Tu cita está reservada' : TITULOS_PASOS[paso];
+  useEffect(() => {
+    onReservada?.(!!confirmacion);
+  }, [confirmacion, onReservada]);
 
   return (
     <div className="rv-asistente">

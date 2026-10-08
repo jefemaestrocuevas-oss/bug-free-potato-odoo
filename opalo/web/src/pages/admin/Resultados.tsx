@@ -1,4 +1,4 @@
-// /admin/resultados: cómo le va al spa mes con mes (últimos 12 meses).
+// /admin/resultados: cómo le va al spa mes con mes (últimos 12 meses, desde el primero con actividad).
 // Las cifras salen de v_resultado_mensual: pagos, gastos, consumos de insumos y compras de inventario.
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -30,11 +30,23 @@ const vacio = (mes: string): ResultadoMensual => ({
 });
 const tieneActividad = (f: ResultadoMensual) => CIFRAS.some((k) => k !== 'utilidad' && k !== 'flujo' && f[k] !== 0);
 
+/**
+ * Meses en orden, desde el primero con actividad: antes de abrir (o de empezar a registrar), los
+ * meses en cero sólo hacen ruido en la gráfica y en la tabla.
+ */
+export function desdePrimeraActividad(filas: ResultadoMensual[]): ResultadoMensual[] {
+  const orden = [...filas].sort((a, b) => a.mes.localeCompare(b.mes));
+  const i = orden.findIndex(tieneActividad);
+  return i <= 0 ? orden : orden.slice(i);
+}
+
+const textoMeses = (n: number) => (n === 1 ? 'este mes' : `los últimos ${n} meses`);
+
 /** Celda de dinero; utilidad y flujo negativos se marcan. */
-function CeldaDinero({ valor, signo = false, fuerte = false }: { valor: number; signo?: boolean; fuerte?: boolean }) {
-  const clase = signo && valor < 0 ? 'res-negativo' : '';
+function CeldaDinero({ valor, signo = false, fuerte = false, extra = '' }: { valor: number; signo?: boolean; fuerte?: boolean; extra?: string }) {
+  const clase = [signo && valor < 0 ? 'res-negativo' : '', extra].filter(Boolean).join(' ');
   const texto = dineroCentavos(valor);
-  return <td className={`num ${clase}`}>{fuerte ? <strong>{texto}</strong> : texto}</td>;
+  return <td className={`num ${clase}`.trim()}>{fuerte ? <strong>{texto}</strong> : texto}</td>;
 }
 
 function Explicacion() {
@@ -116,9 +128,11 @@ export default function Resultados() {
   const porMes = new Map(filas.map((f) => [f.mes.slice(0, 7), f]));
   const delMes = porMes.get(actual) ?? vacio(actual);
   const mesPasado = porMes.get(sumarMeses(actual, -1)) ?? null;
-  const recientes = [...filas].sort((a, b) => b.mes.localeCompare(a.mes));
+  const serie = desdePrimeraActividad(filas);
+  const nMeses = serie.length;
+  const recientes = [...serie].reverse();
   const totales = CIFRAS.reduce(
-    (acc, k) => ({ ...acc, [k]: centavos(filas.reduce((s, f) => s + f[k], 0)) }),
+    (acc, k) => ({ ...acc, [k]: centavos(serie.reduce((s, f) => s + f[k], 0)) }),
     {} as Record<Cifra, number>,
   );
   const egresos = centavos(delMes.gastos + delMes.costo_insumos);
@@ -203,8 +217,8 @@ export default function Resultados() {
             </div>
           </section>
 
-          <Bloque titulo="Últimos 12 meses" id="res-b-grafica">
-            <GraficaResultados datos={filas} idTabla="res-tabla" />
+          <Bloque titulo={nMeses === 1 ? 'Este mes' : `Últimos ${nMeses} meses`} id="res-b-grafica">
+            <GraficaResultados datos={serie} idTabla="res-tabla" />
           </Bloque>
 
           <Bloque titulo="Mes por mes" id="res-b-tabla">
@@ -215,10 +229,14 @@ export default function Resultados() {
             {desborda && <p className="ayuda res-deslizar">Desliza la tabla hacia los lados para ver todas las columnas.</p>}
             <div ref={envoltura} className="tabla-envoltura res-envoltura" tabIndex={0} role="region" aria-labelledby="res-b-tabla">
               <table className="tabla res-tabla" id="res-tabla">
-                <caption className="sr-only">Resultados de los últimos 12 meses, del más reciente al más antiguo</caption>
+                <caption className="sr-only">Resultados de {textoMeses(nMeses)}, del más reciente al más antiguo</caption>
                 <thead>
                   <tr>
                     <th scope="col">Mes</th>
+                    {/* En pantallas angostas la utilidad pasa a ser la segunda columna (sin deslizar). */}
+                    <th scope="col" className="num res-col-angosta">
+                      Utilidad
+                    </th>
                     <th scope="col" className="num">
                       Ingresos
                     </th>
@@ -228,7 +246,7 @@ export default function Resultados() {
                     <th scope="col" className="num">
                       Gastos
                     </th>
-                    <th scope="col" className="num">
+                    <th scope="col" className="num res-col-ancha">
                       Utilidad
                     </th>
                     <th scope="col" className="num">
@@ -258,10 +276,11 @@ export default function Resultados() {
                           </span>
                           {m === actual && <span className="adm-sub">en curso</span>}
                         </th>
+                        <CeldaDinero valor={f.utilidad} signo fuerte extra="res-col-angosta" />
                         <CeldaDinero valor={f.ingresos} />
                         <CeldaDinero valor={f.costo_insumos} />
                         <CeldaDinero valor={f.gastos} />
-                        <CeldaDinero valor={f.utilidad} signo fuerte />
+                        <CeldaDinero valor={f.utilidad} signo fuerte extra="res-col-ancha" />
                         <CeldaDinero valor={f.flujo} signo />
                         <CeldaDinero valor={f.compras} />
                         <CeldaDinero valor={f.propinas} />
@@ -272,11 +291,12 @@ export default function Resultados() {
                 </tbody>
                 <tfoot>
                   <tr className="res-fila-total">
-                    <th scope="row">Total 12 meses</th>
+                    <th scope="row">Total {nMeses === 1 ? 'del mes' : `${nMeses} meses`}</th>
+                    <CeldaDinero valor={totales.utilidad} signo fuerte extra="res-col-angosta" />
                     <CeldaDinero valor={totales.ingresos} fuerte />
                     <CeldaDinero valor={totales.costo_insumos} fuerte />
                     <CeldaDinero valor={totales.gastos} fuerte />
-                    <CeldaDinero valor={totales.utilidad} signo fuerte />
+                    <CeldaDinero valor={totales.utilidad} signo fuerte extra="res-col-ancha" />
                     <CeldaDinero valor={totales.flujo} signo fuerte />
                     <CeldaDinero valor={totales.compras} fuerte />
                     <CeldaDinero valor={totales.propinas} fuerte />

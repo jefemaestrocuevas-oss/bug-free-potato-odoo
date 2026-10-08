@@ -215,3 +215,36 @@
 /* Dos columnas cuando caben bloques de 400 px; nunca más de dos. */
 .adm-rejilla-2 { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); align-items: start; }
 .adm-lista-item-arriba { align-items: flex-start; }
+
+/* ---------- Resumen: citas de hoy ---------- */
+/* Tabla con espacio; cuando su contenedor mide 640 px o menos, cada cita es una tarjeta (como Clientas y Pedidos). */
+.adm-hoy-envoltura { container: adm-hoy / inline-size; }
+@container adm-hoy (max-width: 640px) {
+  .tabla.adm-hoy,
+  .tabla.adm-hoy tbody { display: block; }
+  .tabla.adm-hoy thead { display: none; }
+  .tabla.adm-hoy tr {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    grid-template-areas:
+      'hora clienta clienta'
+      'estado firma .'
+      'servicios servicios servicios'
+      'atiende atiende atiende';
+    align-items: center;
+    gap: 6px 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--linea-2);
+  }
+  .tabla.adm-hoy tr:last-child { border-bottom: 0; }
+  .tabla.adm-hoy td { display: block; padding: 0; border: 0; background: none; min-width: 0; white-space: normal; }
+  .tabla.adm-hoy .adm-hoy-hora { grid-area: hora; font-weight: 700; }
+  .tabla.adm-hoy .adm-hoy-clienta { grid-area: clienta; font-weight: 700; overflow-wrap: anywhere; }
+  .tabla.adm-hoy .adm-hoy-clienta::before { content: '·' / ''; margin-right: 8px; color: var(--tinta-3); font-weight: 400; }
+  .tabla.adm-hoy .adm-hoy-estado { grid-area: estado; }
+  .tabla.adm-hoy .adm-hoy-firma { grid-area: firma; }
+  .tabla.adm-hoy .adm-hoy-firma-vacia { display: none; }
+  .tabla.adm-hoy .adm-hoy-servicios { grid-area: servicios; color: var(--tinta-2); font-size: 0.9rem; }
+  .tabla.adm-hoy .adm-hoy-atiende { grid-area: atiende; color: var(--tinta-2); font-size: 0.85rem; }
+  .tabla.adm-hoy .adm-hoy-atiende::before { content: attr(data-etiqueta) ': '; }
+}

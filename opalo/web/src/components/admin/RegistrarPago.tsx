@@ -16,15 +16,18 @@ interface Props {
   destino: { tipo: 'cita' | 'pedido'; id: string; descripcion: string };
   total: number;
   pagado: number;
+  /** El preferido del pedido. Una cortesía nunca se precarga: se elige a propósito. */
   metodoSugerido?: MetodoPago | null;
+  /** Pedido sólo con productos: al liquidarlo no se generan servicios prepagados. */
+  soloProductos?: boolean;
   onCerrar: () => void;
   onListo: (mensaje: string) => void;
 }
 
-export function RegistrarPago({ destino, total, pagado, metodoSugerido, onCerrar, onListo }: Props) {
+export function RegistrarPago({ destino, total, pagado, metodoSugerido, soloProductos = false, onCerrar, onListo }: Props) {
   const saldo = Math.max(0, centavos(total - pagado));
   const [monto, setMonto] = useState(saldo > 0 ? String(saldo) : '');
-  const [metodo, setMetodo] = useState<MetodoPago>(metodoSugerido ?? 'efectivo');
+  const [metodo, setMetodo] = useState<MetodoPago>(metodoSugerido && metodoSugerido !== 'cortesia' ? metodoSugerido : 'efectivo');
   const [referencia, setReferencia] = useState('');
   const [propina, setPropina] = useState('');
   const [confirmaExceso, setConfirmaExceso] = useState(false);
@@ -33,6 +36,7 @@ export function RegistrarPago({ destino, total, pagado, metodoSugerido, onCerrar
   const montoNum = aNumero(monto);
   const exceso = total > 0 && montoNum !== null && montoNum > 0 ? centavos(montoNum - saldo) : 0;
   const hayExceso = exceso > 0.005;
+  const cortesia = metodo === 'cortesia';
   const puedePasarAPropina = hayExceso && destino.tipo === 'cita' && saldo > 0;
 
   const cambiarMonto = (v: string) => {
@@ -71,9 +75,14 @@ export function RegistrarPago({ destino, total, pagado, metodoSugerido, onCerrar
     const r = await ejecutar();
     if (!r) return;
     const cubre = pagado + r.m >= total - 0.005;
-    let mensaje = `Pago de ${dinero(r.m)} registrado${hayExceso ? ` (${dinero(exceso)} más que el saldo)` : ''}.`;
+    let mensaje = cortesia
+      ? `Cortesía de ${dinero(r.m)} registrada (no cuenta como ingreso).`
+      : `Pago de ${dinero(r.m)} registrado${hayExceso ? ` (${dinero(exceso)} más que el saldo)` : ''}.`;
     if (r.p > 0) mensaje += ` Propina de ${dinero(r.p)} registrada aparte.`;
-    if (destino.tipo === 'pedido' && cubre) mensaje += ' El pedido quedó pagado y sus servicios ya están disponibles como créditos de la clienta.';
+    if (destino.tipo === 'pedido' && cubre)
+      mensaje += soloProductos
+        ? ' El pedido quedó pagado y los productos se descontaron del inventario.'
+        : ' El pedido quedó pagado y sus servicios ya están disponibles como servicios prepagados de la clienta.';
     onListo(mensaje);
   };
 
@@ -116,7 +125,7 @@ export function RegistrarPago({ destino, total, pagado, metodoSugerido, onCerrar
         <div className="adm-form-2">
           <div className="campo">
             <label className="etiqueta" htmlFor="pago-monto">
-              Monto que recibes
+              {cortesia ? 'Valor de la cortesía' : 'Monto que recibes'}
             </label>
             <input
               id="pago-monto"
@@ -134,13 +143,22 @@ export function RegistrarPago({ destino, total, pagado, metodoSugerido, onCerrar
             <label className="etiqueta" htmlFor="pago-metodo">
               Método
             </label>
-            <select id="pago-metodo" className="input" value={metodo} onChange={(e) => setMetodo(e.target.value as MetodoPago)}>
+            <select
+              id="pago-metodo"
+              className="input"
+              value={metodo}
+              onChange={(e) => setMetodo(e.target.value as MetodoPago)}
+              aria-describedby={cortesia ? 'pago-cortesia' : undefined}
+            >
               {METODOS.map((m) => (
                 <option key={m} value={m}>
                   {ETIQUETA_METODO_PAGO[m]}
                 </option>
               ))}
             </select>
+            <span className="ayuda adm-pago-cortesia" id="pago-cortesia" aria-live="polite">
+              {cortesia ? 'La cortesía no cuenta como ingreso.' : ''}
+            </span>
           </div>
         </div>
         {hayExceso && montoNum !== null && (
@@ -152,7 +170,9 @@ export function RegistrarPago({ destino, total, pagado, metodoSugerido, onCerrar
                     ? `Es ${dinero(exceso)} más que el saldo (${dinero(saldo)}).`
                     : `${destino.tipo === 'cita' ? 'Esta cita ya está pagada' : 'Este pedido ya está pagado'}: los ${dinero(montoNum)} serían un pago de más.`}
                 </strong>{' '}
-                Revisa que el monto esté bien escrito: lo que registres aquí cuenta como ingreso del spa.
+                {cortesia
+                  ? 'Revisa que el monto esté bien escrito.'
+                  : 'Revisa que el monto esté bien escrito: lo que registres aquí cuenta como ingreso del spa.'}
                 {puedePasarAPropina && ' Si la diferencia es propina, pásala a «Propina».'}
               </p>
               {puedePasarAPropina && (
@@ -162,7 +182,11 @@ export function RegistrarPago({ destino, total, pagado, metodoSugerido, onCerrar
                   </button>
                 </div>
               )}
-              <Casilla etiqueta={`Sí, recibí ${dinero(montoNum)} como pago`} checked={confirmaExceso} onChange={setConfirmaExceso} />
+              <Casilla
+                etiqueta={cortesia ? `Sí, la cortesía es de ${dinero(montoNum)}` : `Sí, recibí ${dinero(montoNum)} como pago`}
+                checked={confirmaExceso}
+                onChange={setConfirmaExceso}
+              />
             </div>
           </div>
         )}
@@ -189,8 +213,9 @@ export function RegistrarPago({ destino, total, pagado, metodoSugerido, onCerrar
         )}
         {destino.tipo === 'pedido' && (
           <p className="aviso aviso-info adm-sin-margen">
-            Cuando los pagos cubren el total, el pedido pasa a “Pagado” y el sistema activa automáticamente los créditos de los servicios y paquetes
-            (y los códigos de regalo). Los productos se descuentan del inventario.
+            {soloProductos
+              ? 'Cuando los pagos cubren el total, el pedido pasa a “Pagado” y los productos se descuentan del inventario.'
+              : 'Cuando los pagos cubren el total, el pedido pasa a “Pagado” y el sistema activa automáticamente los servicios prepagados de los servicios y paquetes (y los códigos de regalo). Los productos se descuentan del inventario.'}
           </p>
         )}
         <MensajeError error={error} />

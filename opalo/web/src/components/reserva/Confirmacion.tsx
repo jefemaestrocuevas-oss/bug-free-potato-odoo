@@ -1,4 +1,5 @@
-// Paso 7: "¡Listo!" con los datos de la cita, recordatorios, calendario y WhatsApp.
+// Paso 7: la cita ya está reservada (el título "¡Listo! Tu cita está reservada" lo pone Reservar):
+// datos de la cita, recordatorios, calendario y WhatsApp.
 import { Link } from 'react-router-dom';
 import type { Configuracion } from '../../lib/api/tipos';
 import { duracion, enlaceWhatsApp, ETIQUETA_ESTADO_CITA, fechaHora, fechaLarga, hora, telefonoBonito } from '../../lib/format';
@@ -20,7 +21,7 @@ export function Confirmacion({ conf, config, onOtra }: { conf: DatosConfirmacion
         titulo: `Cita en ${config.nombre_negocio}: ${servicios}`,
         descripcion: [
           `Te atiende ${conf.personal_nombre}.`,
-          `Llega 10 minutos antes. Tolerancia de ${config.tolerancia_retraso_min} minutos.`,
+          `Llega puntual: tienes ${config.tolerancia_retraso_min} minutos de tolerancia.`,
           `Para cancelar o cambiar tu cita, hazlo con ${config.horas_cancelacion} horas de anticipación desde tu cuenta o por WhatsApp al ${telefonoBonito(config.telefono_whatsapp)}.`,
         ].join('\n'),
         lugar: config.direccion,
@@ -35,14 +36,9 @@ export function Confirmacion({ conf, config, onOtra }: { conf: DatosConfirmacion
         <span className="rv-confirmacion-icono" aria-hidden="true">
           ✓
         </span>
-        <div>
-          <p className="rv-confirmacion-listo">¡Listo!</p>
-          <p className="texto-2">
-            {pendiente
-              ? 'Recibimos tu reserva. Está por confirmar: abajo te explicamos por qué.'
-              : 'Tu cita quedó confirmada. Te esperamos.'}
-          </p>
-        </div>
+        <p className="rv-confirmacion-estado">
+          {pendiente ? 'Recibimos tu reserva. Está por confirmar: abajo te explicamos por qué.' : 'Tu cita quedó confirmada. Te esperamos.'}
+        </p>
       </div>
 
       <dl className="rv-final-datos tarjeta-plana">
@@ -109,10 +105,7 @@ export function Confirmacion({ conf, config, onOtra }: { conf: DatosConfirmacion
           Para tu cita
         </h3>
         <ul>
-          <li>Llega 10 minutos antes para empezar a tiempo.</li>
-          <li>
-            Tenemos una tolerancia de {config.tolerancia_retraso_min} minutos; después quizá debamos acortar o reagendar tu servicio.
-          </li>
+          <li>Llega puntual: tienes {config.tolerancia_retraso_min} minutos de tolerancia. Si vas tarde, avísanos por WhatsApp.</li>
           <li>
             Si necesitas cancelar, hazlo con al menos {config.horas_cancelacion} horas de anticipación desde{' '}
             <Link to="/cuenta/citas">tu cuenta</Link>. Con menos tiempo, escríbenos por WhatsApp.

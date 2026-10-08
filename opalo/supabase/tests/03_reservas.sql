@@ -1,6 +1,10 @@
 -- Pruebas · reservar_cita (R1, R4), cancelar_cita (R5), consentimiento (R6), completar (R7)
 begin;
 
+-- Las reservas usan fechas relativas a hoy, que pueden caer antes de la apertura (seed.sql trae
+-- configuracion.fecha_apertura): sin fecha de apertura, salvo en el bloque que prueba esa regla.
+update public.configuracion set fecha_apertura = null;
+
 -- ---------------------------------------------------------------------------
 -- Requisitos antes de reservar
 -- ---------------------------------------------------------------------------
@@ -781,6 +785,55 @@ begin
                            from public.citas where id = (r ->> 'id')::uuid), 'no_asistio/1',
                         'sigue como no asistió y el crédito no regresa');
   raise notice 'OK - no asistió: ni se cancela ni se completa directo';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- Apertura (R4): antes de configuracion.fecha_apertura no se reserva en línea (fecha LOCAL de la
+-- cita); el día de la apertura sí; el personal sí agenda antes (ensayo) con reservar_cita_staff.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_apertura date := pruebas.proximo_dia(5, 49);   -- un viernes: día de apertura
+  v_antes date := pruebas.proximo_dia(5, 49) - 1;  -- el jueves anterior
+  v_c uuid := pruebas.clienta_lista('apertura.prueba@ejemplo.mx');
+  v_esp uuid := pruebas.usuario('especialista@demo.opalo.mx');
+  v_sql text;
+  r jsonb;
+begin
+  update public.configuracion set fecha_apertura = v_apertura;
+
+  perform pruebas.como(v_c);
+  perform pruebas.espera_error(format('select public.reservar_cita(%L::jsonb, %L::timestamptz, %L, %L)',
+      pruebas.items('cejas'), pruebas.instante(v_antes, '10:00'), 'Clienta Apertura', pruebas.firma()),
+    'Ese horario no está disponible.');
+  -- 18:00 del jueves en Querétaro son las 00:00 UTC del viernes: cuenta la fecha local (jueves).
+  v_sql := format('select public.reservar_cita(%L::jsonb, %L::timestamptz, %L, %L)',
+                  pruebas.items('cejas'), pruebas.instante(v_antes, '18:00'), 'Clienta Apertura', pruebas.firma());
+  perform pruebas.igual((pruebas.instante(v_antes, '18:00') at time zone 'UTC')::date, v_apertura,
+                        'en UTC ya es el día de la apertura');
+  perform pruebas.espera_error(v_sql, 'Ese horario no está disponible.');
+
+  r := public.reservar_cita(pruebas.items('cejas'), pruebas.instante(v_apertura, '10:00'), 'Clienta Apertura', pruebas.firma());
+  perform pruebas.igual(r ->> 'estado', 'confirmada', 'el día de la apertura sí reserva');
+
+  -- El personal agenda antes de la apertura (p. ej. el ensayo), pero no por el camino de la clienta
+  perform pruebas.como(v_esp);
+  r := public.reservar_cita_staff(pruebas.cliente_de(v_c), pruebas.items('cejas'), pruebas.instante(v_antes, '12:00'),
+                                  null, 'mostrador', 'Ensayo de apertura');
+  perform pruebas.afirma((r ->> 'id') is not null, 'el personal agenda antes de la apertura');
+  perform pruebas.espera_error(format('select public.reservar_cita(%L::jsonb, %L::timestamptz, %L, %L)',
+      pruebas.items('cejas'), pruebas.instante(v_antes, '15:00'), 'Especialista', pruebas.firma()),
+    'Ese horario no está disponible.');
+
+  -- Sin fecha de apertura, ese mismo horario se reserva
+  perform pruebas.como_postgres();
+  update public.configuracion set fecha_apertura = null;
+  perform pruebas.como(v_c);
+  perform public.reservar_cita(pruebas.items('cejas'), pruebas.instante(v_antes, '18:00'), 'Clienta Apertura', pruebas.firma());
+  perform pruebas.como_postgres();
+  perform pruebas.igual((select count(*)::int from public.citas where cliente_id = pruebas.cliente_de(v_c)), 3,
+                        'tres citas: apertura, ensayo y la del jueves sin restricción');
+  raise notice 'OK - apertura: la clienta no reserva antes (fecha local), sí el día de apertura; el personal agenda antes';
 end $$;
 
 rollback;

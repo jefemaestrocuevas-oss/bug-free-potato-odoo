@@ -79,8 +79,9 @@ export default function Resumen() {
             {r.citas_hoy.length === 0 ? (
               <Vacio titulo="No hay citas para hoy">Cuando alguien reserve, aparecerá aquí.</Vacio>
             ) : (
-              <div className="tabla-envoltura">
-                <table className="tabla">
+              // En pantallas angostas cada cita es una tarjeta: «10:00–11:00 · Clienta», y abajo estado y firma.
+              <div className="tabla-envoltura adm-hoy-envoltura">
+                <table className="tabla adm-hoy">
                   <thead>
                     <tr>
                       <th>Hora</th>
@@ -92,25 +93,32 @@ export default function Resumen() {
                     </tr>
                   </thead>
                   <tbody>
-                    {r.citas_hoy.map((c) => (
-                      <tr key={c.id}>
-                        <td className="adm-nowrap">
-                          <span className="num">
-                            {hora(c.inicio)}–{hora(c.fin)}
-                          </span>
-                        </td>
-                        <td>
-                          <Link to={`/admin/clientes/${c.cliente_id}`}>{c.cliente_nombre}</Link>
-                          {c.primera_vez && <span className="pill pill-oro adm-pill-junto">Primera vez</span>}
-                        </td>
-                        <td>{c.items.map((i) => i.nombre).join(', ')}</td>
-                        <td>{c.personal_nombre}</td>
-                        <td>
-                          <PillEstadoCita estado={c.estado} />
-                        </td>
-                        <td>{c.estado === 'cancelada' || c.estado === 'no_asistio' ? <span className="texto-3">—</span> : <PillFirma firmados={c.consentimientos_firmados} />}</td>
-                      </tr>
-                    ))}
+                    {r.citas_hoy.map((c) => {
+                      const sinFirmaQueAplique = c.estado === 'cancelada' || c.estado === 'no_asistio';
+                      return (
+                        <tr key={c.id}>
+                          <td className="adm-nowrap adm-hoy-hora">
+                            <span className="num">
+                              {hora(c.inicio)}–{hora(c.fin)}
+                            </span>
+                          </td>
+                          <td className="adm-hoy-clienta">
+                            <Link to={`/admin/clientes/${c.cliente_id}`}>{c.cliente_nombre}</Link>
+                            {c.primera_vez && <span className="pill pill-oro adm-pill-junto">Primera vez</span>}
+                          </td>
+                          <td className="adm-hoy-servicios">{c.items.map((i) => i.nombre).join(', ')}</td>
+                          <td className="adm-hoy-atiende" data-etiqueta="Atiende">
+                            {c.personal_nombre}
+                          </td>
+                          <td className="adm-hoy-estado">
+                            <PillEstadoCita estado={c.estado} />
+                          </td>
+                          <td className={sinFirmaQueAplique ? 'adm-hoy-firma adm-hoy-firma-vacia' : 'adm-hoy-firma'}>
+                            {sinFirmaQueAplique ? <span className="texto-3">—</span> : <PillFirma firmados={c.consentimientos_firmados} />}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

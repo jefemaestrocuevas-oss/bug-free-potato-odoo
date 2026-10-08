@@ -52,7 +52,7 @@ export const FIRMA_EJEMPLO =
 export function dbVacia(configuracion: Configuracion): Db {
   return {
     folio_pedidos: 0,
-    configuracion: { ...configuracion },
+    configuracion: { ...configuracion, fecha_apertura: configuracion.fecha_apertura ?? null },
     usuarios: [],
     perfiles: [],
     clientes: [],
@@ -500,6 +500,11 @@ export function sembrar(fuentes: FuentesDemo, ahora: Date, opciones: OpcionesSem
   };
   const S = (slug: string): ItemReserva => ({ servicio_id: servId.get(slug) });
   const P = (slug: string): ItemReserva => ({ paquete_id: paqId.get(slug) });
+  // Antes de configuracion.fecha_apertura las clientas no reservan en línea; lo que el personal
+  // agenda en esos días son ensayos (ESPEC §4.1), y no se cobran.
+  const apertura = db.configuracion.fecha_apertura;
+  const antesDeAbrir = (fecha: string) => !!apertura && fecha < apertura;
+  const NOTA_ENSAYO = 'Ensayo de apertura (ejemplo).';
 
   // ---------- Citas pasadas (completadas con pago) ----------
   interface Pasada {
@@ -529,7 +534,9 @@ export function sembrar(fuentes: FuentesDemo, ahora: Date, opciones: OpcionesSem
       const fin = inicio + duracionReserva(db, p.items) * MS_MIN;
       const servicioIds = [...expandirServicios(db, p.items).keys()];
       const { alertas, requiereRevision } = alertasPara(db, p.cliente.id, categoriasDe(db, servicioIds));
-      const cita = insertarCita(en(inicio - 3 * DIA, p.creador), {
+      // Antes de abrir: ensayo agendado por el personal (nunca "web") y sin cobro.
+      const ensayo = antesDeAbrir(fecha);
+      const cita = insertarCita(en(inicio - 3 * DIA, ensayo ? admin : p.creador), {
         cliente: p.cliente,
         resueltos: p.items.map((it) => ({
           servicio: db.servicios.find((s) => s.id === it.servicio_id) ?? null,
@@ -541,18 +548,19 @@ export function sembrar(fuentes: FuentesDemo, ahora: Date, opciones: OpcionesSem
         personal_id: especialista.id,
         cabina_id: db.cabinas[0].id,
         estado: 'confirmada',
-        origen: p.origen,
+        origen: ensayo && p.origen === 'web' ? 'mostrador' : p.origen,
         requiere_revision: requiereRevision,
         alertas,
         notas_cliente: null,
       });
+      if (ensayo) cita.notas_internas = NOTA_ENSAYO;
       if (p.estado === 'no_asistio') {
         cambiarEstadoCita(en(fin, staff), cita.id, 'no_asistio');
         return;
       }
-      crearConsentimientos(en(inicio - 10 * MS_MIN, staff), cita, { nombre_firmante: nombreCompleto(p.cliente), firma_svg: FIRMA_EJEMPLO }, false);
+      crearConsentimientos(en(inicio - 10 * MS_MIN, staff), cita, { nombre_firmante: nombreCompleto(p.cliente), firma_svg: FIRMA_EJEMPLO }, false, 'cabina');
       completarCita(en(fin, staff), cita.id);
-      if (p.pago) {
+      if (p.pago && !ensayo) {
         const monto = p.pago.monto ?? cita.total;
         if (monto > 0)
           registrarPago(en(fin + 5 * MS_MIN, staff), {
@@ -612,35 +620,45 @@ export function sembrar(fuentes: FuentesDemo, ahora: Date, opciones: OpcionesSem
   });
 
   // ---------- Citas futuras ----------
+  // Las de clientas van desde el día de apertura: antes no se reserva en línea (y así se siembran con
+  // las mismas reglas que una clienta real). Mariana empieza con una sola cita próxima, para que pueda
+  // probar varias reservas antes de llegar al límite de 3.
+  const desde = apertura && hoy < apertura ? apertura : hoy;
+  // Con un par de días de margen: las reservas se siembran "hechas" uno o dos días antes de hoy.
+  const ultimoDiaReservable = sumarDias(hoy, db.configuracion.ventana_reserva_dias - 2);
   const firmaDe = (c: ClienteFila) => ({ nombre_firmante: nombreCompleto(c), firma_svg: FIRMA_EJEMPLO, tutor_nombre: null });
+  /** Inicio a `dias` del primer día en que las clientas reservan, o null si queda fuera de la ventana de reserva. */
   const futura = (dias: number, hhmm: string) => {
-    const fecha = diaHabil(sumarDias(hoy, dias), 1);
-    return isoDesdeLocal(fecha, horaEn(fecha, hhmm));
+    const fecha = diaHabil(sumarDias(desde, dias), 1);
+    return fecha > ultimoDiaReservable ? null : isoDesdeLocal(fecha, horaEn(fecha, hhmm));
   };
-  intentar('cita confirmada de Mariana', () => {
-    reservarCita(en(hace(2), usuarios.cliente), { items: [S('cejas'), S('axilas')], inicio: futura(6, '11:00'), firma: firmaDe(mariana), notas: 'Cita de ejemplo.' });
-  });
   intentar('cita con crédito de Mariana', () => {
-    if (!creditoExpress) return;
+    const inicio = futura(6, '12:00');
+    if (!creditoExpress || !inicio) return;
     reservarCita(en(hace(1), usuarios.cliente), {
       items: [{ paquete_id: paqId.get('express'), credito_id: creditoExpress }],
-      inicio: futura(13, '12:00'),
+      inicio,
       firma: firmaDe(mariana),
+      notas: 'Cita de ejemplo.',
     });
   });
   intentar('cita por revisar de Daniela', () => {
+    const inicio = futura(3, '13:00');
+    if (!inicio) return;
     reservarCita(en(hace(1), danielaUid), {
       items: [S('facial-hidratante'), S('shot-hidratante')],
-      inicio: futura(3, '13:00'),
+      inicio,
       firma: firmaDe(daniela),
       notas: 'Es mi primera vez con un facial (ejemplo).',
     });
   });
   intentar('cita sin firma de Fernanda', () => {
+    const inicio = futura(2, '17:00');
+    if (!inicio) return;
     reservarCitaStaff(en(hace(1), staff), {
       cliente_id: fernanda.id,
       items: [S('bikini-brasileno')],
-      inicio: futura(2, '17:00'),
+      inicio,
       origen: 'whatsapp',
       notas: 'Agendó por WhatsApp; falta que firme (ejemplo).',
     });
@@ -655,6 +673,8 @@ export function sembrar(fuentes: FuentesDemo, ahora: Date, opciones: OpcionesSem
         notas: null,
       });
       firmarConsentimientoCita(en(hace(3), staff), r.id, firmaDe(lucia));
+      const cita = db.citas.find((c) => c.id === r.id);
+      if (cita && antesDeAbrir(hoy)) cita.notas_internas = NOTA_ENSAYO;
     });
   }
   intentar('bloqueo de ejemplo', () => {

@@ -57,6 +57,8 @@
 .tabla.res-tabla thead th:first-child { background: var(--fondo-alt); padding-left: 12px; }
 .tabla.res-tabla tbody th .adm-sub { font-weight: 600; }
 .res-mes-corto { display: none; }
+/* Utilidad: en su lugar (después de gastos) a lo ancho; segunda columna cuando la tabla es angosta. */
+.tabla.res-tabla .res-col-angosta { display: none; }
 .tabla.res-tabla .res-fila-actual th,
 .tabla.res-tabla .res-fila-actual td { background: var(--fondo); }
 .tabla.res-tabla .res-fila-sin td { color: var(--tinta-3); }
@@ -83,6 +85,8 @@
     border: 0;
   }
   .res-mes-corto { display: inline; }
+  .tabla.res-tabla .res-col-angosta { display: table-cell; }
+  .tabla.res-tabla .res-col-ancha { display: none; }
   .tabla.res-tabla { font-size: 0.86rem; }
   .tabla.res-tabla td,
   .tabla.res-tabla thead th { padding: 9px 8px; }

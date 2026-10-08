@@ -60,9 +60,13 @@ create table public.configuracion (
   edad_minima             int  not null default 15  check (edad_minima >= 0),
   edad_mayoria            int  not null default 18  check (edad_mayoria >= 0),
   vigencia_creditos_dias  int  not null default 365 check (vigencia_creditos_dias > 0),
+  fecha_apertura          date,                                   -- null = sin restricción
   actualizado_en          timestamptz not null default now()
 );
 comment on table public.configuracion is 'Parámetros del negocio (una sola fila, id = 1).';
+comment on column public.configuracion.fecha_apertura is
+  'Día de apertura (hora local). Antes de esa fecha las clientas no ven horarios ni reservan en línea; '
+  'el personal sí agenda (p. ej. el ensayo de apertura). Null = sin restricción.';
 
 create trigger configuracion_actualizado_en
   before update on public.configuracion

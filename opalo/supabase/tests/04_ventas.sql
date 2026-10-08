@@ -1,6 +1,10 @@
 -- Pruebas · crear_pedido (R8), registrar_pago (R9), créditos y regalos (R10), cancelar_pedido
 begin;
 
+-- Una prueba reserva en una fecha relativa a hoy, que puede caer antes de la apertura: sin fecha
+-- de apertura (la regla se prueba en 02 y 03).
+update public.configuracion set fecha_apertura = null;
+
 do $$
 declare
   v_a uuid := pruebas.clienta_lista('compra.a@ejemplo.mx');

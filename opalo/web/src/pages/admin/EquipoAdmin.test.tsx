@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PersonalInterno } from '../../lib/api';
-import { enlaceSeguro, erroresDelDia, horarioPorDia, iniciales, minutosSemana, urlValida } from '../../components/admin/EquipoPiezas';
+import { enlaceSeguro, erroresDelDia, horarioPorDia, iniciales, minutosDelDia, minutosSemana, urlValida } from '../../components/admin/EquipoPiezas';
 import EquipoAdmin from './EquipoAdmin';
 
 const admin = vi.hoisted(() => ({
@@ -192,6 +192,22 @@ describe('Piezas del equipo', () => {
     expect(dias[0]).toEqual([]);
     expect(dias[2]).toHaveLength(1);
     expect(minutosSemana(ANA.horarios)).toBe(15 * 60);
+  });
+
+  it('el total del día no cuenta dos veces los rangos encimados', () => {
+    // 10–14 y 12–19 cubren de 10 a 19: 9 h, no 11 h.
+    expect(minutosDelDia([{ k: 1, inicio: '10:00', fin: '14:00' }, { k: 2, inicio: '12:00', fin: '19:00' }])).toBe(9 * 60);
+    // Pegados y separados por la comida.
+    expect(minutosDelDia([{ k: 1, inicio: '10:00', fin: '14:00' }, { k: 2, inicio: '15:00', fin: '19:00' }])).toBe(8 * 60);
+    // Uno dentro de otro, uno incompleto y uno al revés no suman.
+    expect(
+      minutosDelDia([
+        { k: 1, inicio: '09:00', fin: '18:00' },
+        { k: 2, inicio: '10:00', fin: '11:00' },
+        { k: 3, inicio: '', fin: '20:00' },
+        { k: 4, inicio: '21:00', fin: '20:00' },
+      ]),
+    ).toBe(9 * 60);
   });
 
   it('sólo acepta direcciones seguras', () => {

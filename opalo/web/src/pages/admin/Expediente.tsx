@@ -213,6 +213,7 @@ export default function Expediente() {
         descripcion={
           <span className="fila adm-ex-descripcion">
             <ClientasPillCuenta tiene={c.tiene_cuenta} largo />
+            {c.es_personal && <span className="pill pill-info">Cuenta del equipo</span>}
             {anios !== null && config && anios < config.edad_mayoria && <span className="pill pill-alerta">Menor de edad</span>}
             {c.citas_completadas === 0 && <span className="pill pill-oro">Aún no nos visita</span>}
             <span className="texto-3 pequeno">Registrada el {fechaCorta(c.creado_en)}</span>

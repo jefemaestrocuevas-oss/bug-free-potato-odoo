@@ -1,6 +1,10 @@
 -- Pruebas · horarios_disponibles (R3), en hora local America/Mexico_City
 begin;
 
+-- Las pruebas usan fechas relativas a hoy, que pueden caer antes de la apertura (seed.sql trae
+-- configuracion.fecha_apertura): sin fecha de apertura, salvo en el bloque que prueba esa regla.
+update public.configuracion set fecha_apertura = null;
+
 -- Martes libre dentro de la ventana: 9 inicios de 10:00 a 18:00
 do $$
 declare
@@ -147,6 +151,46 @@ begin
                                                       group by 1, 2 having count(*) > 1) x), 0,
                         'ningún inicio repetido para la misma persona');
   raise notice 'OK - rangos encimados no duplican horarios';
+end $$;
+
+-- Antes de la apertura: visitantes y clientas no ven horarios; el personal (y admin) sí, para
+-- agendar el ensayo de apertura. El día de la apertura ya hay horarios para todas.
+do $$
+declare
+  v_antes date := pruebas.proximo_dia(2, 28);        -- un martes (libre) antes de la apertura
+  v_apertura date := pruebas.proximo_dia(2, 28) + 7; -- el martes siguiente: día de apertura
+  v_clienta uuid := pruebas.crear_usuario('apertura.horarios@ejemplo.mx', '{"nombre": "Clienta", "apellidos": "Apertura"}');
+  v_esp uuid := pruebas.usuario('especialista@demo.opalo.mx');
+  v_admin uuid := pruebas.usuario('admin@demo.opalo.mx');
+begin
+  update public.configuracion set fecha_apertura = v_apertura;
+
+  perform pruebas.como_anon();
+  perform pruebas.igual((select count(*)::int from public.horarios_disponibles(v_antes)), 0, 'visitante: nada antes de la apertura');
+  perform pruebas.igual((select count(*)::int from public.horarios_disponibles(v_apertura - 1)), 0, 'visitante: ni el día anterior');
+  perform pruebas.igual((select count(*)::int from public.horarios_disponibles(v_apertura)), 9, 'visitante: el día de la apertura sí');
+
+  perform pruebas.como(v_clienta);
+  perform pruebas.igual((select count(*)::int from public.horarios_disponibles(v_antes)), 0, 'clienta: nada antes de la apertura');
+  perform pruebas.igual((select count(*)::int from public.horarios_disponibles(v_apertura)), 9, 'clienta: el día de la apertura sí');
+  perform pruebas.igual((select count(*)::int from public.horarios_disponibles(v_apertura + 7)), 9, 'clienta: y después');
+
+  perform pruebas.como(v_esp);
+  perform pruebas.igual((select count(*)::int from public.horarios_disponibles(v_antes)), 9, 'personal: sí ve horarios antes (ensayo)');
+  perform pruebas.como(v_admin);
+  perform pruebas.igual((select count(*)::int from public.horarios_disponibles(v_antes)), 9, 'admin: también');
+
+  -- Fecha de apertura ya pasada o sin fecha: sin restricción
+  perform pruebas.como_postgres();
+  update public.configuracion set fecha_apertura = public.hoy_local() - 30;
+  perform pruebas.como(v_clienta);
+  perform pruebas.igual((select count(*)::int from public.horarios_disponibles(v_antes)), 9, 'apertura en el pasado: la clienta ve todo');
+  perform pruebas.como_postgres();
+  update public.configuracion set fecha_apertura = null;
+  perform pruebas.como_anon();
+  perform pruebas.igual((select count(*)::int from public.horarios_disponibles(v_antes)), 9, 'sin fecha de apertura: sin restricción');
+  perform pruebas.como_postgres();
+  raise notice 'OK - antes de la apertura sólo el personal ve horarios; el día de la apertura, todas';
 end $$;
 
 rollback;

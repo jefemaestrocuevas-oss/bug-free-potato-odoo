@@ -1,23 +1,10 @@
 // Datos de contacto del sitio público. Se leen de `configuracion` (api.getConfiguracion);
-// mientras cargan (o si falla la conexión) se usan estos valores, que son los mismos del catálogo.
+// mientras cargan (o si falla la conexión) se usan los de datos/catalogo.json, la misma fuente
+// que llena la base: así no hay valores escritos dos veces.
 import { useEffect, useState } from 'react';
+import { configuracion as CONFIG_CATALOGO } from '../../../../datos/catalogo.json';
 import { api, type Configuracion } from '../../lib/api';
 import { fechaLocal } from '../../lib/format';
-
-export const CONTACTO_RESPALDO = {
-  nombre_negocio: 'Ópalo',
-  lema: 'Todo lo que necesitas para consentirte, en un solo lugar',
-  telefono_whatsapp: '4421701466',
-  direccion: 'Momentum Centro Sur, Torre 2, Int. 207, Querétaro, Qro.',
-  horas_cancelacion: 24,
-  edad_minima: 15,
-  edad_mayoria: 18,
-  vigencia_creditos_dias: 365,
-  duracion_sesion_min: 60,
-} as const;
-
-/** Fecha de apertura del spa ('YYYY-MM-DD', hora de Querétaro). */
-export const FECHA_APERTURA = '2026-10-31';
 
 export type DatosContacto = {
   nombre_negocio: string;
@@ -29,6 +16,27 @@ export type DatosContacto = {
   edad_mayoria: number;
   vigencia_creditos_dias: number;
   duracion_sesion_min: number;
+  tolerancia_retraso_min: number;
+  /**
+   * Día de apertura ('YYYY-MM-DD', hora de Querétaro) o null. Aquí sólo alimenta los textos de
+   * bienvenida; la regla de reservas usa `configuracion.fecha_apertura` (ver PasoHorario).
+   */
+  fecha_apertura: string | null;
+};
+
+/** Valores del catálogo, mientras llega la configuración de la base. */
+export const CONTACTO_RESPALDO: DatosContacto = {
+  nombre_negocio: CONFIG_CATALOGO.nombre_negocio,
+  lema: CONFIG_CATALOGO.lema,
+  telefono_whatsapp: CONFIG_CATALOGO.telefono_whatsapp,
+  direccion: CONFIG_CATALOGO.direccion,
+  horas_cancelacion: CONFIG_CATALOGO.horas_cancelacion,
+  edad_minima: CONFIG_CATALOGO.edad_minima,
+  edad_mayoria: CONFIG_CATALOGO.edad_mayoria,
+  vigencia_creditos_dias: CONFIG_CATALOGO.vigencia_creditos_dias,
+  duracion_sesion_min: CONFIG_CATALOGO.duracion_sesion_min,
+  tolerancia_retraso_min: CONFIG_CATALOGO.tolerancia_retraso_min,
+  fecha_apertura: CONFIG_CATALOGO.fecha_apertura ?? null,
 };
 
 let promesa: Promise<Configuracion> | null = null;
@@ -62,7 +70,7 @@ export function useContacto(): DatosContacto {
       vivo = false;
     };
   }, []);
-  if (!config) return { ...CONTACTO_RESPALDO };
+  if (!config) return CONTACTO_RESPALDO;
   return {
     nombre_negocio: config.nombre_negocio || CONTACTO_RESPALDO.nombre_negocio,
     lema: config.lema,
@@ -73,12 +81,14 @@ export function useContacto(): DatosContacto {
     edad_mayoria: config.edad_mayoria,
     vigencia_creditos_dias: config.vigencia_creditos_dias,
     duracion_sesion_min: config.duracion_sesion_min,
+    tolerancia_retraso_min: config.tolerancia_retraso_min,
+    fecha_apertura: config.fecha_apertura,
   };
 }
 
-/** true mientras no llega el día de apertura. */
-export function antesDeApertura(hoy: string = fechaLocal()): boolean {
-  return hoy < FECHA_APERTURA;
+/** true mientras no llega el día de apertura (`apertura` null = ya no hay fecha de apertura). */
+export function antesDeApertura(apertura: string | null, hoy: string = fechaLocal()): boolean {
+  return !!apertura && hoy < apertura;
 }
 
 /** Enlace a Google Maps con la dirección (se abre en otra pestaña). */

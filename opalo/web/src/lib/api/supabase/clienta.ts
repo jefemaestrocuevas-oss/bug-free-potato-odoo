@@ -9,8 +9,11 @@ import {
   aPedidoDetalle,
   aResultadoPedido,
   aResultadoReserva,
+  COLUMNAS_CITA_DETALLE,
   COLUMNAS_CLIENTE,
   COLUMNAS_CONSENTIMIENTO,
+  COLUMNAS_CREDITO,
+  COLUMNAS_PEDIDO_DETALLE,
   limpio,
   texto,
 } from './conversion';
@@ -126,7 +129,9 @@ export function crearApiClienta(ctx: Contexto): ApiClienta {
 
     async getMisCitas() {
       const id = await ctx.miClienteId();
-      const fs = await ctx.filas(sb.from('v_citas_detalle').select('*').eq('cliente_id', id).order('inicio', { ascending: false }));
+      const fs = await ctx.filas(
+        sb.from('v_citas_detalle').select(COLUMNAS_CITA_DETALLE).eq('cliente_id', id).order('inicio', { ascending: false }),
+      );
       return fs.map(aCitaDetalle);
     },
 
@@ -165,14 +170,16 @@ export function crearApiClienta(ctx: Contexto): ApiClienta {
     async getMisPedidos() {
       const id = await ctx.miClienteId();
       const fs = await ctx.filas(
-        sb.from('v_pedidos_detalle').select('*').eq('cliente_id', id).order('creado_en', { ascending: false }),
+        sb.from('v_pedidos_detalle').select(COLUMNAS_PEDIDO_DETALLE).eq('cliente_id', id).order('creado_en', { ascending: false }),
       );
       return fs.map(aPedidoDetalle);
     },
 
     async getMisCreditos() {
       const id = await ctx.miClienteId();
-      const fs = await ctx.filas(sb.from('v_creditos').select('*').eq('cliente_id', id).order('creado_en', { ascending: false }));
+      const fs = await ctx.filas(
+        sb.from('v_creditos').select(COLUMNAS_CREDITO).eq('cliente_id', id).order('creado_en', { ascending: false }),
+      );
       return fs.map(aCredito);
     },
 

@@ -3,10 +3,19 @@ import { crearApiDemo, FUENTES_DEMO } from './demo';
 import { CUENTAS_DEMO, PASSWORD_DEMO } from './cuentasDemo';
 import type { Ctx } from './demo/permisos';
 import * as R from './demo/reglas';
-import { sembrar } from './demo/sembrado';
-import { sha256 } from './demo/utilidades';
+import { FIRMA_EJEMPLO, sembrar } from './demo/sembrado';
+import { firmaValida, sha256 } from './demo/utilidades';
 import { fechaLocal, isoDesdeLocal, sumarDias } from '../format';
-import { POLITICAS_GENERALES, type DatosFirma, type OpaloApi, type Rol } from './tipos';
+import {
+  POLITICAS_GENERALES,
+  type DatosFirma,
+  type ItemPedidoNuevo,
+  type MetodoPago,
+  type OpaloApi,
+  type PaqueteEditable,
+  type ProductoEditable,
+  type Rol,
+} from './tipos';
 
 // Lunes 2 de noviembre de 2026, 12:00 en Querétaro. El horario cargado es mar–vie 10–19 y sáb 9–15.
 const LUNES = '2026-11-02';
@@ -34,6 +43,22 @@ const M = {
   credito: 'Ese crédito no es válido o ya se usó.',
   regalo: 'Ese código de regalo no existe o ya se canjeó.',
   permiso: 'No tienes permiso para hacer esto.',
+  // Endurecimiento (ESPEC §5.1)
+  nacimientoReservar: 'Para reservar necesitamos tu fecha de nacimiento.',
+  nacimientoFirmar: 'Para firmar necesitamos tu fecha de nacimiento.',
+  maxCitas: 'Ya tienes 3 citas próximas; para agendar otra escríbenos por WhatsApp al 442 170 1466.',
+  maxPedidos: 'Tienes 5 pedidos por pagar; págalos o cancela alguno antes de hacer otro.',
+  metodoPago: 'Elige efectivo, tarjeta o transferencia.',
+  firmaInvalida: 'No pudimos leer tu firma; bórrala y vuelve a firmar.',
+  nombreLargo: 'El nombre es muy largo; escríbelo en máximo 200 caracteres.',
+  notasLargas: 'Las notas son muy largas; escríbelas en máximo 1000 caracteres.',
+  nacimientoRegistrado: 'Tu fecha de nacimiento ya está registrada; si hay un error, escríbenos por WhatsApp al 442 170 1466.',
+  servicioSinConsentimiento: 'Elige qué consentimiento firma la clienta para este servicio.',
+  noAsistio: 'Esta cita se marcó como no asistió.',
+  fichaLarga: 'Tu ficha de salud es muy larga; resume cada respuesta en máximo 2000 caracteres.',
+  cantidad: 'Revisa las cantidades.',
+  cantidadMinima: 'La cantidad debe ser al menos 1.',
+  regaloLargo: 'El nombre de quien recibe el regalo es muy largo (máximo 120 caracteres).',
 };
 
 const FIRMA: DatosFirma = {
@@ -100,12 +125,13 @@ async function clientaLista(api: OpaloApi, marcadas: string[] = []) {
   await fichaCon(api, marcadas);
 }
 
-/** Otra clienta registrada y lista para reservar. */
+/** Otra clienta registrada y lista para reservar (devuelve su sesión). */
 async function otraClienta(api: OpaloApi, email = 'otra@ejemplo.mx', fecha_nacimiento: string | null = '1990-01-01') {
   await api.cerrarSesion();
-  await api.registrarse({ email, password: 'secreta1', nombre: 'Otra', apellidos: 'Clienta', telefono: '4429999999', fecha_nacimiento });
+  const sesion = await api.registrarse({ email, password: 'secreta1', nombre: 'Otra', apellidos: 'Clienta', telefono: '4429999999', fecha_nacimiento });
   await aceptarGenerales(api);
   await fichaCon(api);
+  return sesion!;
 }
 
 const a = (fecha: string, hhmm: string) => isoDesdeLocal(fecha, hhmm);
@@ -137,6 +163,46 @@ describe('utilidades', () => {
       expect(p.titulo.startsWith('#')).toBe(false);
       expect(p.hash_sha256).toBe(sha256(p.contenido_md));
     }
+  });
+
+  it('firmaValida acepta sólo un <svg> de trazos (como public.firma_valida)', () => {
+    expect(firmaValida(FIRMA_EJEMPLO)).toBe(true); // mismo formato que PanelFirma
+    expect(firmaValida(FIRMA.firma_svg)).toBe(true);
+    expect(firmaValida('  <svg><g><polyline points="0 0 1 1"/><line x1="0"/><circle r="1"/></g></svg>\n')).toBe(true);
+    for (const mala of [
+      null,
+      '',
+      'hola',
+      '<div><svg></svg></div>',
+      '<svg><path d="M0 0"/></svg> y algo más',
+      '<svg><script>alert(1)</script></svg>',
+      '<svg onload="alert(1)"><path d="M0 0"/></svg>',
+      '<svg><path d="M0 0" ONCLICK ="x()"/></svg>',
+      '<svg><a href="https://ejemplo.mx"><path d="M0 0"/></a></svg>',
+      '<svg><path xlink:href="#x" d="M0 0"/></svg>',
+      '<svg><path style="fill: url(#x)" d="M0 0"/></svg>',
+      '<svg><path d="javascript:alert(1)"/></svg>',
+      '<svg><foreignObject/></svg>',
+      `<svg><path d="${'M0 0 '.repeat(40_000)}"/></svg>`, // más de 200 000 caracteres
+    ])
+      expect(firmaValida(mala)).toBe(false);
+  });
+
+  it('documento_hash: misma fórmula que el trigger de SQL', () => {
+    // Valor calculado en PostgreSQL con tg_consentimiento_hash (concat_ws('|', …) y firmado_en en UTC con microsegundos).
+    expect(
+      R.documentoHash({
+        hash_politica: 'abc',
+        cliente_id: 'c1',
+        cita_id: null,
+        ficha_salud_id: 'f1',
+        nombre_firmante: 'Ana Pérez',
+        tutor_nombre: null,
+        es_menor: false,
+        firma_svg: '<svg/>',
+        firmado_en: '2026-11-02T18:00:00.123Z',
+      }),
+    ).toBe('c6db26485529531d167eb266ab5d975eec0c464f2f95723b3c385697c5e206cd');
   });
 });
 
@@ -239,13 +305,11 @@ describe('R4 reservar', () => {
 
   it('edad mínima y tutor para menores', async () => {
     const { api } = entorno();
-    await clientaLista(api);
     const cejas = await servicio(api, 'cejas');
-    const datos = { nombre: 'Mariana', apellidos: 'López', telefono: null, acepta_promociones: false };
-    await api.actualizarMisDatos({ ...datos, fecha_nacimiento: '2012-01-01' }); // 14 años
     const pedir = (firma: DatosFirma) => api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), firma });
+    await otraClienta(api, 'catorce@ejemplo.mx', '2012-01-01'); // 14 años
     await expect(pedir(FIRMA)).rejects.toThrow(M.edad);
-    await api.actualizarMisDatos({ ...datos, fecha_nacimiento: '2010-06-01' }); // 16 años
+    await otraClienta(api, 'dieciseis@ejemplo.mx', '2010-06-01'); // 16 años
     await expect(pedir(FIRMA)).rejects.toThrow(M.tutor);
     await expect(pedir({ ...FIRMA, tutor_nombre: 'Rosa López' })).resolves.toMatchObject({ estado: 'confirmada' });
     const [doc] = await api.getMisConsentimientos();
@@ -648,7 +712,7 @@ describe('escrituras del panel', () => {
     await api.admin.guardarPersonal({ slug: 'auxiliar', nombre: 'Auxiliar (ejemplo)', titulo: 'Cosmetóloga', bio: null, foto_url: null, color_agenda: '#8a6d3b', activo: true, mostrar_en_sitio: true, orden: 2 });
     const aux = (await api.admin.getPersonal()).find((p) => p.slug === 'auxiliar')!;
     await expect(api.admin.guardarHorarios(aux.id, [{ dia_semana: 2, hora_inicio: '12:00', hora_fin: '10:00' }])).rejects.toThrow(
-      'La hora de salida debe ser después de la de entrada.',
+      'La salida debe ser después de la entrada.',
     );
     await api.admin.guardarHorarios(aux.id, [{ dia_semana: 2, hora_inicio: '10:00', hora_fin: '12:00' }]);
     await api.admin.guardarCapacitacion({ personal_id: aux.id, nombre: 'Curso (ejemplo)', institucion: null, tipo: 'curso', fecha: '2026-01-10', horas: 10, constancia_url: null, mostrar_en_sitio: true, notas: null });
@@ -686,7 +750,7 @@ describe('escrituras del panel', () => {
     await entrar(api, 'admin');
     await api.admin.guardarPaquete({ slug: 'duo', nombre: 'Dúo (ejemplo)', descripcion: null, tipo: 'bono', precio: 200, duracion_min: null, vigencia_dias: 90, activo: true, orden: 9, items: [{ servicio_id: cejas.id, cantidad: 2 }] });
     await expect(api.admin.guardarPaquete({ slug: 'duo', nombre: 'Otro', descripcion: null, tipo: 'combo', precio: 1, duracion_min: null, vigencia_dias: null, activo: true, orden: 1, items: [] })).rejects.toThrow(
-      'Ya existe otro registro con ese identificador (slug).',
+      'Ya existe otro paquete con ese identificador (slug).',
     );
     await api.admin.guardarServicio({ ...axilas, activo: false });
     expect((await api.getCatalogo()).servicios.some((x) => x.id === axilas.id)).toBe(false);
@@ -725,7 +789,8 @@ describe('datos de ejemplo', () => {
     await entrar(api, 'cliente');
     const misCitas = await api.getMisCitas();
     expect(misCitas.filter((c) => c.estado === 'completada').length).toBeGreaterThanOrEqual(3);
-    expect(misCitas.filter((c) => c.estado === 'confirmada').length).toBe(2);
+    // Una sola cita próxima: así puede probar varias reservas antes del límite de 3.
+    expect(misCitas.filter((c) => c.estado === 'confirmada').length).toBe(1);
     const creditos = await api.getMisCreditos();
     expect(creditos.some((c) => c.codigo_regalo)).toBe(true);
     expect(creditos.some((c) => c.paquete_id && c.usados === 1 && c.restantes === 1)).toBe(true);
@@ -743,6 +808,12 @@ describe('datos de ejemplo', () => {
     expect(agenda.some((c) => c.estado === 'confirmada' && c.consentimientos_firmados === 0)).toBe(true);
     expect(agenda.some((c) => c.estado === 'no_asistio')).toBe(true);
     for (const c of agenda.filter((x) => x.estado === 'completada')) expect(c.consentimientos_firmados).toBeGreaterThan(0);
+    // Lo anterior a la apertura son ensayos: los agendó el personal (nunca "web") y no se cobraron.
+    const previas = agenda.filter((c) => fechaLocal(new Date(c.inicio)) < APERTURA);
+    expect(previas.length).toBeGreaterThan(0);
+    expect(previas.every((c) => c.origen !== 'web' && c.pagado === 0)).toBe(true);
+    // Las reservas en línea de ejemplo son del día de apertura en adelante.
+    expect(agenda.filter((c) => c.origen === 'web').every((c) => fechaLocal(new Date(c.inicio)) >= APERTURA)).toBe(true);
     expect((await api.admin.getBloqueos(MIERCOLES, sumarDias(MIERCOLES, 20))).length).toBe(1);
 
     expect((await api.admin.getPedidos('pagado')).length).toBe(1);
@@ -870,8 +941,9 @@ describe('paridad con SQL (hallazgos de revisión)', () => {
       api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), firma: FIRMA }),
     ).resolves.toMatchObject({ estado: 'confirmada' });
     await entrar(api, 'personal');
-    await expect(api.admin.completarCita(ausente.id)).rejects.toThrow('Esta cita está cancelada');
-    await expect(api.admin.cambiarEstadoCita(ausente.id, 'completada')).rejects.toThrow('Esta cita está cancelada');
+    await expect(api.admin.completarCita(ausente.id)).rejects.toThrow('Esta cita se marcó como no asistió.');
+    await expect(api.admin.cambiarEstadoCita(ausente.id, 'completada')).rejects.toThrow('Esta cita se marcó como no asistió.');
+    await expect(api.admin.cambiarEstadoCita(ausente.id, 'cancelada')).rejects.toThrow(M.noCancelable);
     const agenda = await api.admin.getAgenda(MARTES, MARTES);
     expect(agenda.map((c) => c.estado).sort()).toEqual(['confirmada', 'no_asistio']);
   });
@@ -938,43 +1010,35 @@ describe('paridad con SQL (hallazgos de revisión)', () => {
   });
 
   it('edad mínima y tutor se miden el día de la cita, no hoy', async () => {
-    // Hoy es lunes 2 de noviembre de 2026; las citas son el martes 3.
+    // Hoy es lunes 2 de noviembre de 2026; las citas son el martes 3. La fecha de nacimiento no cambia
+    // una vez registrada, así que cada caso es una clienta distinta.
     const { api } = entorno();
     const cejas = await servicio(api, 'cejas');
-    const sesion = await entrar(api, 'cliente');
-    await aceptarGenerales(api);
-    await fichaCon(api);
-    const datos = { nombre: 'Mariana', apellidos: 'López', telefono: null, acepta_promociones: false };
-    const nacio = (fecha_nacimiento: string) => api.actualizarMisDatos({ ...datos, fecha_nacimiento });
     const conTutor: DatosFirma = { ...FIRMA, tutor_nombre: 'Rosa López' };
     const pedir = (hhmm: string, firma: DatosFirma) => api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, hhmm), firma });
 
-    await nacio('2011-11-04'); // 14 hoy y 14 el martes
+    const catorce = await otraClienta(api, 'catorce@ejemplo.mx', '2011-11-04'); // 14 hoy y 14 el martes
     await expect(pedir('10:00', conTutor)).rejects.toThrow(M.edad);
-    await nacio('2011-11-03'); // 14 hoy, 15 el martes
+    const quinceMartes = await otraClienta(api, 'quince@ejemplo.mx', '2011-11-03'); // 14 hoy, 15 el martes
     await expect(pedir('10:00', FIRMA)).rejects.toThrow(M.tutor);
     const quince = await pedir('10:00', conTutor);
-    await nacio('2008-11-03'); // 17 hoy, 18 el martes: ya no necesita tutor
+    expect((await api.getMisConsentimientos()).find((d) => d.cita_id === quince.id)!.tutor_nombre).toBe('Rosa López');
+    const dieciochoMartes = await otraClienta(api, 'dieciocho@ejemplo.mx', '2008-11-03'); // 17 hoy, 18 el martes
     const dieciocho = await pedir('11:00', FIRMA);
-    const docs = await api.getMisConsentimientos();
-    expect(docs.find((d) => d.cita_id === quince.id)!.tutor_nombre).toBe('Rosa López');
-    expect(docs.find((d) => d.cita_id === dieciocho.id)!.tutor_nombre).toBeNull();
+    expect((await api.getMisConsentimientos()).find((d) => d.cita_id === dieciocho.id)!.tutor_nombre).toBeNull();
 
     // El personal agenda y la clienta firma después: también cuenta la fecha de la cita.
     await entrar(api, 'personal');
-    const staff = (hhmm: string) =>
-      api.admin.reservarParaCliente({ cliente_id: sesion.cliente!.id, items: [{ servicio_id: cejas.id }], inicio: a(MARTES, hhmm), origen: 'whatsapp' });
-    const porWhatsApp = await staff('12:00');
-    await entrar(api, 'cliente');
+    const staff = (cliente_id: string, hhmm: string) =>
+      api.admin.reservarParaCliente({ cliente_id, items: [{ servicio_id: cejas.id }], inicio: a(MARTES, hhmm), origen: 'whatsapp' });
+    const porWhatsApp = await staff(dieciochoMartes.cliente!.id, '12:00');
+    await api.cerrarSesion();
+    await api.iniciarSesion('dieciocho@ejemplo.mx', 'secreta1');
     await api.firmarConsentimientoCita(porWhatsApp.id, conTutor);
     expect((await api.getMisConsentimientos()).find((d) => d.cita_id === porWhatsApp.id)!.tutor_nombre).toBeNull();
-    await nacio('2011-11-03');
     await entrar(api, 'personal');
-    await expect(staff('13:00')).resolves.toMatchObject({ estado: 'confirmada' });
-    await entrar(api, 'cliente');
-    await nacio('2011-11-04');
-    await entrar(api, 'personal');
-    await expect(staff('14:00')).rejects.toThrow(M.edad);
+    await expect(staff(quinceMartes.cliente!.id, '13:00')).resolves.toMatchObject({ estado: 'confirmada' });
+    await expect(staff(catorce.cliente!.id, '14:00')).rejects.toThrow(M.edad);
   });
 
   it('se puede firmar una cita completada y cada versión nueva de la política se firma aparte', async () => {
@@ -994,7 +1058,7 @@ describe('paridad con SQL (hallazgos de revisión)', () => {
 
     const otra = await api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MIERCOLES, '12:00'), firma: FIRMA });
     await api.cancelarCita(otra.id);
-    await expect(api.firmarConsentimientoCita(otra.id, FIRMA)).rejects.toThrow('Esta cita ya no admite firmas.');
+    await expect(api.firmarConsentimientoCita(otra.id, FIRMA)).rejects.toThrow('Esta cita está cancelada.');
   });
 
   it('no acepta pagos a un pedido reembolsado', () => {
@@ -1020,5 +1084,593 @@ describe('paridad con SQL (hallazgos de revisión)', () => {
     expect((await api.admin.getResumenHoy()).mes_actual).toMatchObject({ ingresos: 500 });
     const [clienta] = await api.admin.getClientes('mariana');
     expect(clienta.total_pagado).toBe(500);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Apertura (configuracion.fecha_apertura) y endurecimiento (ESPEC §5.1)
+// ---------------------------------------------------------------------------
+
+// Jueves 8 de octubre de 2026: el spa abre el sábado 31 (horario de sábado 9–15).
+const HOY_PREVIO = '2026-10-08';
+const VIERNES_PREVIO = '2026-10-09';
+const VIERNES_30 = '2026-10-30';
+const APERTURA = '2026-10-31';
+const ANTES_DE_ABRIR = new Date(isoDesdeLocal(HOY_PREVIO, '09:00'));
+
+/** Clienta con sesión en un Ctx de la base directa (para revisar columnas que la API no expone). */
+function ctxDeUsuario(db: ReturnType<typeof baseDirecta>['db'], usuarioId: string, ahora = AHORA): Ctx {
+  return { db, ahora, usuarioId, userAgent: null };
+}
+
+function clientaListaDirecta(ctx: Ctx): void {
+  R.aceptarPoliticas(ctx, ctx.db.politicas.filter((p) => p.activa).map((p) => p.id));
+  R.guardarFicha(ctx, { respuestas: {}, detalles: {}, alergias: null, medicamentos: null, observaciones: null, acepta_datos_sensibles: true });
+}
+
+describe('fecha de apertura', () => {
+  it('viene del catálogo; antes de ella visitantes y clientas no ven horarios ni reservan; el personal sí agenda', async () => {
+    const { api } = entorno({ ahora: ANTES_DE_ABRIR });
+    expect((await api.getConfiguracion()).fecha_apertura).toBe(APERTURA);
+    const cejas = await servicio(api, 'cejas');
+
+    // Visitante
+    expect(await api.getHorariosDisponibles(VIERNES_PREVIO, 60)).toEqual([]);
+    expect(await api.getHorariosDisponibles(VIERNES_30, 60)).toEqual([]);
+    expect(await api.getHorariosDisponibles(APERTURA, 60)).toHaveLength(6);
+
+    // Clienta: la fecha de apertura se revisa antes que todo lo demás (como en SQL).
+    const mariana = await entrar(api, 'cliente');
+    expect(await api.getHorariosDisponibles(VIERNES_30, 60)).toEqual([]);
+    const pedir = (inicio: string) => api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio, firma: FIRMA });
+    await expect(pedir(a(VIERNES_30, '10:00'))).rejects.toThrow(M.noDisponible); // aún sin políticas ni ficha
+    await aceptarGenerales(api);
+    await fichaCon(api);
+    await expect(pedir(a(VIERNES_30, '18:00'))).rejects.toThrow(M.noDisponible);
+    await expect(pedir(a(APERTURA, '09:00'))).resolves.toMatchObject({ estado: 'confirmada' });
+
+    // El personal ve los horarios previos y agenda el ensayo de apertura.
+    await entrar(api, 'personal');
+    expect(await api.getHorariosDisponibles(VIERNES_30, 60)).toHaveLength(9);
+    const ensayo = await api.admin.reservarParaCliente({
+      cliente_id: mariana.cliente!.id,
+      items: [{ servicio_id: cejas.id }],
+      inicio: a(VIERNES_30, '10:00'),
+      origen: 'mostrador',
+      notas: 'Ensayo de apertura',
+    });
+    expect(ensayo.estado).toBe('confirmada');
+    await entrar(api, 'admin');
+    const slots = await api.getHorariosDisponibles(VIERNES_30, 60);
+    expect(slots).toHaveLength(8);
+    expect(slots.some((x) => x.inicio === a(VIERNES_30, '10:00'))).toBe(false);
+    await entrar(api, 'cliente');
+    expect((await api.getMisCitas()).map((c) => c.inicio).sort()).toEqual([a(VIERNES_30, '10:00'), a(APERTURA, '09:00')]);
+  });
+
+  it('sin fecha de apertura (null) no hay restricción', () => {
+    const { db, como } = baseDirecta(ANTES_DE_ABRIR);
+    const visitante: Ctx = { db, ahora: ANTES_DE_ABRIR, usuarioId: null, userAgent: null };
+    expect(R.horariosDisponibles(visitante, VIERNES_30, 60, null)).toEqual([]);
+    expect(R.horariosDisponibles(como('cliente'), VIERNES_30, 60, null)).toEqual([]);
+    expect(R.horariosDisponibles(como('admin'), VIERNES_30, 60, null)).toHaveLength(9);
+    db.configuracion.fecha_apertura = null;
+    expect(R.horariosDisponibles(visitante, VIERNES_30, 60, null)).toHaveLength(9);
+  });
+
+  it('los datos de ejemplo respetan la apertura: reservas en línea desde ese día y, antes, sólo ensayos sin cobro', async () => {
+    const aviso = vi.spyOn(console, 'warn');
+    for (const inicio of [HOY_PREVIO, '2026-10-26'])
+      for (let i = 0; i < 7; i++) {
+        const { api } = entorno({ ejemplos: true, ahora: new Date(a(sumarDias(inicio, i), '08:30')) });
+        await api.getConfiguracion();
+      }
+    expect(aviso).not.toHaveBeenCalled();
+
+    const { api } = entorno({ ejemplos: true, ahora: ANTES_DE_ABRIR });
+    await entrar(api, 'cliente');
+    const proximas = (await api.getMisCitas()).filter((c) => c.estado === 'confirmada');
+    expect(proximas).toHaveLength(1);
+    expect(proximas.every((c) => fechaLocal(new Date(c.inicio)) >= APERTURA)).toBe(true);
+    expect(proximas.every((c) => c.consentimientos_firmados > 0)).toBe(true);
+    // Aun así, la clienta no ve horarios ni reserva antes de la apertura.
+    expect(await api.getHorariosDisponibles(VIERNES_PREVIO, 60)).toEqual([]);
+    const cejas = await servicio(api, 'cejas');
+    await expect(api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(VIERNES_30, '12:00'), firma: FIRMA })).rejects.toThrow(M.noDisponible);
+    // Desde la apertura sí, y le quedan dos lugares antes del límite de 3 citas próximas.
+    await expect(api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(APERTURA, '10:00'), firma: FIRMA })).resolves.toMatchObject({ estado: 'confirmada' });
+    await entrar(api, 'admin');
+    expect((await api.admin.getResumenHoy()).citas_hoy).toHaveLength(1);
+    const agenda = await api.admin.getAgenda(sumarDias(HOY_PREVIO, -90), sumarDias(HOY_PREVIO, 60));
+    const previas = agenda.filter((c) => fechaLocal(new Date(c.inicio)) < APERTURA);
+    expect(previas.length).toBeGreaterThan(0);
+    expect(previas.every((c) => c.origen !== 'web' && c.pagado === 0)).toBe(true);
+    // Antes de abrir no hay ingresos por citas: los únicos son de la tienda (un pedido pagado por transferencia).
+    const pagados = await api.admin.getPedidos('pagado');
+    expect(pagados).toHaveLength(1);
+    const ingresos = (await api.admin.getResultados(4)).reduce((s, r) => s + r.ingresos, 0);
+    expect(ingresos).toBe(pagados[0].total);
+    expect((await api.getHorariosDisponibles(VIERNES_PREVIO, 60)).length).toBeGreaterThan(0);
+  });
+});
+
+describe('mensajes iguales a SQL en pagos, compras, ajustes, políticas y registro', () => {
+  it('responde con el mismo texto (y en el mismo orden) que las funciones de la base', async () => {
+    const { api } = entorno();
+    await expect(api.registrarse({ email: 'corta@ejemplo.mx', password: 'abc1234', nombre: 'Corta', apellidos: '', telefono: '', fecha_nacimiento: null })).rejects.toThrow(
+      'La contraseña debe tener al menos 8 caracteres.',
+    );
+    await entrar(api, 'admin');
+    // registrar_pago: primero pide a qué se aplica, aunque el monto también esté mal.
+    await expect(api.admin.registrarPago({ monto: 0, metodo: 'efectivo' })).rejects.toThrow('Indica el pedido o la cita que se está pagando.');
+
+    const producto = await api.admin.guardarProducto({
+      nombre: 'Cera de prueba',
+      marca: null,
+      categoria: 'cera',
+      unidad_medida: 'g',
+      presentacion: null,
+      contenido_presentacion: 800,
+      costo_presentacion: 400,
+      stock_minimo: 0,
+      proveedor_id: null,
+      uso: 'cabina',
+      precio_venta: null,
+      vendible_en_linea: false,
+      activo: true,
+      notas: null,
+    });
+    const compra = (it: { producto_id?: string; presentaciones?: number; costo_presentacion?: number }, proveedor_id: string | null = null) =>
+      api.admin.registrarCompra({ items: [{ producto_id: producto.id, presentaciones: 1, costo_presentacion: 100, ...it }], proveedor_id });
+    await expect(compra({}, 'no-existe')).rejects.toThrow('No encontramos ese proveedor.');
+    await expect(compra({ producto_id: 'no-existe' })).rejects.toThrow('Uno de los productos de la compra no existe.');
+    await expect(compra({ presentaciones: 0 })).rejects.toThrow('Las presentaciones compradas deben ser más de cero.');
+    await expect(compra({ costo_presentacion: -1 })).rejects.toThrow('El costo no puede ser negativo.');
+    // El tipo lo limita TypeScript, pero la regla es la de la base.
+    await expect(api.admin.ajustarInventario(producto.id, 5, 'compra' as 'ajuste')).rejects.toThrow('Sólo se registran ajustes o mermas.');
+    await expect(api.admin.ajustarInventario('no-existe', 0, 'ajuste')).rejects.toThrow('La cantidad no puede ser cero.');
+    await expect(api.admin.ajustarInventario('no-existe', 3, 'ajuste')).rejects.toThrow('No encontramos ese producto.');
+    await expect(api.admin.publicarPolitica('terminos', ' ', 'Texto')).rejects.toThrow('Escribe el título y el contenido de la política.');
+  });
+});
+
+describe('endurecimiento: reservar (ESPEC §5.1)', () => {
+  it('pide fecha de nacimiento y permite a lo más 3 citas próximas (el personal no tiene límite)', async () => {
+    const { api, fijarHora } = entorno();
+    const cejas = await servicio(api, 'cejas');
+    const sin = await otraClienta(api, 'sinfecha@ejemplo.mx', null);
+    const pedir = (fecha: string, hhmm: string) => api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(fecha, hhmm), firma: FIRMA });
+    await expect(pedir(MIERCOLES, '10:00')).rejects.toThrow(M.nacimientoReservar);
+    await api.actualizarMisDatos({ nombre: 'Otra', apellidos: 'Clienta', telefono: null, fecha_nacimiento: '1990-01-01', acepta_promociones: false });
+    const r1 = await pedir(MIERCOLES, '10:00');
+    const r2 = await pedir(MIERCOLES, '11:00');
+    await pedir(MIERCOLES, '12:00');
+    await expect(pedir(MIERCOLES, '13:00')).rejects.toThrow(M.maxCitas);
+
+    await entrar(api, 'personal');
+    await expect(
+      api.admin.reservarParaCliente({ cliente_id: sin.cliente!.id, items: [{ servicio_id: cejas.id }], inicio: a(MIERCOLES, '13:00'), origen: 'whatsapp' }),
+    ).resolves.toMatchObject({ estado: 'confirmada' });
+
+    await api.cerrarSesion();
+    await api.iniciarSesion('sinfecha@ejemplo.mx', 'secreta1');
+    await api.cancelarCita(r1.id);
+    await expect(pedir(MIERCOLES, '14:00')).rejects.toThrow(M.maxCitas); // cuenta también la que agendó el personal
+    await api.cancelarCita(r2.id);
+    await expect(pedir(MIERCOLES, '14:00')).resolves.toMatchObject({ estado: 'confirmada' });
+    await expect(pedir(MIERCOLES, '15:00')).rejects.toThrow(M.maxCitas);
+
+    // Las que ya pasaron no cuentan.
+    fijarHora(new Date(a('2026-11-05', '09:00')));
+    await expect(pedir('2026-11-06', '10:00')).resolves.toMatchObject({ estado: 'confirmada' });
+  });
+
+  it('firma sólo de trazos; nombres de 200 y notas de 1000 caracteres como máximo', async () => {
+    const { api } = entorno();
+    const cejas = await servicio(api, 'cejas');
+    await clientaLista(api);
+    const pedir = (firma: DatosFirma, notas?: string) =>
+      api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), firma, notas });
+    for (const firma_svg of ['hola', '<svg><script>alert(1)</script></svg>', '<svg onload="x()"><path d="M0 0"/></svg>', `<svg><path d="${'M0 0 '.repeat(40_000)}"/></svg>`])
+      await expect(pedir({ ...FIRMA, firma_svg })).rejects.toThrow(M.firmaInvalida);
+    await expect(pedir({ ...FIRMA, nombre_firmante: 'A'.repeat(201) })).rejects.toThrow(M.nombreLargo);
+    await expect(pedir(FIRMA, 'n'.repeat(1001))).rejects.toThrow(M.notasLargas);
+    expect(await api.getMisCitas()).toEqual([]);
+    await expect(pedir({ ...FIRMA, nombre_firmante: 'A'.repeat(200) }, 'n'.repeat(1000))).resolves.toMatchObject({ estado: 'confirmada' });
+
+    // Tutor de una menor
+    await otraClienta(api, 'menor@ejemplo.mx', '2010-06-01');
+    const menor = (tutor_nombre: string) =>
+      api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '11:00'), firma: { ...FIRMA, tutor_nombre } });
+    await expect(menor('B'.repeat(201))).rejects.toThrow(M.nombreLargo);
+    await expect(menor('Rosa López')).resolves.toMatchObject({ estado: 'confirmada' });
+
+    // El personal también tiene el límite de notas.
+    await entrar(api, 'personal');
+    const [mariana] = await api.admin.getClientes('mariana');
+    await expect(
+      api.admin.reservarParaCliente({ cliente_id: mariana.id, items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '12:00'), origen: 'whatsapp', notas: 'n'.repeat(1001) }),
+    ).rejects.toThrow(M.notasLargas);
+  });
+
+  it('el crédito debe estar vigente el día de la cita, no sólo hoy', () => {
+    const { db, como } = baseDirecta();
+    const clienta = como('cliente');
+    clientaListaDirecta(clienta);
+    const mariana = db.clientes.find((c) => c.usuario_id === clienta.usuarioId)!;
+    const cejas = db.servicios.find((s) => s.slug === 'cejas')!;
+    db.creditos.push({
+      id: 'credito-prueba',
+      cliente_id: mariana.id,
+      servicio_id: cejas.id,
+      paquete_id: null,
+      cantidad: 3,
+      usados: 0,
+      pedido_item_id: null,
+      codigo_regalo: null,
+      regalo_para: null,
+      vence_en: MARTES, // vigente hoy (lunes) y el martes; vencido el miércoles
+      creado_en: AHORA.toISOString(),
+    });
+    const items = [{ servicio_id: cejas.id, credito_id: 'credito-prueba' }];
+    expect(() => R.reservarCita(clienta, { items, inicio: a(MIERCOLES, '12:00'), firma: FIRMA })).toThrow(M.credito);
+    expect(() => R.reservarCitaStaff(como('personal'), { cliente_id: mariana.id, items, inicio: a(MIERCOLES, '13:00'), origen: 'whatsapp' })).toThrow(M.credito);
+    expect(R.reservarCita(clienta, { items, inicio: a(MARTES, '10:00'), firma: FIRMA })).toMatchObject({ estado: 'confirmada' });
+    expect(db.creditos[0].usados).toBe(1);
+  });
+
+  it('sin una política activa del consentimiento de algún servicio, la cita no se puede crear', () => {
+    const { db, como } = baseDirecta();
+    const clienta = como('cliente');
+    clientaListaDirecta(clienta);
+    const mariana = db.clientes.find((c) => c.usuario_id === clienta.usuarioId)!;
+    const cejas = db.servicios.find((s) => s.slug === 'cejas')!;
+    const facial = db.servicios.find((s) => s.slug === 'facial-hidratante')!;
+    db.politicas.find((p) => p.tipo === 'consentimiento_depilacion' && p.activa)!.activa = false;
+    expect(() => R.reservarCita(clienta, { items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), firma: FIRMA })).toThrow(M.noReservable);
+    expect(() =>
+      R.reservarCitaStaff(como('personal'), { cliente_id: mariana.id, items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), origen: 'whatsapp' }),
+    ).toThrow(M.noReservable);
+    // Con al menos un consentimiento por firmar, sí (se firma el facial).
+    const r = R.reservarCita(clienta, { items: [{ servicio_id: cejas.id }, { servicio_id: facial.id }], inicio: a(MARTES, '10:00'), firma: FIRMA });
+    expect(db.consentimientos.filter((k) => k.cita_id === r.id)).toHaveLength(1);
+  });
+});
+
+describe('endurecimiento: firma, datos y ficha (ESPEC §5.1)', () => {
+  it('firmar: la clienta necesita su fecha de nacimiento; se guarda quién capturó la firma y por qué canal', () => {
+    const { db, como } = baseDirecta();
+    const personal = como('personal');
+    const clienta = como('cliente');
+    clientaListaDirecta(clienta);
+    const cejas = db.servicios.find((s) => s.slug === 'cejas')!;
+    const items = [{ servicio_id: cejas.id }];
+
+    const u = R.crearUsuario({ db, ahora: AHORA, usuarioId: null, userAgent: null }, { email: 'sinfecha@ejemplo.mx', password: 'secreta1', nombre: 'Sin fecha' });
+    const sinFecha = ctxDeUsuario(db, u.id);
+    const suFila = db.clientes.find((c) => c.usuario_id === u.id)!;
+    const porWhatsApp = R.reservarCitaStaff(personal, { cliente_id: suFila.id, items, inicio: a(MARTES, '10:00'), origen: 'whatsapp' });
+    expect(() => R.firmarConsentimientoCita(sinFecha, porWhatsApp.id, FIRMA)).toThrow(M.nacimientoFirmar);
+    expect(() => R.firmarConsentimientoCita(personal, porWhatsApp.id, { ...FIRMA, firma_svg: '<svg><script/></svg>' })).toThrow(M.firmaInvalida);
+    expect(() => R.firmarConsentimientoCita(personal, porWhatsApp.id, { ...FIRMA, nombre_firmante: 'A'.repeat(201) })).toThrow(M.nombreLargo);
+    R.firmarConsentimientoCita(personal, porWhatsApp.id, FIRMA); // en la tablet de la cabina
+    const enCabina = db.consentimientos.filter((k) => k.cita_id === porWhatsApp.id);
+    expect(enCabina).toHaveLength(1);
+    expect(enCabina[0]).toMatchObject({ canal: 'cabina', capturado_por: personal.usuarioId });
+
+    const web = R.reservarCita(clienta, { items, inicio: a(MARTES, '11:00'), firma: FIRMA });
+    expect(db.consentimientos.find((k) => k.cita_id === web.id)).toMatchObject({ canal: 'reserva_web', capturado_por: clienta.usuarioId });
+
+    const mariana = db.clientes.find((c) => c.usuario_id === clienta.usuarioId)!;
+    const paraFirmar = R.reservarCitaStaff(personal, { cliente_id: mariana.id, items, inicio: a(MARTES, '12:00'), origen: 'telefono' });
+    R.firmarConsentimientoCita(clienta, paraFirmar.id, FIRMA);
+    const k = db.consentimientos.find((x) => x.cita_id === paraFirmar.id)!;
+    expect(k).toMatchObject({ canal: 'portal', capturado_por: clienta.usuarioId });
+    const pol = db.politicas.find((p) => p.id === k.politica_id)!;
+    expect(k.documento_hash).toBe(
+      R.documentoHash({ ...k, hash_politica: pol.hash_sha256 }), // cubre política, clienta, cita, ficha, firmante, tutor, menor, trazo y fecha
+    );
+    expect(k.documento_hash).not.toBe(R.documentoHash({ ...k, hash_politica: pol.hash_sha256, firma_svg: FIRMA_EJEMPLO }));
+  });
+
+  it('la clienta captura su fecha de nacimiento una sola vez; el personal sí puede cambiar la suya', async () => {
+    const { api } = entorno();
+    await entrar(api, 'cliente'); // nació el 1994-05-12
+    const datos = { nombre: 'Mariana', apellidos: 'López', telefono: '4420000001', acepta_promociones: true };
+    await expect(api.actualizarMisDatos({ ...datos, fecha_nacimiento: '1995-05-12' })).rejects.toThrow(M.nacimientoRegistrado);
+    await expect(api.actualizarMisDatos({ ...datos, fecha_nacimiento: null })).rejects.toThrow(M.nacimientoRegistrado);
+    expect((await api.getSesion())?.cliente).toMatchObject({ fecha_nacimiento: '1994-05-12', acepta_promociones: false });
+    await expect(api.actualizarMisDatos({ ...datos, fecha_nacimiento: '1994-05-12' })).resolves.toMatchObject({ acepta_promociones: true });
+
+    await otraClienta(api, 'sinfecha@ejemplo.mx', null);
+    const suyos = { nombre: 'Otra', apellidos: 'Clienta', telefono: null, acepta_promociones: false };
+    await expect(api.actualizarMisDatos({ ...suyos, fecha_nacimiento: '1990-01-01' })).resolves.toMatchObject({ fecha_nacimiento: '1990-01-01' });
+    await expect(api.actualizarMisDatos({ ...suyos, fecha_nacimiento: '1991-01-01' })).rejects.toThrow(M.nacimientoRegistrado);
+
+    await entrar(api, 'personal');
+    const equipo = { nombre: 'Especialista', apellidos: 'de Ópalo', telefono: null, acepta_promociones: false };
+    await api.actualizarMisDatos({ ...equipo, fecha_nacimiento: '1990-01-01' });
+    await expect(api.actualizarMisDatos({ ...equipo, fecha_nacimiento: '1991-02-02' })).resolves.toMatchObject({ fecha_nacimiento: '1991-02-02' });
+  });
+
+  it('ficha de salud: cada campo de texto en máximo 2000 caracteres', async () => {
+    const { api } = entorno();
+    await entrar(api, 'cliente');
+    const base = { respuestas: {}, detalles: {}, alergias: null, medicamentos: null, observaciones: null, acepta_datos_sensibles: true };
+    await expect(api.guardarFicha({ ...base, alergias: 'x'.repeat(2001) })).rejects.toThrow(M.fichaLarga);
+    await expect(api.guardarFicha({ ...base, medicamentos: 'x'.repeat(2001) })).rejects.toThrow(M.fichaLarga);
+    await expect(api.guardarFicha({ ...base, observaciones: 'x'.repeat(2001) })).rejects.toThrow(M.fichaLarga);
+    await expect(api.guardarFicha({ ...base, detalles: { otra: 'x'.repeat(20_001) } })).rejects.toThrow(M.fichaLarga);
+    expect(await api.getMiFicha()).toBeNull();
+    await api.guardarFicha({ ...base, medicamentos: 'x'.repeat(2000) });
+    expect((await api.getMiFicha())?.medicamentos).toHaveLength(2000);
+  });
+});
+
+describe('endurecimiento: pedidos, regalos y catálogo (ESPEC §5.1)', () => {
+  it('pedidos: efectivo, tarjeta o transferencia; cantidades enteras 1–99; a lo más 5 por pagar', async () => {
+    const { api } = entorno();
+    const express = await paquete(api, 'express');
+    const cejas = await servicio(api, 'cejas');
+    await clientaLista(api);
+    const linea = (cantidad: unknown): ItemPedidoNuevo[] => [{ tipo: 'paquete', id: express.id, cantidad: cantidad as number }];
+    await expect(api.crearPedido(linea(1), 'cortesia')).rejects.toThrow(M.metodoPago);
+    await expect(api.crearPedido(linea(1), 'mercado_pago')).rejects.toThrow(M.metodoPago);
+    await expect(api.crearPedido(linea(1.5), 'efectivo')).rejects.toThrow(M.cantidad);
+    await expect(api.crearPedido(linea(100), 'efectivo')).rejects.toThrow(M.cantidad);
+    await expect(api.crearPedido(linea('dos'), 'efectivo')).rejects.toThrow(M.cantidad);
+    await expect(api.crearPedido(linea(0), 'efectivo')).rejects.toThrow(M.cantidadMinima);
+    await expect(api.crearPedido(linea(-2), 'efectivo')).rejects.toThrow(M.cantidadMinima);
+    await expect(api.crearPedido([{ tipo: 'servicio', id: cejas.id, cantidad: 1, regalo_para: 'A'.repeat(121) }], 'efectivo')).rejects.toThrow(M.regaloLargo);
+    await expect(api.crearPedido(linea(1), 'efectivo', 'n'.repeat(1001))).rejects.toThrow(M.notasLargas);
+    expect(await api.getMisPedidos()).toEqual([]);
+
+    const sinCantidad = await api.crearPedido([{ tipo: 'paquete', id: express.id } as ItemPedidoNuevo], undefined as unknown as MetodoPago);
+    expect(sinCantidad.total).toBe(300); // falta = 1
+    expect((await api.crearPedido(linea(99), 'tarjeta')).total).toBe(29_700);
+    await api.crearPedido([{ tipo: 'servicio', id: cejas.id, cantidad: 1, regalo_para: ` ${'A'.repeat(120)} ` }], 'transferencia');
+    await api.crearPedido(linea('2'), 'efectivo');
+    await api.crearPedido(linea(3), 'efectivo');
+    await expect(api.crearPedido(linea(1), 'efectivo')).rejects.toThrow(M.maxPedidos);
+    await api.cancelarPedido(sinCantidad.id);
+    await expect(api.crearPedido(linea(1), 'efectivo')).resolves.toMatchObject({ total: 300 });
+    const pedidos = await api.getMisPedidos();
+    expect(pedidos.find((p) => p.id === sinCantidad.id)).toMatchObject({ metodo_pago_preferido: 'efectivo', estado: 'cancelado' });
+    expect(pedidos.flatMap((p) => p.items).find((i) => i.regalo_para)?.regalo_para).toBe('A'.repeat(120));
+  });
+
+  it('un regalo genera un solo código para todos sus créditos y al canjearlo pasan todos', () => {
+    const { db, como } = baseDirecta();
+    const cejas = db.servicios.find((s) => s.slug === 'cejas')!;
+    const axilas = db.servicios.find((s) => s.slug === 'axilas')!;
+    // Bono de dos servicios (guardarPaquete ya no lo permite; puede venir de datos anteriores).
+    db.paquetes.push({ id: 'bono-doble', slug: 'bono-doble', nombre: 'Bono doble (prueba)', descripcion: null, tipo: 'bono', precio: 400, duracion_min: null, vigencia_dias: 180, activo: true, orden: 99 });
+    db.paquete_servicios.push({ paquete_id: 'bono-doble', servicio_id: cejas.id, cantidad: 2 }, { paquete_id: 'bono-doble', servicio_id: axilas.id, cantidad: 1 });
+    const ped = R.crearPedido(
+      como('cliente'),
+      [
+        { tipo: 'paquete', id: 'bono-doble', cantidad: 2, regalo_para: '  Ana  ' },
+        { tipo: 'servicio', id: cejas.id, cantidad: 1, regalo_para: 'Luz' },
+      ],
+      'efectivo',
+    );
+    R.registrarPago(como('personal'), { monto: ped.total, metodo: 'efectivo', pedido_id: ped.id });
+    const [itemBono, itemCejas] = db.pedido_items.filter((i) => i.pedido_id === ped.id);
+    const delBono = db.creditos.filter((c) => c.pedido_item_id === itemBono.id);
+    expect(delBono.map((c) => [c.servicio_id, c.cantidad]).sort()).toEqual([[axilas.id, 2], [cejas.id, 4]].sort());
+    expect(new Set(delBono.map((c) => c.codigo_regalo)).size).toBe(1);
+    expect(delBono.every((c) => c.regalo_para === 'Ana' && c.vence_en === sumarDias(LUNES, 180))).toBe(true);
+    const codigo = delBono[0].codigo_regalo!;
+    const deLuz = db.creditos.find((c) => c.pedido_item_id === itemCejas.id)!;
+    expect(deLuz.codigo_regalo).not.toBe(codigo);
+
+    const u = R.crearUsuario({ db, ahora: AHORA, usuarioId: null, userAgent: null }, { email: 'ana@ejemplo.mx', password: 'secreta1', nombre: 'Ana', fecha_nacimiento: '1990-01-01' });
+    const ana = ctxDeUsuario(db, u.id);
+    const id = R.canjearRegalo(ana, codigo.toLowerCase());
+    const suFila = db.clientes.find((c) => c.usuario_id === u.id)!;
+    expect(delBono.map((c) => c.id)).toContain(id);
+    expect(db.creditos.filter((c) => c.cliente_id === suFila.id).map((c) => c.id).sort()).toEqual(delBono.map((c) => c.id).sort());
+    expect(db.creditos.filter((c) => c.cliente_id === suFila.id).every((c) => c.codigo_regalo === null)).toBe(true);
+    expect(deLuz.codigo_regalo).not.toBeNull(); // el otro regalo sigue sin canjear
+    expect(() => R.canjearRegalo(ana, codigo)).toThrow(M.regalo);
+  });
+
+  it('completar una cita que no asistió dice por qué', async () => {
+    const { api } = entorno();
+    const cejas = await servicio(api, 'cejas');
+    await clientaLista(api);
+    const r = await api.reservarCita({ items: [{ servicio_id: cejas.id }], inicio: a(MARTES, '10:00'), firma: FIRMA });
+    await entrar(api, 'personal');
+    await api.admin.cambiarEstadoCita(r.id, 'no_asistio');
+    await expect(api.admin.completarCita(r.id)).rejects.toThrow(M.noAsistio);
+  });
+
+  it('un servicio activo y disponible debe decir qué consentimiento se firma', async () => {
+    const { api } = entorno();
+    const cejas = await servicio(api, 'cejas');
+    await entrar(api, 'admin');
+    await expect(api.admin.guardarServicio({ ...cejas, tipo_consentimiento: null })).rejects.toThrow(M.servicioSinConsentimiento);
+    const { id: _id, ...nuevo } = cejas;
+    await expect(api.admin.guardarServicio({ ...nuevo, slug: 'cejas-nuevas', tipo_consentimiento: null })).rejects.toThrow(M.servicioSinConsentimiento);
+    await api.admin.guardarServicio({ ...cejas, tipo_consentimiento: null, etapa: 'segunda_etapa' });
+    await api.admin.guardarServicio({ ...cejas, tipo_consentimiento: null, etapa: 'disponible', activo: false });
+    expect((await servicio(api, 'cejas'))).toMatchObject({ activo: false, tipo_consentimiento: null });
+  });
+
+  it('paquetes: guardar_paquete valida nombre, servicios, cantidades, precio y bonos', async () => {
+    const { api } = entorno();
+    const cejas = await servicio(api, 'cejas');
+    const axilas = await servicio(api, 'axilas');
+    await entrar(api, 'admin');
+    const base: PaqueteEditable = {
+      slug: '',
+      nombre: 'Paquete Verano',
+      descripcion: null,
+      tipo: 'combo',
+      precio: 500,
+      duracion_min: null,
+      vigencia_dias: null,
+      activo: true,
+      orden: 5,
+      items: [{ servicio_id: cejas.id, cantidad: 1 }],
+    };
+    const guardar = (p: Partial<PaqueteEditable>) => api.admin.guardarPaquete({ ...base, ...p });
+    await expect(guardar({ nombre: ' ' })).rejects.toThrow('Escribe el nombre del paquete.');
+    await expect(guardar({ nombre: 'P'.repeat(201) })).rejects.toThrow(M.nombreLargo);
+    await expect(guardar({ id: 'no-existe' })).rejects.toThrow('No encontramos ese paquete.');
+    await expect(guardar({ slug: '¡¡!!', nombre: '¿?' })).rejects.toThrow('El identificador (slug) del paquete debe tener letras o números.');
+    await expect(guardar({ slug: 'express' })).rejects.toThrow('Ya existe otro paquete con ese identificador (slug).');
+    await expect(guardar({ precio: -1 })).rejects.toThrow('El precio no puede ser negativo.');
+    await expect(guardar({ duracion_min: 30.5 })).rejects.toThrow('Revisa la duración: minutos enteros, cero o más.');
+    await expect(guardar({ vigencia_dias: 0 })).rejects.toThrow('Revisa la vigencia: días enteros, uno o más.');
+    await expect(guardar({ items: [] })).rejects.toThrow('Agrega al menos un servicio al paquete.');
+    await expect(guardar({ items: [{ servicio_id: 'no-existe', cantidad: 1 }] })).rejects.toThrow('Uno de los servicios del paquete no existe.');
+    await expect(guardar({ items: [{ servicio_id: cejas.id, cantidad: 100 }] })).rejects.toThrow(M.cantidad);
+    await expect(guardar({ items: [{ servicio_id: cejas.id, cantidad: 60 }, { servicio_id: cejas.id, cantidad: 40 }] })).rejects.toThrow(M.cantidad);
+    await expect(guardar({ tipo: 'bono', items: [{ servicio_id: cejas.id, cantidad: 2 }, { servicio_id: axilas.id, cantidad: 1 }] })).rejects.toThrow(
+      'Un bono es de un solo servicio: elige sólo uno y cuántas sesiones incluye.',
+    );
+    await guardar({ items: [{ servicio_id: cejas.id, cantidad: 1 }, { servicio_id: cejas.id, cantidad: 2 }, { servicio_id: axilas.id, cantidad: 1 }] });
+    const verano = (await api.getCatalogo()).paquetes.find((p) => p.slug === 'paquete-verano')!;
+    expect(verano.items).toEqual([
+      { servicio_id: cejas.id, cantidad: 3 },
+      { servicio_id: axilas.id, cantidad: 1 },
+    ]);
+    // Editar reemplaza los servicios completos.
+    await guardar({ id: verano.id, slug: 'paquete-verano', tipo: 'bono', items: [{ servicio_id: axilas.id, cantidad: 5 }] });
+    expect((await paquete(api, 'paquete-verano')).items).toEqual([{ servicio_id: axilas.id, cantidad: 5 }]);
+  });
+
+  it('recetas: guardar_receta reemplaza la receta, suma repetidos y conserva la primera nota', async () => {
+    const { api } = entorno();
+    const cejas = await servicio(api, 'cejas');
+    await entrar(api, 'personal');
+    const cera = await api.admin.guardarProducto({
+      nombre: 'Cera',
+      marca: null,
+      categoria: 'cera',
+      unidad_medida: 'g',
+      presentacion: 'Lata',
+      contenido_presentacion: 800,
+      costo_presentacion: 400,
+      stock_minimo: 0,
+      proveedor_id: null,
+      uso: 'cabina',
+      precio_venta: null,
+      vendible_en_linea: false,
+      activo: true,
+      notas: null,
+    });
+    await expect(api.admin.guardarReceta('no-existe', [])).rejects.toThrow('No encontramos ese servicio.');
+    await expect(api.admin.guardarReceta(cejas.id, [{ producto_id: 'no-existe', cantidad: 1 }])).rejects.toThrow('Uno de los productos de la receta no existe.');
+    await expect(api.admin.guardarReceta(cejas.id, [{ producto_id: cera.id, cantidad: 0 }])).rejects.toThrow('La cantidad de cada producto debe ser mayor a cero.');
+    await expect(api.admin.guardarReceta(cejas.id, [{ producto_id: cera.id, cantidad: 1, notas: 'n'.repeat(1001) }])).rejects.toThrow(M.notasLargas);
+    await api.admin.guardarReceta(cejas.id, [
+      { producto_id: cera.id, cantidad: 10, notas: 'Primera' },
+      { producto_id: cera.id, cantidad: 5.0004, notas: 'Segunda' },
+    ]);
+    expect(await api.admin.getReceta(cejas.id)).toEqual([{ producto_id: cera.id, cantidad: 15, notas: 'Primera' }]);
+    await api.admin.guardarReceta(cejas.id, []);
+    expect(await api.admin.getReceta(cejas.id)).toEqual([]);
+  });
+});
+
+describe('horarios del equipo (guardar_horarios)', () => {
+  it('la salida después de la entrada y sin rangos encimados el mismo día', async () => {
+    const { api } = entorno();
+    await entrar(api, 'admin');
+    const [esp] = await api.admin.getPersonal();
+    const guardar = (h: { dia_semana: number; hora_inicio: string; hora_fin: string }[]) => api.admin.guardarHorarios(esp.id, h);
+    await expect(guardar([{ dia_semana: 2, hora_inicio: '10:00', hora_fin: '10:00' }])).rejects.toThrow('La salida debe ser después de la entrada.');
+    await expect(
+      guardar([
+        { dia_semana: 2, hora_inicio: '10:00', hora_fin: '14:00' },
+        { dia_semana: 2, hora_inicio: '13:00', hora_fin: '19:00' },
+      ]),
+    ).rejects.toThrow('Dos horarios del martes se enciman (10:00–14:00 y 13:00–19:00).');
+    await expect(
+      guardar([
+        { dia_semana: 3, hora_inicio: '12:00', hora_fin: '18:00' },
+        { dia_semana: 3, hora_inicio: '10:00', hora_fin: '13:00' },
+      ]),
+    ).rejects.toThrow('Dos horarios del miércoles se enciman (10:00–13:00 y 12:00–18:00).');
+    await expect(guardar([{ dia_semana: 7, hora_inicio: '10:00', hora_fin: '12:00' }])).rejects.toThrow('El día de la semana debe ir de 0 (domingo) a 6 (sábado).');
+    await expect(guardar([{ dia_semana: 2, hora_inicio: '', hora_fin: '12:00' }])).rejects.toThrow('Escribe la hora de entrada y la de salida.');
+    await expect(guardar([{ dia_semana: 2, hora_inicio: '25:00', hora_fin: '26:00' }])).rejects.toThrow('Escribe la hora de entrada y la de salida.');
+    await expect(api.admin.guardarHorarios('no-existe', [])).rejects.toThrow('No encontramos a esa persona del equipo.');
+    expect((await api.admin.getPersonal())[0].horarios).toHaveLength(5); // un error no deja el horario a medias
+
+    // Rangos pegados (comida) sí; el mismo rango en otro día también.
+    await guardar([
+      { dia_semana: 2, hora_inicio: '14:00', hora_fin: '19:00' },
+      { dia_semana: 2, hora_inicio: '9:00', hora_fin: '14:00' },
+      { dia_semana: 3, hora_inicio: '09:00', hora_fin: '14:00' },
+    ]);
+    const horarios = (await api.admin.getPersonal())[0].horarios;
+    expect(horarios.map((h) => [h.dia_semana, h.hora_inicio, h.hora_fin])).toEqual([
+      [2, '09:00', '14:00'],
+      [2, '14:00', '19:00'],
+      [3, '09:00', '14:00'],
+    ]);
+    expect(await api.getHorariosDisponibles(MARTES, 60)).toHaveLength(10);
+    await entrar(api, 'personal');
+    await expect(guardar([])).rejects.toThrow(M.permiso);
+  });
+});
+
+describe('clientas del equipo y reposición', () => {
+  it('v_clientes_resumen.es_personal: las cuentas del equipo se distinguen de las clientas', async () => {
+    const { api } = entorno();
+    await entrar(api, 'personal');
+    const nueva = await api.admin.crearCliente({ nombre: 'Paola', apellidos: null, telefono: null, email: null, fecha_nacimiento: null });
+    const clientes = await api.admin.getClientes();
+    const porCorreo = Object.fromEntries(clientes.map((c) => [c.email ?? c.id, c.es_personal]));
+    expect(porCorreo).toEqual({ [emailDe('cliente')]: false, [emailDe('personal')]: true, [emailDe('admin')]: true, [nueva]: false });
+    expect((await api.admin.getExpediente(clientes.find((c) => c.email === emailDe('admin'))!.id)).cliente.es_personal).toBe(true);
+
+    // Con datos de ejemplo: el equipo sale marcado y las clientas de ejemplo no.
+    const ejemplo = entorno({ ejemplos: true }).api;
+    await entrar(ejemplo, 'admin');
+    const todas = await ejemplo.admin.getClientes();
+    expect(todas.filter((c) => c.es_personal).map((c) => c.email).sort()).toEqual([emailDe('admin'), emailDe('personal')].sort());
+    expect(todas.filter((c) => !c.es_personal)).toHaveLength(4);
+  });
+
+  it('presentaciones sugeridas = floor((mínimo − stock) / contenido) + 1: comprarlas saca al producto de la lista', async () => {
+    const { api } = entorno();
+    await entrar(api, 'personal');
+    const base: Omit<ProductoEditable, 'nombre' | 'contenido_presentacion' | 'stock_minimo' | 'costo_presentacion'> = {
+      marca: null,
+      categoria: 'cera',
+      unidad_medida: 'g',
+      presentacion: null,
+      proveedor_id: null,
+      uso: 'cabina',
+      precio_venta: null,
+      vendible_en_linea: false,
+      activo: true,
+      notas: null,
+    };
+    const lata = await api.admin.guardarProducto({ ...base, nombre: 'Cera en lata', contenido_presentacion: 800, costo_presentacion: 400, stock_minimo: 800 });
+    const caja = await api.admin.guardarProducto({ ...base, nombre: 'Abatelenguas', unidad_medida: 'pz', contenido_presentacion: 100, costo_presentacion: 85, stock_minimo: 100 });
+    const gotero = await api.admin.guardarProducto({ ...base, nombre: 'Ampolleta', unidad_medida: 'ml', contenido_presentacion: 0.25, costo_presentacion: 30, stock_minimo: 0.75 });
+    await api.admin.ajustarInventario(caja.id, 100, 'ajuste'); // justo en el mínimo
+    await api.admin.ajustarInventario(gotero.id, 0.25, 'ajuste');
+    const repo = await api.admin.getReposicion();
+    // Los más urgentes primero (stock − mínimo).
+    expect(repo.map((r) => [r.nombre, r.faltante, r.presentaciones_sugeridas, r.costo_estimado])).toEqual([
+      ['Cera en lata', 800, 2, 800],
+      ['Ampolleta', 0.5, 3, 90],
+      ['Abatelenguas', 0, 1, 85],
+    ]);
+    const costos = new Map([
+      [lata.id, 400],
+      [caja.id, 85],
+      [gotero.id, 30],
+    ]);
+    await api.admin.registrarCompra({
+      items: repo.map((r) => ({ producto_id: r.id, presentaciones: r.presentaciones_sugeridas, costo_presentacion: costos.get(r.id)! })),
+    });
+    expect(await api.admin.getReposicion()).toEqual([]);
   });
 });

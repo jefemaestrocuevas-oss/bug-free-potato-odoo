@@ -7,7 +7,7 @@ import { useAccion } from '../../lib/useAsync';
 import { MensajeError } from '../ui/Estado';
 import { IconoCerrar, IconoMas } from './Iconos';
 import { Modal } from './Modal';
-import { aMinutos, deMinutos, erroresDelDia, horarioPorDia, horasTexto, type RangoEditable } from './EquipoPiezas';
+import { aMinutos, deMinutos, erroresDelDia, horarioPorDia, horasTexto, minutosDelDia, type RangoEditable } from './EquipoPiezas';
 
 interface Props {
   persona: PersonalInterno;
@@ -23,10 +23,7 @@ export function EquipoHorario({ persona, onCerrar, onGuardado }: Props) {
 
   const errores = dias.map(erroresDelDia);
   const hayErrores = errores.some((e) => e.size > 0);
-  const totalMin = dias.flat().reduce((s, r) => {
-    if (!/^\d{2}:\d{2}/.test(r.inicio) || !/^\d{2}:\d{2}/.test(r.fin)) return s;
-    return s + Math.max(0, aMinutos(r.fin) - aMinutos(r.inicio));
-  }, 0);
+  const totalMin = dias.reduce((s, d) => s + minutosDelDia(d), 0);
   const diasAbiertos = dias.filter((d) => d.length > 0).length;
 
   const cambiarDia = (i: number, f: (d: RangoEditable[]) => RangoEditable[]) => setDias((ds) => ds.map((d, j) => (j === i ? f(d) : d)));

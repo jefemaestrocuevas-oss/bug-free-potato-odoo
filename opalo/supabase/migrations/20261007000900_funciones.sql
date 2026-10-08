@@ -121,6 +121,12 @@ begin
     return;
   end if;
 
+  -- Antes de la apertura, visitantes y clientas no ven horarios; el personal sí (puede agendar,
+  -- p. ej. el ensayo de apertura, con reservar_cita_staff).
+  if v_cfg.fecha_apertura is not null and p_fecha < v_cfg.fecha_apertura and not public.es_personal() then
+    return;
+  end if;
+
   -- distinct: si dos rangos del mismo día se traslapan, cada inicio sale una sola vez.
   return query
   with candidatos as (
@@ -590,7 +596,8 @@ $$;
 -- R4 · la clienta reserva (con firma del consentimiento)
 -- Además de R4: necesita su fecha de nacimiento (decide edad mínima y tutor) y puede tener a lo
 -- más 3 citas próximas activas (pendiente o confirmada) para que una sola cuenta no acapare la
--- agenda; para más, el personal le agenda por WhatsApp.
+-- agenda; para más, el personal le agenda por WhatsApp. Antes de configuracion.fecha_apertura no
+-- se reserva en línea (vale para cualquier cuenta; el personal agenda con reservar_cita_staff).
 create or replace function public.reservar_cita(
   p_items jsonb,
   p_inicio timestamptz,
@@ -621,6 +628,10 @@ begin
   select * into v_cliente from public.clientes c where c.usuario_id = auth.uid() for update;
   if not found then
     raise exception using message = 'Inicia sesión para continuar.', errcode = 'P0001';
+  end if;
+
+  if v_cfg.fecha_apertura is not null and (p_inicio at time zone v_tz)::date < v_cfg.fecha_apertura then
+    raise exception using message = 'Ese horario no está disponible.', errcode = 'P0001';
   end if;
 
   if exists (select 1 from public.politicas po
@@ -1482,5 +1493,377 @@ begin
   values (p_tipo, v_version, btrim(p_titulo), p_contenido_md, true, now())
   returning id into v_id;
   return v_id;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Escrituras atómicas del panel (ESPEC §6 y §6.1): paquetes, horarios y recetas.
+-- Cada una reemplaza el conjunto completo en una sola transacción (no quedan paquetes a medias
+-- si se corta la red). Las tablas paquetes, paquete_servicios, horarios y recetas_servicio ya no
+-- aceptan escrituras directas de anon/authenticated (1100_seguridad).
+-- -----------------------------------------------------------------------------
+
+-- Paquete (admin): upsert del paquete + reemplazo de paquete_servicios.
+--   p_id     null = nuevo; si no, el paquete a editar.
+--   p_datos  {slug, nombre, descripcion, tipo, precio, duracion_min, vigencia_dias, activo, orden}.
+--            Al editar, lo que no venga se queda como está; al crear, toma su valor por defecto.
+--            Si no viene slug (o viene vacío), se arma con el nombre ("Paquete Verano" → paquete-verano).
+--   p_items  [{servicio_id, cantidad}] (cantidad entera 1–99, 1 si falta; repetidos se suman).
+-- Un bono es N sesiones de un mismo servicio: lleva exactamente un servicio.
+create or replace function public.guardar_paquete(p_id uuid, p_datos jsonb, p_items jsonb)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_paq       public.paquetes;
+  v_slug      text;
+  v_item      jsonb;
+  v_serv      uuid;
+  v_cant_num  numeric;
+  v_items     jsonb := '{}'::jsonb;    -- {servicio_id: cantidad}
+begin
+  if not public.es_admin() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  if p_datos is null or jsonb_typeof(p_datos) <> 'object' then
+    raise exception using message = 'Escribe el nombre del paquete.', errcode = 'P0001';
+  end if;
+
+  if p_id is not null then
+    select * into v_paq from public.paquetes p where p.id = p_id for update;
+    if not found then
+      raise exception using message = 'No encontramos ese paquete.', errcode = 'P0001';
+    end if;
+  else
+    v_paq.id := gen_random_uuid();
+    v_paq.tipo := 'combo';
+    v_paq.activo := true;
+    v_paq.orden := 0;
+  end if;
+
+  -- Datos del paquete
+  if p_datos ? 'nombre' then
+    v_paq.nombre := nullif(btrim(p_datos ->> 'nombre'), '');
+  end if;
+  if v_paq.nombre is null then
+    raise exception using message = 'Escribe el nombre del paquete.', errcode = 'P0001';
+  end if;
+  if length(v_paq.nombre) > 200 then
+    raise exception using message = 'El nombre es muy largo; escríbelo en máximo 200 caracteres.', errcode = 'P0001';
+  end if;
+
+  if p_id is null or p_datos ? 'slug' then
+    v_slug := coalesce(nullif(btrim(p_datos ->> 'slug'), ''), v_paq.nombre);
+    v_slug := lower(translate(v_slug, 'ÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑÇáàäâãéèëêíìïîóòöôõúùüûñç',
+                                      'aaaaaeeeeiiiiooooouuuuncaaaaaeeeeiiiiooooouuuunc'));
+    v_slug := btrim(regexp_replace(v_slug, '[^a-z0-9_-]+', '-', 'g'), '-_');
+    if v_slug = '' then
+      raise exception using message = 'El identificador (slug) del paquete debe tener letras o números.', errcode = 'P0001';
+    end if;
+    v_paq.slug := v_slug;
+  end if;
+  if exists (select 1 from public.paquetes p where p.slug = v_paq.slug and p.id <> v_paq.id) then
+    raise exception using message = 'Ya existe otro paquete con ese identificador (slug).', errcode = 'P0001';
+  end if;
+
+  if p_datos ? 'descripcion' then
+    v_paq.descripcion := nullif(btrim(p_datos ->> 'descripcion'), '');
+  end if;
+
+  if p_datos ? 'tipo' then
+    if coalesce(p_datos ->> 'tipo', '') not in ('combo', 'bono') then
+      raise exception using message = 'Elige si el paquete es combo o bono.', errcode = 'P0001';
+    end if;
+    v_paq.tipo := (p_datos ->> 'tipo')::public.tipo_paquete;
+  end if;
+
+  if p_datos ? 'precio' then
+    begin
+      v_paq.precio := nullif(btrim(p_datos ->> 'precio'), '')::numeric;
+    exception when others then
+      raise exception using message = 'Revisa el precio.', errcode = 'P0001';
+    end;
+    if v_paq.precio = 'NaN'::numeric then
+      raise exception using message = 'Revisa el precio.', errcode = 'P0001';
+    end if;
+    if v_paq.precio < 0 then
+      raise exception using message = 'El precio no puede ser negativo.', errcode = 'P0001';
+    end if;
+  end if;
+
+  if p_datos ? 'duracion_min' then
+    begin
+      v_cant_num := nullif(btrim(p_datos ->> 'duracion_min'), '')::numeric;
+      if v_cant_num <> trunc(v_cant_num) or v_cant_num < 0 then
+        raise exception 'duración inválida';
+      end if;
+      v_paq.duracion_min := v_cant_num::int;
+    exception when others then
+      raise exception using message = 'Revisa la duración: minutos enteros, cero o más.', errcode = 'P0001';
+    end;
+  end if;
+
+  if p_datos ? 'vigencia_dias' then
+    begin
+      v_cant_num := nullif(btrim(p_datos ->> 'vigencia_dias'), '')::numeric;
+      if v_cant_num <> trunc(v_cant_num) or v_cant_num <= 0 then
+        raise exception 'vigencia inválida';
+      end if;
+      v_paq.vigencia_dias := v_cant_num::int;
+    exception when others then
+      raise exception using message = 'Revisa la vigencia: días enteros, uno o más.', errcode = 'P0001';
+    end;
+  end if;
+
+  begin
+    if p_datos ? 'activo' and jsonb_typeof(p_datos -> 'activo') <> 'null' then
+      v_paq.activo := (p_datos ->> 'activo')::boolean;
+    end if;
+    if p_datos ? 'orden' and jsonb_typeof(p_datos -> 'orden') <> 'null' then
+      v_paq.orden := (p_datos ->> 'orden')::numeric::int;
+    end if;
+  exception when others then
+    raise exception using message = 'Revisa los datos del paquete.', errcode = 'P0001';
+  end;
+
+  -- Servicios del paquete
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
+    raise exception using message = 'Agrega al menos un servicio al paquete.', errcode = 'P0001';
+  end if;
+  for v_item in select e.value from jsonb_array_elements(p_items) as e(value) loop
+    v_serv := null;
+    if jsonb_typeof(v_item) = 'object' then
+      begin
+        v_serv := nullif(btrim(v_item ->> 'servicio_id'), '')::uuid;
+      exception when invalid_text_representation then
+        v_serv := null;
+      end;
+    end if;
+    if v_serv is null or not exists (select 1 from public.servicios s where s.id = v_serv) then
+      raise exception using message = 'Uno de los servicios del paquete no existe.', errcode = 'P0001';
+    end if;
+
+    v_cant_num := 1;
+    if nullif(btrim(v_item ->> 'cantidad'), '') is not null then
+      begin
+        v_cant_num := (v_item ->> 'cantidad')::numeric;
+      exception when others then
+        raise exception using message = 'Revisa las cantidades.', errcode = 'P0001';
+      end;
+    end if;
+    if v_cant_num <> trunc(v_cant_num) or v_cant_num < 1 or v_cant_num > 99 then
+      raise exception using message = 'Revisa las cantidades.', errcode = 'P0001';
+    end if;
+
+    v_items := v_items || jsonb_build_object(v_serv::text,
+                 coalesce((v_items ->> v_serv::text)::int, 0) + v_cant_num::int);
+    if (v_items ->> v_serv::text)::int > 99 then
+      raise exception using message = 'Revisa las cantidades.', errcode = 'P0001';
+    end if;
+  end loop;
+
+  if v_paq.tipo = 'bono' and (select count(*) from jsonb_object_keys(v_items)) <> 1 then
+    raise exception using
+      message = 'Un bono es de un solo servicio: elige sólo uno y cuántas sesiones incluye.',
+      errcode = 'P0001';
+  end if;
+
+  -- Guardar todo junto
+  begin
+    if p_id is null then
+      insert into public.paquetes (id, slug, nombre, descripcion, tipo, precio, duracion_min, vigencia_dias, activo, orden)
+      values (v_paq.id, v_paq.slug, v_paq.nombre, v_paq.descripcion, v_paq.tipo, v_paq.precio, v_paq.duracion_min,
+              v_paq.vigencia_dias, v_paq.activo, v_paq.orden);
+    else
+      update public.paquetes
+         set slug = v_paq.slug, nombre = v_paq.nombre, descripcion = v_paq.descripcion, tipo = v_paq.tipo,
+             precio = v_paq.precio, duracion_min = v_paq.duracion_min, vigencia_dias = v_paq.vigencia_dias,
+             activo = v_paq.activo, orden = v_paq.orden
+       where id = v_paq.id;
+    end if;
+  exception when unique_violation then
+    raise exception using message = 'Ya existe otro paquete con ese identificador (slug).', errcode = 'P0001';
+  end;
+
+  delete from public.paquete_servicios ps where ps.paquete_id = v_paq.id;
+  insert into public.paquete_servicios (paquete_id, servicio_id, cantidad)
+  select v_paq.id, e.key::uuid, e.value::text::int
+    from jsonb_each(v_items) as e(key, value);
+
+  return v_paq.id;
+end;
+$$;
+
+-- Horario semanal de una persona del equipo (admin): reemplaza todos sus rangos.
+--   p_horarios  [{dia_semana (0 = domingo … 6 = sábado), hora_inicio 'HH:MI', hora_fin 'HH:MI'}]
+--               '[]' deja a la persona sin horario (no ofrece citas en línea).
+-- Puede haber varios rangos por día (comida), pero no encimados (10–14 y 14–19 sí; 10–14 y 13–19 no).
+create or replace function public.guardar_horarios(p_personal_id uuid, p_horarios jsonb)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_h        jsonb;
+  v_dia      int;
+  v_ini      time;
+  v_fin      time;
+  v_dias     int[] := '{}';
+  v_inis     time[] := '{}';
+  v_fins     time[] := '{}';
+  v_choque   record;
+  c_nombres  constant text[] := array['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+begin
+  if not public.es_admin() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  -- for update: dos guardados simultáneos del mismo horario se forman.
+  perform 1 from public.personal p where p.id = p_personal_id for update;
+  if not found then
+    raise exception using message = 'No encontramos a esa persona del equipo.', errcode = 'P0001';
+  end if;
+  if p_horarios is null or jsonb_typeof(p_horarios) <> 'array' then
+    raise exception using message = 'Revisa los horarios.', errcode = 'P0001';
+  end if;
+
+  for v_h in select e.value from jsonb_array_elements(p_horarios) as e(value) loop
+    v_dia := null;
+    v_ini := null;
+    v_fin := null;
+    if jsonb_typeof(v_h) = 'object' then
+      begin
+        v_dia := (v_h ->> 'dia_semana')::numeric::int;
+        if (v_h ->> 'dia_semana')::numeric <> v_dia then
+          v_dia := null;
+        end if;
+      exception when others then
+        v_dia := null;
+      end;
+      begin
+        v_ini := nullif(btrim(v_h ->> 'hora_inicio'), '')::time;
+        v_fin := nullif(btrim(v_h ->> 'hora_fin'), '')::time;
+      exception when others then
+        v_ini := null;
+        v_fin := null;
+      end;
+    end if;
+    if v_dia is null or v_dia not between 0 and 6 then
+      raise exception using message = 'El día de la semana debe ir de 0 (domingo) a 6 (sábado).', errcode = 'P0001';
+    end if;
+    if v_ini is null or v_fin is null then
+      raise exception using message = 'Escribe la hora de entrada y la de salida.', errcode = 'P0001';
+    end if;
+    if v_fin <= v_ini then
+      raise exception using message = 'La salida debe ser después de la entrada.', errcode = 'P0001';
+    end if;
+    v_dias := v_dias || v_dia;
+    v_inis := v_inis || v_ini;
+    v_fins := v_fins || v_fin;
+  end loop;
+
+  -- Sin traslapes el mismo día (rangos pegados, como 10–14 y 14–19, sí se permiten).
+  with r as (
+    select x.dia, x.ini, x.fin, x.n
+      from unnest(v_dias, v_inis, v_fins) with ordinality as x(dia, ini, fin, n)
+  )
+  select a.dia, a.ini as a_ini, a.fin as a_fin, b.ini as b_ini, b.fin as b_fin
+    into v_choque
+    from r a
+    join r b on b.dia = a.dia and b.n <> a.n
+            and (a.ini, a.n) < (b.ini, b.n)
+            and b.ini < a.fin and a.ini < b.fin
+   order by a.dia, a.ini, b.ini
+   limit 1;
+  if found then
+    raise exception using
+      message = format('Dos horarios del %s se enciman (%s–%s y %s–%s).', c_nombres[v_choque.dia + 1],
+                       left(v_choque.a_ini::text, 5), left(v_choque.a_fin::text, 5),
+                       left(v_choque.b_ini::text, 5), left(v_choque.b_fin::text, 5)),
+      errcode = 'P0001';
+  end if;
+
+  delete from public.horarios h where h.personal_id = p_personal_id;
+  insert into public.horarios (personal_id, dia_semana, hora_inicio, hora_fin)
+  select p_personal_id, x.dia, x.ini, x.fin
+    from unnest(v_dias, v_inis, v_fins) as x(dia, ini, fin)
+   order by x.dia, x.ini;
+end;
+$$;
+
+-- Receta de un servicio (personal): cuánto se gasta de cada producto. Reemplaza la receta completa.
+--   p_items  [{producto_id, cantidad (> 0, en la unidad del producto), notas}]; '[]' la deja vacía.
+--            Si un producto se repite, se suman las cantidades.
+create or replace function public.guardar_receta(p_servicio_id uuid, p_items jsonb)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_item     jsonb;
+  v_prod     uuid;
+  v_cant     numeric;
+  v_notas    text;
+  v_receta   jsonb := '{}'::jsonb;    -- {producto_id: {cantidad, notas}}
+  v_previo   jsonb;
+begin
+  if not public.es_personal() then
+    raise exception using message = 'No tienes permiso para hacer esto.', errcode = 'P0001';
+  end if;
+  -- for update: dos guardados simultáneos de la misma receta se forman.
+  perform 1 from public.servicios s where s.id = p_servicio_id for update;
+  if not found then
+    raise exception using message = 'No encontramos ese servicio.', errcode = 'P0001';
+  end if;
+  if p_items is null or jsonb_typeof(p_items) <> 'array' then
+    raise exception using message = 'Revisa la receta.', errcode = 'P0001';
+  end if;
+
+  for v_item in select e.value from jsonb_array_elements(p_items) as e(value) loop
+    v_prod := null;
+    if jsonb_typeof(v_item) = 'object' then
+      begin
+        v_prod := nullif(btrim(v_item ->> 'producto_id'), '')::uuid;
+      exception when invalid_text_representation then
+        v_prod := null;
+      end;
+    end if;
+    if v_prod is null or not exists (select 1 from public.productos pr where pr.id = v_prod) then
+      raise exception using message = 'Uno de los productos de la receta no existe.', errcode = 'P0001';
+    end if;
+
+    begin
+      v_cant := round(nullif(btrim(v_item ->> 'cantidad'), '')::numeric, 3);
+    exception when others then
+      v_cant := null;
+    end;
+    if v_cant is null or v_cant <= 0 or v_cant >= 1000000000 then
+      raise exception using message = 'La cantidad de cada producto debe ser mayor a cero.', errcode = 'P0001';
+    end if;
+
+    v_notas := nullif(btrim(v_item ->> 'notas'), '');
+    if length(v_notas) > 1000 then
+      raise exception using message = 'Las notas son muy largas; escríbelas en máximo 1000 caracteres.', errcode = 'P0001';
+    end if;
+
+    v_previo := v_receta -> v_prod::text;
+    v_receta := v_receta || jsonb_build_object(v_prod::text, jsonb_build_object(
+      'cantidad', coalesce((v_previo ->> 'cantidad')::numeric, 0) + v_cant,
+      'notas', coalesce(v_previo ->> 'notas', v_notas)));
+    if (v_receta -> v_prod::text ->> 'cantidad')::numeric >= 1000000000 then
+      raise exception using message = 'La cantidad de cada producto debe ser mayor a cero.', errcode = 'P0001';
+    end if;
+  end loop;
+
+  delete from public.recetas_servicio r where r.servicio_id = p_servicio_id;
+  insert into public.recetas_servicio (servicio_id, producto_id, cantidad, notas)
+  select p_servicio_id, e.key::uuid, (e.value ->> 'cantidad')::numeric, e.value ->> 'notas'
+    from jsonb_each(v_receta) as e(key, value);
 end;
 $$;

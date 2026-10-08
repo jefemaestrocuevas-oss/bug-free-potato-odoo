@@ -54,9 +54,12 @@
   text-decoration: none;
 }
 .ini-hero-dato-enlace a:hover { background: var(--verde-suave); color: var(--verde); text-decoration: underline; }
-/* En celular la ilustración va chica para que el titular y los botones se vean desde el inicio. */
-.ini-hero-arte { order: -1; max-width: 140px; margin: 0 auto; width: 100%; }
-@media (min-width: 560px) { .ini-hero-arte { max-width: 260px; } }
+/*
+  En celular la ilustración va chica y DESPUÉS del texto: así el titular, los botones y las
+  píldoras ("Equipo en capacitación constante") caben en la primera pantalla. En tablet va arriba.
+*/
+.ini-hero-arte { max-width: 140px; margin: 0 auto; width: 100%; }
+@media (min-width: 560px) { .ini-hero-arte { order: -1; max-width: 260px; } }
 @media (min-width: 900px) { .ini-hero-arte { order: 0; max-width: none; } }
 
 /* ---------- Categorías ---------- */

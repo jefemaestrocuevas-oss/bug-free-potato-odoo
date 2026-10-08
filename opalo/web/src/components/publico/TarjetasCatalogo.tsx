@@ -60,7 +60,7 @@ export function FilaServicio({ servicio: s, mostrarAcciones = true }: { servicio
         <div className="fs-acciones">
           {reservable && (
             <Link
-              className="btn btn-primario btn-sm"
+              className="btn btn-primario btn-sm fs-reservar"
               to={`/reservar?servicio=${encodeURIComponent(s.slug)}`}
               aria-label={s.es_complemento ? `Agregar ${s.nombre} al reservar` : `Reservar ${s.nombre}`}
             >
@@ -69,6 +69,7 @@ export function FilaServicio({ servicio: s, mostrarAcciones = true }: { servicio
           )}
           {vendible && (
             <BotonComprar
+              className="btn btn-secundario btn-sm fs-comprar"
               item={{ tipo: 'servicio', id: s.id, nombre: s.nombre, precio: s.precio as number, detalle: s.es_complemento ? 'Complemento' : textoDuracion(s) }}
             />
           )}

@@ -60,7 +60,9 @@ export function CostosReceta({ servicio, productos: productosCargados, onCerrar,
   });
   const total = centavos(calculadas.reduce((s, c) => s + (c.costo ?? 0), 0));
   const precio = servicio.precio;
-  const margen = precio === null ? null : centavos(precio - total);
+  // Sin ningún producto con cantidad el material sale en $0 y el margen sería un falso 100 %.
+  const conProductos = calculadas.some((c) => c.costo !== null);
+  const margen = precio === null || !conProductos ? null : centavos(precio - total);
   const margenPct = precio === null || precio === 0 || margen === null ? null : Math.round((margen / precio) * 1000) / 10;
   const usados = new Set(ls.map((l) => l.producto_id).filter(Boolean));
   const cambiado = lineas !== null && firma(ls) !== original;

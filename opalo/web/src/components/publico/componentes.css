@@ -94,7 +94,15 @@
 .fs-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0 0; font-size: 0.85rem; color: var(--tinta-2); }
 .fs-meta span + span::before { content: '·'; margin-right: 14px; color: var(--oro-osc); }
 .fs-acciones { display: flex; flex-wrap: wrap; gap: 8px; }
-@media (min-width: 720px) { .fs-acciones { justify-content: flex-end; } }
+/*
+  A lo ancho, rejilla fija de 2 columnas: «Reservar» siempre en la misma columna y el lugar de
+  «Comprar» reservado aunque no haya (servicios con precio por confirmar). Así la lista no hace zigzag.
+*/
+@media (min-width: 720px) {
+  .fs-acciones { display: grid; grid-template-columns: minmax(0, 1fr) 8rem; align-items: center; }
+  .fs-acciones .fs-reservar { grid-column: 1; justify-self: end; }
+  .fs-acciones .fs-comprar { grid-column: 2; justify-self: stretch; }
+}
 .fila-servicio.es-pronto .fs-nombre { color: var(--tinta-2); }
 
 /* ---------- Tarjeta de paquete ---------- */

@@ -7,7 +7,20 @@ import { dinero, mesNombre } from '../../lib/format';
 import { mesCorto } from './util';
 
 const ALTO = 300;
-const M = { arriba: 18, derecha: 56, abajo: 34, izquierda: 64 };
+const M = { arriba: 18, derecha: 64, abajo: 34, izquierda: 72 };
+/** Ancho aproximado de un carácter de las etiquetas del eje (11.5 px, cifras tabulares). */
+const ANCHO_CARACTER = 6.6;
+/** Aire mínimo entre dos etiquetas del eje X. */
+const AIRE_ETIQUETAS = 10;
+
+/**
+ * Cada cuántos meses se pone etiqueta para que no se encimen («ago 26oct 26»). Se cuenta desde el
+ * último mes, que siempre lleva etiqueta: así nunca queda pegada a la anterior.
+ */
+export function pasoEtiquetas(banda: number, etiquetas: string[]): number {
+  const mas = Math.max(0, ...etiquetas.map((t) => t.length)) * ANCHO_CARACTER + AIRE_ETIQUETAS;
+  return Math.max(1, Math.ceil(mas / Math.max(1, banda)));
+}
 
 function pasoBonito(rango: number, partes: number): number {
   const crudo = rango / partes;
@@ -17,11 +30,13 @@ function pasoBonito(rango: number, partes: number): number {
   return paso * mag;
 }
 
-function compacto(n: number): string {
+/** Cifra corta para los ejes: "$12 mil", "-$3.5 mil" (mismo signo menos que dinero() en tarjetas y tabla). */
+export function compacto(n: number): string {
   const a = Math.abs(n);
-  if (a >= 1_000_000) return `${n < 0 ? '−' : ''}$${(a / 1_000_000).toLocaleString('es-MX', { maximumFractionDigits: 1 })} M`;
-  if (a >= 1000) return `${n < 0 ? '−' : ''}$${(a / 1000).toLocaleString('es-MX', { maximumFractionDigits: 1 })} k`;
-  return `${n < 0 ? '−' : ''}$${a.toLocaleString('es-MX', { maximumFractionDigits: 0 })}`;
+  const signo = n < 0 && Math.round(a) !== 0 ? '-' : '';
+  if (a >= 1_000_000) return `${signo}$${(a / 1_000_000).toLocaleString('es-MX', { maximumFractionDigits: 1 })} M`;
+  if (a >= 1000) return `${signo}$${(a / 1000).toLocaleString('es-MX', { maximumFractionDigits: 1 })} mil`;
+  return `${signo}$${a.toLocaleString('es-MX', { maximumFractionDigits: 0 })}`;
 }
 
 /** Barra con esquinas superiores redondeadas (4 px) y base recta. Para valores negativos, al revés. */
@@ -44,7 +59,8 @@ export function GraficaResultados({ datos, idTabla }: { datos: ResultadoMensual[
   useEffect(() => {
     const el = caja.current;
     if (!el) return;
-    const medir = () => setAncho(Math.max(300, Math.round(el.clientWidth)));
+    // Siempre del ancho de su caja (a 390 px el SVG no se sale ni se estira).
+    const medir = () => setAncho(Math.max(240, Math.round(el.clientWidth)));
     medir();
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(medir);
@@ -76,7 +92,8 @@ export function GraficaResultados({ datos, idTabla }: { datos: ResultadoMensual[
   const banda = plotW / n;
   const anchoBarra = Math.max(4, Math.min(24, (banda - 10) / 2 - 1));
   const centro = (i: number) => M.izquierda + banda * i + banda / 2;
-  const cada = banda < 34 ? 3 : banda < 52 ? 2 : 1;
+  const etiquetas = filas.map((f) => mesCorto(f.mes));
+  const cada = pasoEtiquetas(banda, etiquetas);
   const y0 = y(0);
   const puntos = filas.map((f, i) => `${centro(i)},${y(f.utilidad)}`).join(' ');
   const ultima = filas.length - 1;
@@ -99,12 +116,14 @@ export function GraficaResultados({ datos, idTabla }: { datos: ResultadoMensual[
         </span>
       </div>
       <div className="adm-grafica-caja" ref={caja} onMouseLeave={() => setActivo(null)}>
+        {/* role="group" (no "img"): los meses enfocables de adentro deben seguir visibles para el lector de pantalla. */}
         <svg
           width={ancho}
           height={ALTO}
           viewBox={`0 0 ${ancho} ${ALTO}`}
-          role="img"
-          aria-labelledby={`${id}-t ${id}-d`}
+          role="group"
+          aria-labelledby={`${id}-t`}
+          aria-describedby={`${id}-d`}
           className="adm-grafica-svg"
         >
           <title id={`${id}-t`}>Ingresos, egresos y utilidad por mes</title>
@@ -113,50 +132,53 @@ export function GraficaResultados({ datos, idTabla }: { datos: ResultadoMensual[
             {idTabla ? ' Los valores exactos están en la tabla de abajo.' : ''}
           </desc>
 
-          {/* Rejilla y eje */}
-          {ticks.map((t) => (
-            <g key={t}>
-              <line x1={M.izquierda} x2={ancho - M.derecha} y1={y(t)} y2={y(t)} className={t === 0 ? 'adm-g-base' : 'adm-g-rejilla'} />
-              <text x={M.izquierda - 8} y={y(t)} className="adm-g-eje" textAnchor="end" dominantBaseline="middle">
-                {compacto(t)}
-              </text>
-            </g>
-          ))}
-
-          {/* Banda resaltada */}
-          {activo !== null && <rect x={M.izquierda + banda * activo} y={M.arriba} width={banda} height={plotH} className="adm-g-banda" />}
-
-          {/* Barras */}
-          {filas.map((f, i) => {
-            const x1 = centro(i) - anchoBarra - 1;
-            const x2 = centro(i) + 1;
-            return (
-              <g key={f.mes}>
-                <path d={barra(x1, anchoBarra, y0, y(f.ingresos))} className="adm-g-ingresos" />
-                <path d={barra(x2, anchoBarra, y0, y(f.egresos))} className="adm-g-egresos" />
+          {/* Lo dibujado es decorativo para el lector de pantalla: cada mes se lee completo en su zona. */}
+          <g aria-hidden="true">
+            {/* Rejilla y eje */}
+            {ticks.map((t) => (
+              <g key={t}>
+                <line x1={M.izquierda} x2={ancho - M.derecha} y1={y(t)} y2={y(t)} className={t === 0 ? 'adm-g-base' : 'adm-g-rejilla'} />
+                <text x={M.izquierda - 8} y={y(t)} className="adm-g-eje" textAnchor="end" dominantBaseline="middle">
+                  {compacto(t)}
+                </text>
               </g>
-            );
-          })}
+            ))}
 
-          {/* Línea de utilidad */}
-          {filas.length > 1 && <polyline points={puntos} className="adm-g-utilidad" />}
-          {filas.map((f, i) => (
-            <circle key={f.mes} cx={centro(i)} cy={y(f.utilidad)} r={activo === i ? 5.5 : 4} className="adm-g-punto" />
-          ))}
-          {ultima >= 0 && (
-            <text x={centro(ultima) + 9} y={y(filas[ultima].utilidad)} className="adm-g-etiqueta" dominantBaseline="middle">
-              {compacto(filas[ultima].utilidad)}
-            </text>
-          )}
+            {/* Banda resaltada */}
+            {activo !== null && <rect x={M.izquierda + banda * activo} y={M.arriba} width={banda} height={plotH} className="adm-g-banda" />}
 
-          {/* Meses */}
-          {filas.map((f, i) =>
-            i % cada === 0 || i === ultima ? (
-              <text key={f.mes} x={centro(i)} y={ALTO - M.abajo + 20} className="adm-g-eje" textAnchor="middle">
-                {mesCorto(f.mes)}
+            {/* Barras */}
+            {filas.map((f, i) => {
+              const x1 = centro(i) - anchoBarra - 1;
+              const x2 = centro(i) + 1;
+              return (
+                <g key={f.mes}>
+                  <path d={barra(x1, anchoBarra, y0, y(f.ingresos))} className="adm-g-ingresos" />
+                  <path d={barra(x2, anchoBarra, y0, y(f.egresos))} className="adm-g-egresos" />
+                </g>
+              );
+            })}
+
+            {/* Línea de utilidad */}
+            {filas.length > 1 && <polyline points={puntos} className="adm-g-utilidad" />}
+            {filas.map((f, i) => (
+              <circle key={f.mes} cx={centro(i)} cy={y(f.utilidad)} r={activo === i ? 5.5 : 4} className="adm-g-punto" />
+            ))}
+            {ultima >= 0 && (
+              <text x={centro(ultima) + 9} y={y(filas[ultima].utilidad)} className="adm-g-etiqueta" dominantBaseline="middle">
+                {compacto(filas[ultima].utilidad)}
               </text>
-            ) : null,
-          )}
+            )}
+
+            {/* Meses: uno de cada `cada`, contando desde el último */}
+            {filas.map((f, i) =>
+              (ultima - i) % cada === 0 ? (
+                <text key={f.mes} x={centro(i)} y={ALTO - M.abajo + 20} className="adm-g-eje" textAnchor="middle">
+                  {etiquetas[i]}
+                </text>
+              ) : null,
+            )}
+          </g>
 
           {/* Zonas de interacción (mouse, toque y teclado) */}
           {filas.map((f, i) => (

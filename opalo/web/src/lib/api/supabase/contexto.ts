@@ -30,6 +30,11 @@ export interface Contexto {
   fila(consulta: PromiseLike<Respuesta>): Promise<Fila | null>;
   /** Ejecuta un select con { count: 'exact', head: true } y devuelve el conteo. */
   contar(consulta: PromiseLike<Respuesta>): Promise<number>;
+  /**
+   * Ejecuta una escritura sin pedir filas de vuelta (return=minimal, con { count: 'exact' }) y
+   * devuelve cuántas filas afectó; null si el servidor no mandó el conteo.
+   */
+  afectadas(consulta: PromiseLike<Respuesta>): Promise<number | null>;
   /** Llama una función RPC con sus parámetros p_* y devuelve lo que regresa. */
   rpc(nombre: string, args?: Record<string, unknown>): Promise<unknown>;
   /** Sesión de Supabase Auth actual (sin red salvo que haya que refrescar el token). */
@@ -87,6 +92,11 @@ export function crearContexto(sb: SupabaseClient, opciones: OpcionesSupabase = {
       const r = await correr(consulta);
       if (typeof r.count === 'number') return r.count;
       return Array.isArray(r.data) ? r.data.length : 0;
+    },
+
+    async afectadas(consulta) {
+      const r = await correr(consulta);
+      return typeof r.count === 'number' && Number.isFinite(r.count) ? r.count : null;
     },
 
     rpc(nombre, args) {

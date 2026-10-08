@@ -60,6 +60,22 @@ export function emailValido(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+/**
+ * public.firma_valida(text): un <svg> sólo con trazos (svg, path, g, polyline, line, circle),
+ * sin eventos (on…=), enlaces (href), javascript: ni url(), de 200 000 caracteres o menos.
+ */
+export function firmaValida(svg: unknown, maximo = 200_000): boolean {
+  if (typeof svg !== 'string') return false;
+  return (
+    svg.length <= maximo &&
+    /^\s*<svg[\s>/]/.test(svg) &&
+    /(<\/svg>|\/>)\s*$/.test(svg) &&
+    !/<(?!\/?(svg|path|g|polyline|line|circle)[\s>/])/i.test(svg) &&
+    !/\son[a-z]+\s*=/i.test(svg) &&
+    !/(href|javascript:|url\s*\()/i.test(svg)
+  );
+}
+
 // ---------- Fechas (México: UTC−6 fijo) ----------
 
 export const MS_MIN = 60_000;

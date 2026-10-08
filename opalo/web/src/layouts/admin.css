@@ -113,8 +113,20 @@
 .adm-nav-enlace:disabled { opacity: 0.6; cursor: wait; }
 
 .adm-usuario { border-top: 1px solid var(--linea); margin-top: 16px; padding-top: 12px; display: flex; flex-direction: column; gap: 2px; }
-.adm-usuario-datos { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 12px 8px; }
-.adm-usuario-nombre { font-size: 0.88rem; color: var(--tinta-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* Nombre arriba (hasta 2 líneas) y el rol debajo: en la barra de 252 px el nombre no se corta. */
+.adm-usuario-datos { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 4px 12px 8px; }
+.adm-usuario-nombre {
+  font-size: 0.88rem;
+  color: var(--tinta-2);
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
 
 /* ---------- Contenido ---------- */
 .adm-principal { flex: 1; min-width: 0; outline: none; }

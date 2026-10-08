@@ -29,6 +29,13 @@ export function fechaLarga(iso: string): string {
   return new Intl.DateTimeFormat('es-MX', { timeZone: ZONA, weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(iso));
 }
 
+/** "31 de octubre de 2026" (o "31 de octubre" sin año) para 'YYYY-MM-DD'. */
+export function fechaEnLetra(fecha: string, conAnio = true): string {
+  return new Intl.DateTimeFormat('es-MX', { timeZone: ZONA, day: 'numeric', month: 'long', ...(conAnio ? { year: 'numeric' as const } : {}) }).format(
+    new Date(`${fecha.slice(0, 10)}T12:00:00${OFFSET_MX}`),
+  );
+}
+
 /** "4 nov 2026" (acepta 'YYYY-MM-DD' o ISO completo) */
 export function fechaCorta(fechaOIso: string): string {
   const d = fechaOIso.length === 10 ? new Date(`${fechaOIso}T12:00:00${OFFSET_MX}`) : new Date(fechaOIso);

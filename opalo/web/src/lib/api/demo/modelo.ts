@@ -228,6 +228,9 @@ export interface FichaFila {
   creado_en: string;
 }
 
+/** Dónde se capturó la firma (ESPEC §5.1). */
+export type CanalFirma = 'reserva_web' | 'portal' | 'cabina';
+
 export interface ConsentimientoFila {
   id: string;
   cliente_id: string;
@@ -241,6 +244,9 @@ export interface ConsentimientoFila {
   documento_hash: string | null;
   ip: string | null;
   user_agent: string | null;
+  /** Usuario con sesión al firmar (la clienta, o el personal en la tablet de cabina). */
+  capturado_por: string | null;
+  canal: CanalFirma | null;
   firmado_en: string;
 }
 

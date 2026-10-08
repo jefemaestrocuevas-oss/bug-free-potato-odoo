@@ -178,6 +178,31 @@ describe('Catálogo', () => {
     expect(mocks.admin.guardarServicio).not.toHaveBeenCalled();
   });
 
+  it('un servicio activo y disponible necesita su consentimiento (como exige la base)', async () => {
+    await montar();
+    await act(async () => boton('Nuevo servicio', contenedor).click());
+    const dialogo = document.querySelector('[role=dialog]')!;
+    await act(async () => escribir(dialogo.querySelector<HTMLInputElement>('#srv-nombre')!, 'Pierna completa'));
+    const select = dialogo.querySelector<HTMLSelectElement>('#srv-consentimiento')!;
+    expect(select.value).toBe('');
+    await enviar(dialogo);
+    expect(mocks.admin.guardarServicio).not.toHaveBeenCalled();
+    expect(dialogo.querySelector('[role=alert]')?.textContent).toContain('Elige qué consentimiento firma la clienta para este servicio.');
+    expect(select.getAttribute('aria-invalid')).toBe('true');
+    expect(dialogo.querySelector('#srv-consentimiento-error')?.textContent).toBe('Elige qué consentimiento firma la clienta para este servicio.');
+    // El campo con el error queda a la vista y con el foco (no se pierde en <body>).
+    expect(document.activeElement).toBe(select);
+
+    // En segunda etapa (no se reserva) puede quedarse sin consentimiento.
+    await act(async () => elegir(dialogo.querySelector<HTMLSelectElement>('#srv-etapa')!, 'segunda_etapa'));
+    expect(dialogo.querySelector('#srv-consentimiento-error')).toBeNull();
+    await act(async () => elegir(dialogo.querySelector<HTMLSelectElement>('#srv-etapa')!, 'disponible'));
+    await act(async () => elegir(select, 'consentimiento_depilacion'));
+    await enviar(dialogo);
+    expect(mocks.admin.guardarServicio).toHaveBeenCalledTimes(1);
+    expect(mocks.admin.guardarServicio.mock.calls[0][0]).toMatchObject({ nombre: 'Pierna completa', tipo_consentimiento: 'consentimiento_depilacion', etapa: 'disponible' });
+  });
+
   it('muestra los paquetes con lo que suman por separado y crea un bono', async () => {
     await montar('/admin/catalogo?pestana=paquetes');
     const tarjeta = contenedor.querySelector('.cat-paquete')!;
@@ -210,6 +235,38 @@ describe('Catálogo', () => {
       orden: 0,
       items: [{ servicio_id: 'axilas', cantidad: 5 }],
     });
+  });
+
+  it('un bono es de un solo servicio y las cantidades van de 1 a 99 (como guardar_paquete)', async () => {
+    await montar('/admin/catalogo?pestana=paquetes');
+    await act(async () => boton('Nuevo paquete', contenedor).click());
+    const dialogo = document.querySelector('[role=dialog]')!;
+    await act(async () => escribir(dialogo.querySelector<HTMLInputElement>('#paq-nombre')!, 'Bono doble'));
+    await act(async () => dialogo.querySelector<HTMLInputElement>('input[value=bono]')!.click());
+    await act(async () => elegir(dialogo.querySelector<HTMLSelectElement>('.cat-linea select')!, 'axilas'));
+    await act(async () => boton('Agregar servicio', dialogo).click());
+    const selects = dialogo.querySelectorAll<HTMLSelectElement>('.cat-linea select');
+    await act(async () => elegir(selects[1], 'cejas'));
+    // Antes de guardar ya avisa la regla correcta (no la vieja de "sesiones de cada uno").
+    expect(dialogo.textContent).toContain('Un bono es de un solo servicio: elige sólo uno y cuántas sesiones incluye.');
+    expect(dialogo.textContent).not.toContain('recibe sesiones de cada uno');
+    await enviar(dialogo);
+    expect(dialogo.querySelector('[role=alert]')?.textContent).toContain('Un bono es de un solo servicio');
+    expect(mocks.admin.guardarPaquete).not.toHaveBeenCalled();
+
+    // Con un solo servicio pero 100 sesiones, tampoco: el tope es 99.
+    const quitar = [...dialogo.querySelectorAll<HTMLButtonElement>('.cat-linea-quitar')];
+    await act(async () => quitar[1].click());
+    await act(async () => escribir(dialogo.querySelector<HTMLInputElement>('.cat-linea-cantidad input')!, '100'));
+    await enviar(dialogo);
+    expect(dialogo.querySelector('[role=alert]')?.textContent).toContain('Cada cantidad debe ser un número entero de 1 a 99.');
+    expect(dialogo.querySelector('.cat-linea-cantidad input')!.getAttribute('aria-invalid')).toBe('true');
+    expect(mocks.admin.guardarPaquete).not.toHaveBeenCalled();
+
+    await act(async () => escribir(dialogo.querySelector<HTMLInputElement>('.cat-linea-cantidad input')!, '99'));
+    await enviar(dialogo);
+    expect(mocks.admin.guardarPaquete).toHaveBeenCalledTimes(1);
+    expect(mocks.admin.guardarPaquete.mock.calls[0][0]).toMatchObject({ tipo: 'bono', items: [{ servicio_id: 'axilas', cantidad: 99 }] });
   });
 
   it('no guarda un paquete sin servicios', async () => {

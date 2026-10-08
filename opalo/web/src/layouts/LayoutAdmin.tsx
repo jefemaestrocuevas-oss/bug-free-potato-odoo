@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ComponentType } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { reiniciarDemo } from '../lib/api/demo';
+import { AVISO_DEMO } from '../lib/api/cuentasDemo';
 import { useSesion } from '../lib/sesion';
 import { Marca } from '../components/ui/Gema';
 import {
@@ -58,7 +59,7 @@ function BannerDemo() {
   if (api.modo !== 'demo') return null;
   return (
     <div className="banner-demo adm-banner-demo">
-      <span>Modo demostración: los datos de ejemplo viven sólo en este navegador.</span>
+      <span>{AVISO_DEMO}</span>
       <button
         type="button"
         className="adm-banner-boton"

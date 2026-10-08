@@ -92,6 +92,8 @@ button.rv-progreso-boton:hover { background: var(--verde-suave); color: var(--ve
 .rv-bloque { display: flex; flex-direction: column; gap: 12px; }
 .rv-error:focus { outline: 2px solid var(--error); outline-offset: 2px; }
 .rv-campo-error { color: var(--error); font-size: 0.85rem; font-weight: 700; }
+/* Dato que la clienta ya no puede cambiar (p. ej. su fecha de nacimiento registrada). */
+.rv-dato-fijo { margin: 0; min-height: 44px; display: flex; align-items: center; padding: 0 12px; background: var(--fondo-alt); border-radius: var(--radio-sm); overflow-wrap: anywhere; }
 
 /* ---------- Resumen vivo ---------- */
 .rv-resumen-caja {
@@ -169,6 +171,8 @@ button.rv-progreso-boton:hover { background: var(--verde-suave); color: var(--ve
 .rv-opcion-nombre { font-weight: 700; overflow-wrap: anywhere; }
 .rv-opcion-detalle { font-size: 0.85rem; color: var(--tinta-2); }
 .rv-opcion-meta { font-size: 0.8rem; color: var(--tinta-3); }
+/* Sobre el fondo verde suave de la opción elegida, --tinta-3 queda debajo de 4.5:1 (AA). */
+.rv-opcion-elegida .rv-opcion-meta { color: var(--tinta-2); }
 .rv-opcion-precio { font-weight: 700; font-size: 0.9rem; color: var(--tinta); white-space: nowrap; text-align: right; }
 @media (max-width: 400px) {
   .rv-opcion { grid-template-columns: auto minmax(0, 1fr); }
@@ -347,7 +351,7 @@ textarea.input.rv-textarea-corta { min-height: 76px; }
   font-size: 1.8rem;
   font-weight: 700;
 }
-.rv-confirmacion-listo { font-family: var(--display); font-size: 2rem; font-weight: 600; color: var(--verde); line-height: 1.1; }
+.rv-confirmacion-estado { font-size: 1.05rem; color: var(--tinta); }
 .rv-confirmacion .rv-final-datos { padding: 6px 18px; }
 .rv-confirmacion-pendiente { margin: 0; }
 .rv-confirmacion-pendiente p { margin: 0 0 6px; }

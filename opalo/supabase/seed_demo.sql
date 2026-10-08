@@ -217,7 +217,14 @@ $$;
 
 -- -----------------------------------------------------------------------------
 -- Citas futuras (con las RPC reales)
+-- Las fechas son relativas a hoy y pueden caer antes de la apertura (configuracion.fecha_apertura),
+-- cuando las clientas todavía no reservan en línea. Para tener citas de ejemplo, la fecha se quita
+-- mientras se crean y se restablece justo después (la base queda con la de seed.sql).
 -- -----------------------------------------------------------------------------
+create temporary table demo_apertura on commit drop as
+  select c.fecha_apertura from public.configuracion c where c.id = 1;
+update public.configuracion set fecha_apertura = null where id = 1;
+
 do $$
 declare
   v_jueves date := (select d::date from generate_series(public.hoy_local() + 3, public.hoy_local() + 9, interval '1 day') d
@@ -267,6 +274,8 @@ begin
     from public.personal p where p.slug = 'especialista';
 end;
 $$;
+
+update public.configuracion set fecha_apertura = (select d.fecha_apertura from demo_apertura d) where id = 1;
 
 select set_config('request.jwt.claim.sub', '', true);
 

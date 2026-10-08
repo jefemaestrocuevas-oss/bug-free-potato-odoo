@@ -117,7 +117,8 @@ select cr.id,
   left join public.servicios s on s.id = cr.servicio_id
   left join public.paquetes pa on pa.id = cr.paquete_id;
 
--- Sólo personal.
+-- Sólo personal. es_personal: la cuenta ligada es del equipo (rol personal o admin; false sin cuenta),
+-- para que el panel separe al equipo de las clientas.
 create view public.v_clientes_resumen with (security_invoker = true) as
 select cl.id,
        cl.nombre,
@@ -138,7 +139,9 @@ select cl.id,
                     and (pg.pedido_id in (select pe.id from public.pedidos pe where pe.cliente_id = cl.id)
                          or pg.cita_id in (select c.id from public.citas c where c.cliente_id = cl.id))), 0)::numeric
          as total_pagado,
-       cl.creado_en
+       cl.creado_en,
+       coalesce((select pf.rol in ('personal', 'admin') from public.perfiles pf where pf.id = cl.usuario_id), false)
+         as es_personal
   from public.clientes cl
  where public.es_personal();
 
@@ -166,6 +169,8 @@ select s.id as servicio_id,
  order by cs.orden, s.orden, s.nombre;
 
 -- "Se acabó la crema": productos en o bajo su mínimo (personal). R12.
+-- presentaciones_sugeridas = floor((stock_minimo − stock_actual) / contenido_presentacion) + 1:
+-- comprar lo sugerido deja el stock POR ENCIMA del mínimo (y el producto sale de la lista).
 create view public.v_reposicion with (security_invoker = true) as
 select pr.id,
        pr.nombre,
@@ -182,7 +187,7 @@ select pr.id,
   from public.productos pr
   left join public.proveedores pv on pv.id = pr.proveedor_id
   cross join lateral (
-         select greatest(1, ceil(greatest(pr.stock_minimo - pr.stock_actual, 0) / pr.contenido_presentacion))::int
+         select (floor(greatest(pr.stock_minimo - pr.stock_actual, 0) / pr.contenido_presentacion) + 1)::int
                   as presentaciones_sugeridas) x
  where pr.activo
    and pr.stock_actual <= pr.stock_minimo

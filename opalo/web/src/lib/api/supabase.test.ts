@@ -441,6 +441,25 @@ describe('crearApiSupabaseCon · público', () => {
     expect(ops(llamadas.find((l) => l.tabla === 'servicios'), 'eq')).toEqual([]);
   });
 
+  it('getConfiguracion pide sus columnas por nombre y trae fecha_apertura como YYYY-MM-DD o null', async () => {
+    const { api, llamadas } = apiCon((l) =>
+      l.tabla === 'configuracion'
+        ? { data: { nombre_negocio: 'Ópalo', telefono_whatsapp: '4421701466', duracion_sesion_min: 60, fecha_apertura: '2026-10-31' } }
+        : undefined,
+    );
+    const c = await api.getConfiguracion();
+    expect(c).toMatchObject({ nombre_negocio: 'Ópalo', duracion_sesion_min: 60, fecha_apertura: '2026-10-31' });
+    const [cols] = ops(llamadas[0], 'select')[0] as [string];
+    expect(cols).toContain('fecha_apertura');
+    expect(cols).not.toContain('*');
+    expect(ops(llamadas[0], 'eq')).toEqual([['id', 1]]);
+
+    const sinFecha = apiCon(() => ({ data: { nombre_negocio: 'Ópalo', fecha_apertura: null } }));
+    expect((await sinFecha.api.getConfiguracion()).fecha_apertura).toBeNull();
+    const sinFila = apiCon(() => ({ data: null }));
+    expect((await sinFila.api.getConfiguracion()).fecha_apertura).toBeNull();
+  });
+
   it('getEquipo agrupa capacitaciones_publicas por persona', async () => {
     const { api } = apiCon((l) => {
       if (l.tabla === 'personal_publico') return { data: [{ id: 'a', slug: 'ana', nombre: 'Ana', titulo: null, bio: null, foto_url: null, orden: 1 }] };
@@ -639,14 +658,12 @@ describe('crearApiSupabaseCon · panel interno', () => {
     expect(p.costo_unitario).toBe(0.5);
   });
 
-  it('guardarPaquete hace upsert del paquete y reemplaza paquete_servicios', async () => {
-    const { api, llamadas } = apiCon((l) => (l.tabla === 'paquetes' ? { data: { id: 'p1' } } : undefined));
-    await api.admin.guardarPaquete({
-      id: 'p1',
+  describe('guardados atómicos por RPC (ESPEC §6)', () => {
+    const PAQUETE = {
       slug: '',
       nombre: 'Combo Piernas y Axila',
-      descripcion: null,
-      tipo: 'combo',
+      descripcion: '  ',
+      tipo: 'combo' as const,
       precio: 500,
       duracion_min: null,
       vigencia_dias: null,
@@ -657,19 +674,143 @@ describe('crearApiSupabaseCon · panel interno', () => {
         { servicio_id: 's2', cantidad: 1 },
         { servicio_id: 's1', cantidad: 1 },
       ],
+    };
+    const TABLAS_POR_RPC = ['paquetes', 'paquete_servicios', 'horarios', 'recetas_servicio'];
+
+    it('guardarPaquete llama guardar_paquete con p_id, p_datos y p_items (la base arma el slug y junta repetidos)', async () => {
+      const { api, llamadas } = apiCon((l) => (l.rpc === 'guardar_paquete' ? { data: 'p1' } : undefined));
+      await api.admin.guardarPaquete({ ...PAQUETE, id: 'p1' });
+      expect(llamadas).toHaveLength(1);
+      expect(llamadas[0].rpc).toBe('guardar_paquete');
+      expect(llamadas[0].args).toEqual({
+        p_id: 'p1',
+        p_datos: {
+          slug: null,
+          nombre: 'Combo Piernas y Axila',
+          descripcion: null,
+          tipo: 'combo',
+          precio: 500,
+          duracion_min: null,
+          vigencia_dias: null,
+          activo: true,
+          orden: 1,
+        },
+        p_items: [
+          { servicio_id: 's1', cantidad: 1 },
+          { servicio_id: 's2', cantidad: 1 },
+          { servicio_id: 's1', cantidad: 1 },
+        ],
+      });
+
+      // Paquete nuevo: p_id null (la base genera el id).
+      llamadas.length = 0;
+      await api.admin.guardarPaquete({ ...PAQUETE, items: [{ servicio_id: 's3', cantidad: 2 }] });
+      expect(llamadas[0].args).toMatchObject({ p_id: null, p_items: [{ servicio_id: 's3', cantidad: 2 }] });
     });
-    const paq = llamadas.find((l) => l.tabla === 'paquetes');
-    expect(ops(paq, 'update')[0][0]).toMatchObject({ slug: 'combo-piernas-y-axila', precio: 500 });
-    const [ups, del] = llamadas.filter((l) => l.tabla === 'paquete_servicios');
-    expect(ops(ups, 'upsert')[0]).toEqual([
-      [
-        { paquete_id: 'p1', servicio_id: 's1', cantidad: 2 },
-        { paquete_id: 'p1', servicio_id: 's2', cantidad: 1 },
-      ],
-      { onConflict: 'paquete_id,servicio_id' },
-    ]);
-    expect(ops(del, 'delete')).toHaveLength(1);
-    expect(ops(del, 'not')).toEqual([['servicio_id', 'in', '(s1,s2)']]);
+
+    it('guardarPaquete deja que la base valide y muestra su mensaje tal cual (igual que la demo)', async () => {
+      const { api, llamadas } = apiCon((l) =>
+        l.rpc === 'guardar_paquete' ? { error: { code: 'P0001', message: 'Escribe el nombre del paquete.' }, data: null, status: 400 } : undefined,
+      );
+      await expect(api.admin.guardarPaquete({ ...PAQUETE, nombre: ' ', items: [{ servicio_id: '', cantidad: 0 }] })).rejects.toThrow(
+        'Escribe el nombre del paquete.',
+      );
+      expect(llamadas).toHaveLength(1);
+      expect(llamadas[0].args).toMatchObject({ p_datos: { nombre: '' }, p_items: [{ servicio_id: null, cantidad: 0 }] });
+    });
+
+    it('guardarHorarios llama guardar_horarios con los rangos en HH:MM', async () => {
+      const { api, llamadas } = apiCon();
+      await api.admin.guardarHorarios('a', [
+        { id: 'h1', dia_semana: 2, hora_inicio: '10:00:00', hora_fin: '14:00' },
+        { dia_semana: 2, hora_inicio: '15:00', hora_fin: '19:00:00' },
+      ]);
+      expect(llamadas).toHaveLength(1);
+      expect(llamadas[0]).toMatchObject({
+        rpc: 'guardar_horarios',
+        args: {
+          p_personal_id: 'a',
+          p_horarios: [
+            { dia_semana: 2, hora_inicio: '10:00', hora_fin: '14:00' },
+            { dia_semana: 2, hora_inicio: '15:00', hora_fin: '19:00' },
+          ],
+        },
+      });
+
+      // Lista vacía: quita todos los rangos.
+      llamadas.length = 0;
+      await api.admin.guardarHorarios('a', []);
+      expect(llamadas[0].args).toEqual({ p_personal_id: 'a', p_horarios: [] });
+    });
+
+    it('guardarHorarios deja que la base valide y muestra su mensaje tal cual (igual que la demo)', async () => {
+      const { api, llamadas } = apiCon((l) =>
+        l.rpc === 'guardar_horarios' ? { error: { code: 'P0001', message: 'La salida debe ser después de la entrada.' }, data: null, status: 400 } : undefined,
+      );
+      await expect(api.admin.guardarHorarios('a', [{ dia_semana: 2, hora_inicio: '19:00', hora_fin: '10:00' }])).rejects.toThrow(
+        'La salida debe ser después de la entrada.',
+      );
+      expect(llamadas).toHaveLength(1);
+      expect(llamadas[0].args).toEqual({ p_personal_id: 'a', p_horarios: [{ dia_semana: 2, hora_inicio: '19:00', hora_fin: '10:00' }] });
+    });
+
+    it('guardarReceta llama guardar_receta con las líneas tal cual (la base junta repetidos y valida)', async () => {
+      const { api, llamadas } = apiCon();
+      await api.admin.guardarReceta('s1', [
+        { producto_id: 'cera', cantidad: 20, notas: null },
+        { producto_id: 'banda', cantidad: 1, notas: ' ' },
+        { producto_id: 'cera', cantidad: 10.0004, notas: ' tibia ' },
+      ]);
+      expect(llamadas).toHaveLength(1);
+      expect(llamadas[0]).toMatchObject({
+        rpc: 'guardar_receta',
+        args: {
+          p_servicio_id: 's1',
+          p_items: [
+            { producto_id: 'cera', cantidad: 20, notas: null },
+            { producto_id: 'banda', cantidad: 1, notas: null },
+            { producto_id: 'cera', cantidad: 10.0004, notas: 'tibia' },
+          ],
+        },
+      });
+
+      // Receta vacía: se queda sin productos.
+      llamadas.length = 0;
+      await api.admin.guardarReceta('s1', []);
+      expect(llamadas[0].args).toEqual({ p_servicio_id: 's1', p_items: [] });
+
+      // Una cantidad inválida la rechaza la base, con su texto.
+      const mala = apiCon(() => ({ error: { code: 'P0001', message: 'La cantidad de cada producto debe ser mayor a cero.' }, data: null, status: 400 }));
+      await expect(mala.api.admin.guardarReceta('s1', [{ producto_id: 'cera', cantidad: 0 }])).rejects.toThrow(
+        'La cantidad de cada producto debe ser mayor a cero.',
+      );
+    });
+
+    it('no escriben directo en paquetes, paquete_servicios, horarios ni recetas_servicio', async () => {
+      const { api, llamadas } = apiCon();
+      await api.admin.guardarPaquete({ ...PAQUETE, id: 'p1' });
+      await api.admin.guardarPaquete(PAQUETE);
+      await api.admin.guardarHorarios('a', [{ dia_semana: 1, hora_inicio: '10:00', hora_fin: '19:00' }]);
+      await api.admin.guardarReceta('s1', [{ producto_id: 'cera', cantidad: 20 }]);
+      expect(llamadas.map((l) => l.rpc)).toEqual(['guardar_paquete', 'guardar_paquete', 'guardar_horarios', 'guardar_receta']);
+      expect(llamadas.filter((l) => l.tabla && TABLAS_POR_RPC.includes(l.tabla))).toEqual([]);
+    });
+
+    it('un error se muestra tal cual, sin pedir volver a guardar (no hay guardados a medias)', async () => {
+      const SIN_RED = () => {
+        throw new TypeError('Failed to fetch');
+      };
+      const red = apiCon(SIN_RED);
+      await expect(red.api.admin.guardarPaquete(PAQUETE)).rejects.toThrow(new ErrorOpalo(M.red));
+      await expect(red.api.admin.guardarHorarios('a', [])).rejects.toThrow(new ErrorOpalo(M.red));
+      await expect(red.api.admin.guardarReceta('s1', [])).rejects.toThrow(new ErrorOpalo(M.red));
+
+      const negocio = apiCon(() => ({ error: { code: 'P0001', message: 'Mensaje de la base.' }, data: null, status: 400 }));
+      await expect(negocio.api.admin.guardarHorarios('a', [])).rejects.toMatchObject({ message: 'Mensaje de la base.', codigo: 'P0001' });
+
+      const permiso = apiCon(() => ({ error: { code: '42501', message: 'permission denied for function guardar_paquete' }, data: null, status: 403 }));
+      await expect(permiso.api.admin.guardarPaquete(PAQUETE)).rejects.toThrow(M.permiso);
+    });
   });
 
   it('una edición que RLS filtra (0 filas) se reporta como falta de permiso', async () => {
@@ -701,128 +842,72 @@ describe('crearApiSupabaseCon · panel interno', () => {
     ).rejects.toThrow(M.permiso);
   });
 
-  it('guardarHorarios inserta los nuevos y luego borra los anteriores', async () => {
-    const { api, llamadas } = apiCon((l) =>
-      l.tabla === 'horarios' && ops(l, 'select').length ? { data: [{ id: 'h-viejo' }] } : undefined,
-    );
-    await api.admin.guardarHorarios('a', [{ dia_semana: 2, hora_inicio: '10:00:00', hora_fin: '19:00' }]);
-    const hs = llamadas.filter((l) => l.tabla === 'horarios');
-    expect(ops(hs[1], 'insert')[0][0]).toEqual([{ personal_id: 'a', dia_semana: 2, hora_inicio: '10:00', hora_fin: '19:00' }]);
-    expect(ops(hs[2], 'in')).toEqual([['id', ['h-viejo']]]);
-    await expect(api.admin.guardarHorarios('a', [{ dia_semana: 2, hora_inicio: '19:00', hora_fin: '10:00' }])).rejects.toThrow(
-      'La hora de salida debe ser después de la de entrada.',
-    );
-  });
-
-  it('guardarHorarios conserva los rangos que no cambian y limpia los repetidos', async () => {
-    const previos = [
-      { id: 'h-mar', dia_semana: 2, hora_inicio: '10:00:00', hora_fin: '19:00:00' },
-      { id: 'h-mar-copia', dia_semana: 2, hora_inicio: '10:00:00', hora_fin: '19:00:00' },
-      { id: 'h-mie', dia_semana: 3, hora_inicio: '10:00:00', hora_fin: '19:00:00' },
-    ];
-    const { api, llamadas } = apiCon((l) => (l.tabla === 'horarios' && ops(l, 'select').length ? { data: previos } : undefined));
-    await api.admin.guardarHorarios('a', [
-      { dia_semana: 2, hora_inicio: '10:00', hora_fin: '19:00' },
-      { dia_semana: 3, hora_inicio: '10:00', hora_fin: '18:00' },
-      { dia_semana: 3, hora_inicio: '10:00', hora_fin: '18:00' },
-    ]);
-    const hs = llamadas.filter((l) => l.tabla === 'horarios');
-    expect(hs).toHaveLength(3);
-    expect(ops(hs[1], 'insert')[0][0]).toEqual([{ personal_id: 'a', dia_semana: 3, hora_inicio: '10:00', hora_fin: '18:00' }]);
-    expect(ops(hs[2], 'in')).toEqual([['id', ['h-mar-copia', 'h-mie']]]);
-
-    // Sin cambios: no se escribe nada.
-    const sinCambios = apiCon((l) => (l.tabla === 'horarios' && ops(l, 'select').length ? { data: previos.slice(0, 1) } : undefined));
-    await sinCambios.api.admin.guardarHorarios('a', [{ dia_semana: 2, hora_inicio: '10:00', hora_fin: '19:00' }]);
-    expect(sinCambios.llamadas).toHaveLength(1);
-  });
-
-  describe('guardados de varios pasos que fallan a medias', () => {
-    const SIN_RED = () => {
-      throw new TypeError('Failed to fetch');
+  describe('notas internas de la clienta (ESPEC §5.1)', () => {
+    const RESUMEN = {
+      id: CLIENTE_ID,
+      nombre: 'Mariana',
+      apellidos: 'López',
+      telefono: null,
+      email: null,
+      fecha_nacimiento: '1995-04-12',
+      tiene_cuenta: true,
+      citas_completadas: 1,
+      ultima_visita: null,
+      proxima_cita: null,
+      total_pagado: '0',
+      creado_en: '2026-10-01T00:00:00Z',
+      es_personal: false,
     };
-    const A_MEDIAS = 'Solo se guardó una parte de los cambios: vuelve a guardar para completarlos.';
-    const PAQUETE = {
-      slug: 'combo',
-      nombre: 'Combo',
-      descripcion: null,
-      tipo: 'combo' as const,
-      precio: 500,
-      duracion_min: null,
-      vigencia_dias: null,
-      activo: true,
-      orden: 1,
-      items: [{ servicio_id: 's1', cantidad: 1 }],
-    };
-    const esBorrado = (l: Llamada) => ops(l, 'delete').length > 0;
-    const esUpsert = (l: Llamada) => ops(l, 'upsert').length > 0;
 
-    it('guardarHorarios: si no se pudieron quitar los rangos viejos, pide volver a guardar', async () => {
-      const { api } = apiCon((l) => {
-        if (l.tabla !== 'horarios') return undefined;
-        if (ops(l, 'select').length) return { data: [{ id: 'h-viejo', dia_semana: 2, hora_inicio: '10:00:00', hora_fin: '19:00:00' }] };
-        if (esBorrado(l)) SIN_RED();
+    it('getExpediente lee las notas en v_clientes_notas y nunca consulta clientes', async () => {
+      const { api, llamadas } = apiCon((l) => {
+        if (l.tabla === 'v_clientes_resumen') return { data: RESUMEN };
+        if (l.tabla === 'v_clientes_notas') return { data: { id: CLIENTE_ID, notas_internas: 'Piel sensible' } };
         return undefined;
       });
-      const e = await api.admin.guardarHorarios('a', [{ dia_semana: 2, hora_inicio: '10:00', hora_fin: '18:00' }]).catch((x: unknown) => x);
-      expect(e).toBeInstanceOf(ErrorOpalo);
-      expect((e as ErrorOpalo).message).toBe(`${M.red} ${A_MEDIAS}`);
-      expect((e as ErrorOpalo).codigo).toBe('red');
+      const x = await api.admin.getExpediente(CLIENTE_ID);
+      expect(x.cliente).toMatchObject({ id: CLIENTE_ID, notas_internas: 'Piel sensible', es_personal: false, fecha_nacimiento: '1995-04-12' });
+      expect(llamadas.some((l) => l.tabla === 'clientes')).toBe(false);
+      const notas = llamadas.find((l) => l.tabla === 'v_clientes_notas');
+      expect(ops(notas, 'select')).toEqual([['id, notas_internas']]);
+      expect(ops(notas, 'eq')).toEqual([['id', CLIENTE_ID]]);
     });
 
-    it('guardarHorarios: si sólo había que borrar, el error es el de siempre', async () => {
-      const { api } = apiCon((l) => {
-        if (l.tabla !== 'horarios') return undefined;
-        if (ops(l, 'select').length) return { data: [{ id: 'h-viejo', dia_semana: 2, hora_inicio: '10:00:00', hora_fin: '19:00:00' }] };
-        return SIN_RED();
-      });
-      await expect(api.admin.guardarHorarios('a', [])).rejects.toThrow(new ErrorOpalo(M.red));
+    it('getExpediente: sin fila en v_clientes_notas, notas_internas es null', async () => {
+      const { api } = apiCon((l) => (l.tabla === 'v_clientes_resumen' ? { data: RESUMEN } : undefined));
+      expect((await api.admin.getExpediente(CLIENTE_ID)).cliente.notas_internas).toBeNull();
     });
 
-    it('guardarReceta: si falla el borrado de lo que sobra, pide volver a guardar', async () => {
-      const { api } = apiCon((l) => (l.tabla === 'recetas_servicio' && esBorrado(l) ? SIN_RED() : undefined));
-      await expect(api.admin.guardarReceta('s1', [{ producto_id: 'cera', cantidad: 20, notas: null }])).rejects.toThrow(`${M.red} ${A_MEDIAS}`);
-      const vacia = apiCon((l) => (l.tabla === 'recetas_servicio' ? SIN_RED() : undefined));
-      await expect(vacia.api.admin.guardarReceta('s1', [])).rejects.toThrow(new ErrorOpalo(M.red));
+    it('guardarNotasCliente actualiza clientes sin pedir la fila de vuelta (return=minimal)', async () => {
+      const { api, llamadas } = apiCon((l) => (l.tabla === 'clientes' ? { data: null, count: 1, status: 204 } : undefined));
+      await api.admin.guardarNotasCliente(CLIENTE_ID, '  Piel sensible ');
+      expect(llamadas).toHaveLength(1);
+      const [u] = llamadas;
+      expect(u.tabla).toBe('clientes');
+      expect(u.ops.map(([n]) => n)).toEqual(['update', 'eq']);
+      expect(ops(u, 'update')[0]).toEqual([{ notas_internas: 'Piel sensible' }, { count: 'exact' }]);
+      expect(ops(u, 'eq')).toEqual([['id', CLIENTE_ID]]);
+      expect(ops(u, 'select')).toEqual([]);
+
+      // Notas vacías → null. Sin conteo del servidor se da por guardado.
+      const sinConteo = apiCon((l) => (l.tabla === 'clientes' ? { data: null, status: 204 } : undefined));
+      await sinConteo.api.admin.guardarNotasCliente(CLIENTE_ID, '   ');
+      expect(ops(sinConteo.llamadas[0], 'update')[0][0]).toEqual({ notas_internas: null });
     });
 
-    it('guardarPaquete (edición): si fallan los servicios o el borrado, pide volver a guardar', async () => {
-      for (const falla of [esUpsert, esBorrado]) {
-        const { api } = apiCon((l) => {
-          if (l.tabla === 'paquetes') return { data: { id: 'p1' } };
-          if (l.tabla === 'paquete_servicios' && falla(l)) return SIN_RED();
+    it('guardarNotasCliente: 0 filas → la clienta no existe, o falta de permiso', async () => {
+      const ninguna = (personal: boolean) =>
+        apiCon((l) => {
+          if (l.tabla === 'clientes') return { data: null, count: 0, status: 204 };
+          if (l.rpc === 'es_personal') return { data: personal };
           return undefined;
         });
-        await expect(api.admin.guardarPaquete({ ...PAQUETE, id: 'p1' })).rejects.toThrow(`${M.red} ${A_MEDIAS}`);
-      }
-    });
-
-    it('guardarPaquete (nuevo): si fallan los servicios, quita el paquete recién creado', async () => {
-      const { api, llamadas } = apiCon((l) => {
-        if (l.tabla === 'paquetes' && !esBorrado(l)) return { data: { id: 'p-nuevo' } };
-        if (l.tabla === 'paquete_servicios') return { error: { code: '23503', message: 'insert or update violates foreign key constraint' }, status: 409 };
-        return undefined;
-      });
-      await expect(api.admin.guardarPaquete(PAQUETE)).rejects.toThrow(new ErrorOpalo('Uno de los datos elegidos ya no existe.'));
-      const quitar = llamadas.find((l) => l.tabla === 'paquetes' && esBorrado(l));
-      expect(ops(quitar, 'eq')).toEqual([['id', 'p-nuevo']]);
-      expect(llamadas.filter((l) => l.tabla === 'paquete_servicios')).toHaveLength(1);
-    });
-
-    it('guardarPaquete (nuevo): si tampoco se puede quitar, explica cómo terminarlo', async () => {
-      const { api } = apiCon((l) => {
-        if (l.tabla === 'paquetes' && !esBorrado(l)) return { data: { id: 'p-nuevo' } };
-        return SIN_RED();
-      });
-      await expect(api.admin.guardarPaquete(PAQUETE)).rejects.toThrow(
-        `${M.red} El paquete se creó sin sus servicios: cierra este formulario, ábrelo desde la lista y vuelve a guardar.`,
-      );
-    });
-
-    it('guardarPaquete (nuevo): no hay borrado de servicios sobrantes', async () => {
-      const { api, llamadas } = apiCon((l) => (l.tabla === 'paquetes' ? { data: { id: 'p-nuevo' } } : undefined));
-      await api.admin.guardarPaquete(PAQUETE);
-      expect(llamadas.filter((l) => l.tabla === 'paquete_servicios').map((l) => l.ops[0][0])).toEqual(['upsert']);
+      const noExiste = ninguna(true);
+      noExiste.estado.sesion = SESION;
+      await expect(noExiste.api.admin.guardarNotasCliente(CLIENTE_ID, 'x')).rejects.toThrow('No encontramos a esa clienta.');
+      const sinPermiso = ninguna(false);
+      sinPermiso.estado.sesion = SESION;
+      await expect(sinPermiso.api.admin.guardarNotasCliente(CLIENTE_ID, 'x')).rejects.toThrow(M.permiso);
     });
   });
 
@@ -831,15 +916,245 @@ describe('crearApiSupabaseCon · panel interno', () => {
       l.tabla === 'v_clientes_resumen'
         ? {
             data: [
-              { id: '1', nombre: 'María', apellidos: 'Peña', telefono: null, email: null, citas_completadas: '2', total_pagado: '300.00', creado_en: '2026-10-01T00:00:00Z' },
-              { id: '2', nombre: 'Marco', apellidos: null, telefono: null, email: null, creado_en: '2026-10-01T00:00:00Z' },
+              { id: '1', nombre: 'María', apellidos: 'Peña', telefono: null, email: null, citas_completadas: '2', total_pagado: '300.00', creado_en: '2026-10-01T00:00:00Z', es_personal: false },
+              { id: '2', nombre: 'Marco', apellidos: null, telefono: null, email: null, creado_en: '2026-10-01T00:00:00Z', es_personal: true },
+              { id: '3', nombre: 'Mariela', apellidos: null, telefono: null, email: null, creado_en: '2026-10-01T00:00:00Z', es_personal: true },
             ],
           }
         : undefined,
     );
-    const r = await api.admin.getClientes('maria');
-    expect(r.map((c) => c.id)).toEqual(['1']);
-    expect(r[0]).toMatchObject({ citas_completadas: 2, total_pagado: 300 });
-    expect(ops(llamadas[0], 'or')[0][0]).toContain('nombre.ilike.*m_r__*');
+    const r = await api.admin.getClientes('mari');
+    expect(r.map((c) => c.id)).toEqual(['1', '3']);
+    expect(r[0]).toMatchObject({ citas_completadas: 2, total_pagado: 300, es_personal: false });
+    expect(r[1].es_personal).toBe(true);
+    expect(ops(llamadas[0], 'or')[0][0]).toContain('nombre.ilike.*m_r_*');
+    expect(ops(llamadas[0], 'select')[0][0]).toContain('es_personal');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GRANT por columnas y tablas que anon no lee (ESPEC §5.1, migración 1100_seguridad)
+// ---------------------------------------------------------------------------
+
+describe('el adaptador respeta los permisos por columna de la base', () => {
+  /** Columnas que la sesión (authenticated) ya no puede leer. */
+  const NO_LEGIBLES: Record<string, string[]> = {
+    clientes: ['notas_internas'],
+    citas: ['notas_internas', 'creada_por'],
+    pagos: ['recibido_por', 'notas'],
+  };
+  /** Tablas que anon no lee: el sitio público usa personal_publico y capacitaciones_publicas. */
+  const SOLO_CON_SESION = ['personal', 'capacitaciones', 'horarios', 'cabinas', 'personal_servicios'];
+
+  /** Columnas de primer nivel de un select de PostgREST ('a, b, rel(c, d)' → ['a', 'b', 'rel']). */
+  function columnas(sel: string): string[] {
+    let nivel = 0;
+    let actual = '';
+    const r: string[] = [];
+    for (const ch of sel) {
+      if (ch === '(') nivel++;
+      if (ch === ')') nivel--;
+      if (ch === ',' && nivel === 0) {
+        r.push(actual.trim());
+        actual = '';
+      } else if (nivel === 0 && ch !== ')') actual += ch;
+    }
+    r.push(actual.trim());
+    return r.map((c) => c.replace(/^.*:/, '').replace(/::.*$/, '').trim()).filter(Boolean);
+  }
+
+  const FIRMA = { nombre_firmante: 'Mariana López', firma_svg: '<svg/>' };
+
+  function publicas(api: OpaloApi): (() => Promise<unknown>)[] {
+    return [
+      () => api.getConfiguracion(),
+      () => api.getCatalogo(),
+      () => api.getEquipo(),
+      () => api.getPoliticasVigentes(),
+      () => api.getContraindicaciones(),
+      () => api.getProductosTienda(),
+      () => api.getHorariosDisponibles('2026-11-03', 60),
+      () => api.getDuracionReserva([{ servicio_id: 's1' }]),
+    ];
+  }
+
+  function todas(api: OpaloApi): (() => Promise<unknown>)[] {
+    const a = api.admin;
+    return [
+      ...publicas(api),
+      () => api.getCatalogo({ incluirInactivos: true }),
+      () => api.getSesion(),
+      () =>
+        api.actualizarMisDatos({ nombre: 'Mariana', apellidos: null, telefono: null, fecha_nacimiento: '1995-04-12', acepta_promociones: true }),
+      () => api.getMiFicha(),
+      () => api.getMisAceptaciones(),
+      () => api.reservarCita({ items: [{ servicio_id: 's1' }], inicio: '2026-11-03T16:00:00Z', firma: FIRMA }),
+      () => api.getMisCitas(),
+      () => api.firmarConsentimientoCita('c1', FIRMA),
+      () => api.getMisPedidos(),
+      () => api.getMisCreditos(),
+      () => api.getMisConsentimientos(),
+      () => a.getResumenHoy(),
+      () => a.getAgenda('2026-11-02', '2026-11-08'),
+      () => a.getBloqueos('2026-11-02', '2026-11-08'),
+      () => a.guardarBloqueo({ personal_id: null, inicio: '2026-11-02T16:00:00Z', fin: '2026-11-02T18:00:00Z', motivo: 'Junta' }),
+      () => a.guardarBloqueo({ id: 'b1', personal_id: null, inicio: '2026-11-02T16:00:00Z', fin: '2026-11-02T18:00:00Z', motivo: null }),
+      () => a.eliminarBloqueo('b1'),
+      () => a.getClientes(),
+      () => a.getClientes('mari'),
+      () => a.getExpediente(CLIENTE_ID),
+      () => a.crearCliente({ nombre: 'Sofía', apellidos: null, telefono: '4420000000', email: null, fecha_nacimiento: null, notas_internas: 'WhatsApp' }),
+      () => a.guardarNotasCliente(CLIENTE_ID, 'Piel sensible'),
+      () => a.getPedidos(),
+      () => a.getPedidos('pendiente_pago'),
+      () => a.getProductos(),
+      () =>
+        a.guardarProducto({
+          id: 'x1',
+          nombre: 'Cera',
+          marca: null,
+          categoria: 'cera',
+          unidad_medida: 'g',
+          presentacion: null,
+          contenido_presentacion: 800,
+          costo_presentacion: 400,
+          stock_minimo: 200,
+          proveedor_id: null,
+          uso: 'cabina',
+          precio_venta: null,
+          vendible_en_linea: false,
+          activo: true,
+          notas: null,
+        }),
+      () => a.getReposicion(),
+      () => a.getMovimientos('x1', 10),
+      () => a.getProveedores(),
+      () => a.guardarProveedor({ nombre: 'Proveedor', contacto: null, telefono: null, email: null, ciudad: null, notas: null, activo: true }),
+      () => a.getReceta('s1'),
+      () => a.getCostosServicios(),
+      () => a.getCategoriasGasto(),
+      () => a.getGastos('2026-10-01', '2026-10-31'),
+      () =>
+        a.guardarGasto({
+          categoria_id: 'g1',
+          concepto: 'Luz',
+          monto: 800,
+          fecha: '2026-10-08',
+          metodo_pago: null,
+          proveedor: null,
+          comprobante_url: null,
+          recurrente_id: null,
+          notas: null,
+        }),
+      () => a.eliminarGasto('gx'),
+      () => a.getGastosRecurrentes(),
+      () =>
+        a.guardarGastoRecurrente({
+          categoria_id: 'g1',
+          concepto: 'Renta',
+          monto_estimado: 9000,
+          frecuencia: 'mensual',
+          dia_pago: 5,
+          proximo_vencimiento: null,
+          activo: true,
+          notas: null,
+        }),
+      () => a.getGastosPorVencer(),
+      () => a.getResultados(3),
+      () =>
+        a.guardarServicio({
+          categoria_id: 'c1',
+          slug: 'cejas',
+          nombre: 'Cejas',
+          descripcion: null,
+          zonas_incluye: null,
+          duracion_min: null,
+          duracion_primera_vez_min: null,
+          precio: 130,
+          etapa: 'disponible',
+          es_complemento: false,
+          reservable_en_linea: true,
+          vendible_en_linea: true,
+          tipo_consentimiento: null,
+          activo: true,
+          orden: 1,
+        }),
+      () => a.getPersonal(),
+      () =>
+        a.guardarPersonal({
+          slug: 'ana',
+          nombre: 'Ana',
+          titulo: null,
+          bio: null,
+          foto_url: null,
+          color_agenda: '#5C6B3F',
+          activo: true,
+          mostrar_en_sitio: true,
+          orden: 1,
+        }),
+      () =>
+        a.guardarCapacitacion({
+          personal_id: 'a',
+          nombre: 'Cera tibia',
+          institucion: null,
+          tipo: 'curso',
+          fecha: null,
+          horas: null,
+          constancia_url: null,
+          mostrar_en_sitio: true,
+          notas: null,
+        }),
+      () => a.eliminarCapacitacion('k1'),
+      () => a.getPoliticasTodas(),
+    ];
+  }
+
+  async function recorrer(pasos: (() => Promise<unknown>)[]) {
+    for (const paso of pasos) {
+      try {
+        await paso();
+      } catch {
+        // El cliente simulado no siempre devuelve datos completos: aquí sólo importan las consultas.
+      }
+    }
+  }
+
+  it('ningún select pide * (ni select() vacío) ni columnas sin SELECT para la sesión', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { api, llamadas, estado } = apiCon(responderSesion('admin'));
+    estado.sesion = SESION;
+    await recorrer(todas(api));
+    const selects = llamadas.flatMap((l) => ops(l, 'select').map((a) => ({ tabla: l.tabla ?? '', sel: typeof a[0] === 'string' ? a[0] : '' })));
+    expect(selects.length).toBeGreaterThan(40);
+    for (const { tabla, sel } of selects) {
+      expect(sel.trim(), `select vacío en ${tabla}`).not.toBe('');
+      expect(sel, `select con * en ${tabla}`).not.toContain('*');
+      const prohibidas = NO_LEGIBLES[tabla] ?? [];
+      for (const c of columnas(sel)) expect(prohibidas, `${tabla}.${c} no tiene SELECT para authenticated`).not.toContain(c);
+    }
+  });
+
+  it('las vistas internas se piden con las columnas exactas de ESPEC §7', async () => {
+    const { api, llamadas, estado } = apiCon(responderSesion('admin', (l) => (l.rpc === 'es_admin' ? { data: true } : undefined)));
+    estado.sesion = SESION;
+    await recorrer(todas(api));
+    const pedidas = (tabla: string) => new Set(llamadas.filter((l) => l.tabla === tabla).flatMap((l) => ops(l, 'select').map((a) => String(a[0]))));
+    expect([...pedidas('v_clientes_resumen')]).toEqual([
+      'id, nombre, apellidos, telefono, email, fecha_nacimiento, tiene_cuenta, citas_completadas, ultima_visita, proxima_cita, total_pagado, creado_en, es_personal',
+    ]);
+    expect([...pedidas('v_clientes_notas')]).toEqual(['id, notas_internas']);
+    expect([...pedidas('v_reposicion')]).toEqual([
+      'id, nombre, marca, unidad_medida, stock_actual, stock_minimo, faltante, presentacion, contenido_presentacion, presentaciones_sugeridas, costo_estimado, proveedor_nombre',
+    ]);
+    for (const v of ['v_citas_detalle', 'v_pedidos_detalle', 'v_creditos', 'v_costo_servicio', 'v_gastos_por_vencer', 'v_resultado_mensual'])
+      expect(pedidas(v).size, v).toBe(1);
+  });
+
+  it('lo público no lee tablas que anon no puede leer', async () => {
+    const { api, llamadas } = apiCon();
+    await recorrer(publicas(api));
+    expect(llamadas.length).toBeGreaterThan(5);
+    expect(llamadas.filter((l) => l.tabla && SOLO_CON_SESION.includes(l.tabla)).map((l) => l.tabla)).toEqual([]);
+    expect(llamadas.filter((l) => l.tabla?.startsWith('v_'))).toEqual([]);
   });
 });

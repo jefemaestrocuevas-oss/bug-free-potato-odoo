@@ -12,6 +12,11 @@
 .adm-cl-ayuda-modal { margin: 0 0 14px; }
 
 .adm-cl-nombre { font-weight: 700; }
+.adm-cl-pill-equipo { margin-left: 8px; vertical-align: 1px; }
+
+/* «Mostrar cuentas del equipo»: alineada con los campos, área de toque cómoda. */
+.adm-cl-equipo { align-self: flex-end; min-height: 44px; align-items: center; padding: 4px 0; }
+.adm-cl-equipo-ayuda { display: block; margin-top: 2px; }
 .adm-cl-correo { max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Modo tabla: el nombre queda fijo al desplazar horizontalmente. */
@@ -29,4 +34,5 @@
 
 @media (max-width: 719px) {
   .adm-cl-filtros .campo, .adm-cl-filtros .campo:not(.adm-busqueda) { flex: 1 1 100%; min-width: 0; }
+  .adm-cl-equipo { flex: 1 1 100%; }
 }

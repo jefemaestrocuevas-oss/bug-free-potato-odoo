@@ -16,6 +16,7 @@ import {
   serviciosDeCategoria,
 } from '../../components/publico/catalogo';
 import { antesDeApertura, enlaceMapa, useContacto } from '../../components/publico/contacto';
+import { fechaEnTexto } from '../../components/reserva/utilidades';
 import {
   IconoBirrete,
   IconoCalendario,
@@ -36,7 +37,8 @@ export default function Inicio() {
   const contacto = useContacto();
   const catalogo = useAsync(() => api.getCatalogo(), []);
   const equipo = useAsync(() => api.getEquipo(), []);
-  const abre = antesDeApertura();
+  // Fecha de apertura de la configuración (mientras carga, la del catálogo); null = ya no se anuncia.
+  const apertura = antesDeApertura(contacto.fecha_apertura) ? contacto.fecha_apertura : null;
 
   return (
     <div className="inicio">
@@ -45,7 +47,7 @@ export default function Inicio() {
       <section className="ini-hero" aria-labelledby="hero-titulo" data-sin-flotante>
         <div className="contenedor ini-hero-rejilla">
           <div className="ini-hero-texto">
-            <p className="eyebrow">{abre ? 'Spa en Querétaro · Abrimos el 31 de octubre' : 'Spa en Querétaro · Momentum Centro Sur'}</p>
+            <p className="eyebrow">{apertura ? `Spa en Querétaro · Abrimos el ${fechaEnTexto(apertura, false)}` : 'Spa en Querétaro · Momentum Centro Sur'}</p>
             <h1 id="hero-titulo" className="ini-hero-titulo">
               Todo lo que necesitas para consentirte, <em>en un solo lugar</em>
             </h1>
@@ -250,7 +252,7 @@ export default function Inicio() {
               <IconoReloj tam={22} />
               <span>
                 Atención con cita. Consulta los horarios libres al reservar.
-                {abre && <strong className="visitanos-apertura"> Abrimos el 31 de octubre de 2026.</strong>}
+                {apertura && <strong className="visitanos-apertura"> Abrimos el {fechaEnTexto(apertura)}.</strong>}
               </span>
             </p>
             <p className="visitanos-dato">

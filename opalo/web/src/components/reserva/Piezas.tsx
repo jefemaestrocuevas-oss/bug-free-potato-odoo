@@ -1,9 +1,9 @@
 // Piezas compartidas del asistente: indicador de progreso, pie con Atrás/Continuar y resumen vivo.
 import type { ReactNode } from 'react';
 import type { Slot } from '../../lib/api/tipos';
-import { dinero, duracion, fechaLarga, hora } from '../../lib/format';
+import { dinero, duracion, enlaceWhatsApp, fechaLarga, hora } from '../../lib/format';
 import { NOMBRES_PASOS, TOTAL_PASOS, type Paso } from './estado';
-import { notaPago, type Total } from './utilidades';
+import { fechaEnTexto, notaPago, type Total } from './utilidades';
 
 export function Progreso({ paso, maxPaso, onIr }: { paso: Paso; maxPaso: Paso; onIr: (p: Paso) => void }) {
   const pasos = Array.from({ length: TOTAL_PASOS }, (_, i) => (i + 1) as Paso);
@@ -173,3 +173,30 @@ export function ResumenReserva({
   );
 }
 
+
+/**
+ * Fecha de nacimiento ya registrada: la clienta no la puede cambiar (la corrige el equipo), así que se
+ * muestra como dato fijo con el camino para avisar de un error.
+ */
+export function FechaNacimientoFija({ id, fecha, telefono }: { id: string; fecha: string; telefono: string }) {
+  return (
+    <div className="campo">
+      <span className="etiqueta">Fecha de nacimiento</span>
+      <p className="rv-dato-fijo" id={id}>
+        {fechaEnTexto(fecha)}
+      </p>
+      <span className="ayuda">
+        Si hay un error,{' '}
+        <a
+          href={enlaceWhatsApp(telefono, `Hola, Ópalo. Mi fecha de nacimiento registrada (${fechaEnTexto(fecha)}) no es correcta.`)}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          escríbenos por WhatsApp
+          <span className="sr-only"> (se abre en otra pestaña)</span>
+        </a>
+        .
+      </span>
+    </div>
+  );
+}

@@ -89,13 +89,32 @@ describe('Resultados', () => {
     expect(kpis.find((k) => k.textContent?.startsWith('Propinas'))!.textContent).toContain('Son de quien atiende, no del spa');
 
     const tabla = contenedor.querySelector('#res-tabla')!;
-    expect(tabla.querySelectorAll('tbody tr')).toHaveLength(12);
+    // Los 10 meses en cero antes del primero con actividad no se muestran.
+    expect(tabla.querySelectorAll('tbody tr')).toHaveLength(2);
+    expect(contenedor.textContent).toContain('Últimos 2 meses');
     // El mes más reciente va primero.
     expect(tabla.querySelector('tbody tr')!.textContent).toContain('en curso');
     const total = tabla.querySelector('tfoot tr')!.textContent!;
+    expect(total).toContain('Total 2 meses');
     expect(total).toContain('$6,000');
     expect(total).toContain('$500.50');
     expect(total).toContain('$2,799.50');
     expect(total).toContain('12');
+    // Utilidad también va como segunda columna (la que se ve en pantallas angostas).
+    const encabezados = [...tabla.querySelectorAll('thead th')].map((th) => th.textContent?.trim());
+    expect(encabezados.slice(0, 2)).toEqual(['Mes', 'Utilidad']);
+  });
+
+  it('un mes sin movimientos entre dos con actividad sí se muestra', async () => {
+    admin.getResultados.mockResolvedValue(
+      doceMeses({
+        [sumarMeses(ACTUAL, -2)]: { gastos: 500, utilidad: -500, flujo: -500 },
+        [ACTUAL]: { ingresos: 800, utilidad: 800, flujo: 800 },
+      }),
+    );
+    await montar();
+    const filas = [...contenedor.querySelectorAll('#res-tabla tbody tr')];
+    expect(filas).toHaveLength(3);
+    expect(filas[1].className).toContain('res-fila-sin');
   });
 });

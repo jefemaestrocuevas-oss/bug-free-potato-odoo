@@ -168,7 +168,7 @@ function TarjetaCita({ cita, config, proxima = false, onCancelar }: { cita: Cita
         titulo: `Cita en ${config.nombre_negocio}: ${unirConY(servicios)}`,
         descripcion: [
           `Te atiende ${cita.personal_nombre}.`,
-          `Llega 10 minutos antes. Tolerancia de ${config.tolerancia_retraso_min} minutos.`,
+          `Llega puntual: tienes ${config.tolerancia_retraso_min} minutos de tolerancia.`,
           `Para cancelar, hazlo con ${config.horas_cancelacion} horas de anticipación o escríbenos por WhatsApp al ${telefonoBonito(config.telefono_whatsapp)}.`,
         ].join('\n'),
         lugar: config.direccion,

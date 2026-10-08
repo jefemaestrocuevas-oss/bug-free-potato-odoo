@@ -48,6 +48,8 @@ export default function Clientes() {
   const q = params.get('q') ?? '';
   const op = params.get('orden') as Orden | null;
   const orden: Orden = op && op in ORDENAR ? op : 'nombre';
+  // Las cuentas del equipo (rol personal o admin) también tienen fila de clienta; por defecto no se listan.
+  const conEquipo = params.get('equipo') === '1';
   const [texto, setTexto] = useState(q);
   const [nueva, setNueva] = useState(false);
 
@@ -76,8 +78,24 @@ export default function Clientes() {
   }, [q]);
 
   const clientes = useAsync(() => api.admin.getClientes(q || undefined), [q]);
-  const lista = useMemo(() => [...(clientes.datos ?? [])].sort(ORDENAR[orden]), [clientes.datos, orden]);
+  const deEquipo = useMemo(() => (clientes.datos ?? []).filter((c) => c.es_personal).length, [clientes.datos]);
+  const lista = useMemo(
+    () => (clientes.datos ?? []).filter((c) => conEquipo || !c.es_personal).sort(ORDENAR[orden]),
+    [clientes.datos, orden, conEquipo],
+  );
+  const ocultas = conEquipo ? 0 : deEquipo;
   const escribiendo = texto.trim() !== q;
+
+  const cambiarEquipo = (v: boolean) =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        if (v) n.set('equipo', '1');
+        else n.delete('equipo');
+        return n;
+      },
+      { replace: true },
+    );
 
   const cambiarOrden = (v: Orden) =>
     setParams(
@@ -129,6 +147,17 @@ export default function Clientes() {
             ))}
           </select>
         </div>
+        {(deEquipo > 0 || conEquipo) && (
+          <label className="check adm-cl-equipo">
+            <input type="checkbox" checked={conEquipo} onChange={(e) => cambiarEquipo(e.target.checked)} aria-describedby="cl-equipo-ayuda" />
+            <span>
+              Mostrar cuentas del equipo
+              <span className="ayuda adm-cl-equipo-ayuda" id="cl-equipo-ayuda">
+                Personal y socios que también tienen expediente.
+              </span>
+            </span>
+          </label>
+        )}
       </div>
 
       <MensajeError error={clientes.error} onReintentar={clientes.recargar} />
@@ -136,7 +165,17 @@ export default function Clientes() {
 
       {clientes.datos &&
         (lista.length === 0 ? (
-          q ? (
+          ocultas > 0 ? (
+            <Vacio titulo={q ? `Ninguna clienta con “${q}”` : 'Aún no hay clientas'}>
+              <p className="adm-sin-margen">
+                {ocultas === 1 ? 'Sólo hay una cuenta del equipo' : `Sólo hay ${ocultas} cuentas del equipo`}
+                {q ? ' que coincide' + (ocultas === 1 ? '' : 'n') : ''}.
+              </p>
+              <button type="button" className="btn btn-secundario btn-sm adm-cl-vacio-boton" onClick={() => cambiarEquipo(true)}>
+                Mostrar cuentas del equipo
+              </button>
+            </Vacio>
+          ) : q ? (
             <Vacio titulo={`No encontramos a nadie con “${q}”`}>
               <p className="adm-sin-margen">Revisa cómo lo escribiste o regístrala como clienta nueva.</p>
               <button type="button" className="btn btn-secundario btn-sm adm-cl-vacio-boton" onClick={() => setNueva(true)}>
@@ -151,6 +190,8 @@ export default function Clientes() {
             <p className="ayuda adm-cl-conteo" aria-live="polite">
               {lista.length} {lista.length === 1 ? 'clienta' : 'clientas'}
               {q ? ` para “${q}”` : ''}
+              {ocultas > 0 ? ` · ${ocultas} ${ocultas === 1 ? 'cuenta del equipo oculta' : 'cuentas del equipo ocultas'}` : ''}
+              {conEquipo && deEquipo > 0 ? ` · ${deEquipo === 1 ? 'una es cuenta del equipo' : `${deEquipo} son cuentas del equipo`}` : ''}
             </p>
             <div className="tabla-envoltura adm-clientas-envoltura">
               <table className="tabla adm-cl-tabla adm-clientas-adaptable">
@@ -172,6 +213,7 @@ export default function Clientes() {
                         <Link to={`/admin/clientes/${c.id}`} className="adm-cl-nombre">
                           {nombreCompleto(c)}
                         </Link>
+                        {c.es_personal && <span className="pill pill-info adm-cl-pill-equipo">Equipo</span>}
                         <span className="adm-sub adm-cl-correo">{c.email ?? 'Sin correo'}</span>
                       </td>
                       <td data-etiqueta="WhatsApp">

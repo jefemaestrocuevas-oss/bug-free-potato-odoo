@@ -26,11 +26,19 @@ import {
   aResultadoReserva,
   bool,
   COLUMNAS_CAPACITACION,
+  COLUMNAS_CITA_DETALLE,
+  COLUMNAS_CLIENTE_RESUMEN,
+  COLUMNAS_COSTO_SERVICIO,
+  COLUMNAS_CREDITO,
   COLUMNAS_GASTO,
+  COLUMNAS_GASTO_POR_VENCER,
   COLUMNAS_GASTO_RECURRENTE,
+  COLUMNAS_PEDIDO_DETALLE,
   COLUMNAS_PERSONAL,
   COLUMNAS_PRODUCTO,
   COLUMNAS_PROVEEDOR,
+  COLUMNAS_REPOSICION,
+  COLUMNAS_RESULTADO_MENSUAL,
   compararPoliticas,
   completarMeses,
   esFecha,
@@ -49,7 +57,7 @@ import {
 import type { Contexto } from './contexto';
 import { consultaConsentimientos, consultaFichaVigente } from './clienta';
 import { COLUMNAS_POLITICA, itemsReserva } from './publico';
-import { aErrorOpalo, MSG_SUPABASE } from './errores';
+import { MSG_SUPABASE } from './errores';
 
 type ApiAdmin = OpaloApi['admin'];
 type Nivel = 'personal' | 'admin';
@@ -58,11 +66,7 @@ const MSG_ADMIN = {
   nombreClienta: 'Escribe el nombre de la clienta.',
   clienteNoExiste: 'No encontramos a esa clienta.',
   monto: 'El monto debe ser mayor a cero.',
-  cantidad: 'Revisa las cantidades.',
-  rangoHorario: 'La hora de salida debe ser después de la de entrada.',
   rangoBloqueo: 'El fin del bloqueo debe ser después del inicio.',
-  aMedias: 'Solo se guardó una parte de los cambios: vuelve a guardar para completarlos.',
-  paqueteSinServicios: 'El paquete se creó sin sus servicios: cierra este formulario, ábrelo desde la lista y vuelve a guardar.',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -141,12 +145,6 @@ const numeroONulo = (v: unknown): number | null => {
 
 const porNombre = (a: { nombre: string }, b: { nombre: string }) => a.nombre.localeCompare(b.nombre, 'es');
 
-/** Error de un paso que falló cuando otra petición ya había escrito: lo dice y pide volver a guardar. */
-function errorAMedias(e: unknown, aviso: string = MSG_ADMIN.aMedias): ErrorOpalo {
-  const err = aErrorOpalo(e);
-  return new ErrorOpalo(`${err.message} ${aviso}`, err.codigo);
-}
-
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
@@ -166,25 +164,27 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
     return f;
   }
 
+  /**
+   * Actualiza por id sin pedir la fila de vuelta (return=minimal): sirve para columnas que la sesión
+   * puede escribir pero no leer (clientes.notas_internas, ESPEC §5.1). El conteo de filas afectadas
+   * dice si RLS la filtró o si ya no existe.
+   */
+  async function actualizarSinDevolver(
+    tabla: string,
+    datos: Record<string, unknown>,
+    id: string,
+    nivel: Nivel,
+  ): Promise<ErrorOpalo | null> {
+    const n = await ctx.afectadas(sb.from(tabla).update(datos, { count: 'exact' }).eq('id', id));
+    return n === 0 ? ctx.errorSinFilas(nivel) : null;
+  }
+
   /** Borra por id. Si no borró nada: error si fue por permisos; si ya no existía, no pasa nada. */
   async function eliminarFila(tabla: string, id: string, nivel: Nivel): Promise<void> {
     const fs = await ctx.filas(sb.from(tabla).delete().eq('id', id).select('id'));
     if (fs.length) return;
     const e = await ctx.errorSinFilas(nivel);
     if (e.codigo !== 'sin_filas') throw e;
-  }
-
-  /**
-   * Paso de un guardado de varias peticiones (PostgREST no abre una transacción entre ellas).
-   * Si falla cuando otra petición ya escribió, el error lo dice y pide volver a guardar:
-   * cada guardado de varios pasos es idempotente, así que repetirlo deja todo completo.
-   */
-  async function pasoSiguiente<T>(yaHuboEscritura: boolean, paso: () => Promise<T>): Promise<T> {
-    try {
-      return await paso();
-    } catch (e) {
-      throw yaHuboEscritura ? errorAMedias(e) : e;
-    }
   }
 
   async function esAdmin(): Promise<boolean> {
@@ -202,16 +202,22 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
       const [admin, citas, porRevisar, reposicion, pedidosPendientes, gastos, meses] = await Promise.all([
         esAdmin(),
         ctx.filas(
-          sb.from('v_citas_detalle').select('*').gte('inicio', desde).lt('inicio', hasta).neq('estado', 'cancelada').order('inicio'),
+          sb
+            .from('v_citas_detalle')
+            .select(COLUMNAS_CITA_DETALLE)
+            .gte('inicio', desde)
+            .lt('inicio', hasta)
+            .neq('estado', 'cancelada')
+            .order('inicio'),
         ),
         ctx.contar(
           sb.from('citas').select('id', { count: 'exact', head: true }).eq('estado', 'pendiente').gte('fin', ahora.toISOString()),
         ),
-        ctx.filas(sb.from('v_reposicion').select('*')),
+        ctx.filas(sb.from('v_reposicion').select(COLUMNAS_REPOSICION)),
         ctx.contar(sb.from('pedidos').select('id', { count: 'exact', head: true }).eq('estado', 'pendiente_pago')),
         // Las vistas de admin devuelven vacío para el personal (where es_admin()).
-        ctx.filas(sb.from('v_gastos_por_vencer').select('*').neq('estado', 'al_corriente')),
-        ctx.filas(sb.from('v_resultado_mensual').select('*').eq('mes', mes)),
+        ctx.filas(sb.from('v_gastos_por_vencer').select(COLUMNAS_GASTO_POR_VENCER).neq('estado', 'al_corriente')),
+        ctx.filas(sb.from('v_resultado_mensual').select(COLUMNAS_RESULTADO_MENSUAL).eq('mes', mes)),
       ]);
       return {
         citas_hoy: citas.map(aCitaDetalle),
@@ -226,7 +232,9 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
     // ------------------------------- agenda -------------------------------
     async getAgenda(desde, hasta) {
       const [d, h] = rangoInstantes(desde, hasta);
-      const fs = await ctx.filas(sb.from('v_citas_detalle').select('*').gte('inicio', d).lt('inicio', h).order('inicio'));
+      const fs = await ctx.filas(
+        sb.from('v_citas_detalle').select(COLUMNAS_CITA_DETALLE).gte('inicio', d).lt('inicio', h).order('inicio'),
+      );
       return fs.map(aCitaDetalle);
     },
 
@@ -282,7 +290,7 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
 
     // ------------------------------- clientas -------------------------------
     async getClientes(busqueda) {
-      let q = sb.from('v_clientes_resumen').select('*');
+      let q = sb.from('v_clientes_resumen').select(COLUMNAS_CLIENTE_RESUMEN);
       const filtro = busqueda ? filtroBusquedaClientes(busqueda) : null;
       if (filtro) q = q.or(filtro);
       const fs = await ctx.filas(q.order('nombre').order('apellidos'));
@@ -294,12 +302,17 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
 
     async getExpediente(cliente_id) {
       const [resumen, notas, ficha, citas, pedidos, creditos, consentimientos] = await Promise.all([
-        ctx.fila(sb.from('v_clientes_resumen').select('*').eq('id', cliente_id).maybeSingle()),
-        ctx.fila(sb.from('clientes').select('notas_internas').eq('id', cliente_id).maybeSingle()),
+        ctx.fila(sb.from('v_clientes_resumen').select(COLUMNAS_CLIENTE_RESUMEN).eq('id', cliente_id).maybeSingle()),
+        // clientes.notas_internas no tiene SELECT para la sesión (ESPEC §5.1): se lee en v_clientes_notas.
+        ctx.fila(sb.from('v_clientes_notas').select('id, notas_internas').eq('id', cliente_id).maybeSingle()),
         ctx.fila(consultaFichaVigente(ctx, cliente_id)),
-        ctx.filas(sb.from('v_citas_detalle').select('*').eq('cliente_id', cliente_id).order('inicio', { ascending: false })),
-        ctx.filas(sb.from('v_pedidos_detalle').select('*').eq('cliente_id', cliente_id).order('creado_en', { ascending: false })),
-        ctx.filas(sb.from('v_creditos').select('*').eq('cliente_id', cliente_id).order('creado_en', { ascending: false })),
+        ctx.filas(
+          sb.from('v_citas_detalle').select(COLUMNAS_CITA_DETALLE).eq('cliente_id', cliente_id).order('inicio', { ascending: false }),
+        ),
+        ctx.filas(
+          sb.from('v_pedidos_detalle').select(COLUMNAS_PEDIDO_DETALLE).eq('cliente_id', cliente_id).order('creado_en', { ascending: false }),
+        ),
+        ctx.filas(sb.from('v_creditos').select(COLUMNAS_CREDITO).eq('cliente_id', cliente_id).order('creado_en', { ascending: false })),
         ctx.filas(consultaConsentimientos(ctx, cliente_id)),
       ]);
       if (!resumen) {
@@ -338,12 +351,13 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
     },
 
     async guardarNotasCliente(cliente_id, notas) {
-      await guardarFila('clientes', { notas_internas: limpio(notas) }, cliente_id, 'personal');
+      const e = await actualizarSinDevolver('clientes', { notas_internas: limpio(notas) }, cliente_id, 'personal');
+      if (e) throw e.codigo === 'sin_filas' ? new ErrorOpalo(MSG_ADMIN.clienteNoExiste, 'sin_filas') : e;
     },
 
     // ------------------------------- pedidos y pagos -------------------------------
     async getPedidos(estado) {
-      let q = sb.from('v_pedidos_detalle').select('*');
+      let q = sb.from('v_pedidos_detalle').select(COLUMNAS_PEDIDO_DETALLE);
       if (estado) q = q.eq('estado', estado);
       const fs = await ctx.filas(q.order('creado_en', { ascending: false }));
       return fs.map(aPedidoDetalle);
@@ -404,7 +418,7 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
     },
 
     async getReposicion() {
-      return (await ctx.filas(sb.from('v_reposicion').select('*'))).map(aProductoReposicion);
+      return (await ctx.filas(sb.from('v_reposicion').select(COLUMNAS_REPOSICION))).map(aProductoReposicion);
     },
 
     async registrarCompra(c) {
@@ -475,28 +489,21 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
     },
 
     async guardarReceta(servicio_id, items) {
-      const juntos = new Map<string, { cantidad: number; notas: string | null }>();
-      for (const it of items ?? []) {
-        const cant = Number(it.cantidad);
-        if (!it.producto_id || !Number.isFinite(cant) || cant <= 0) throw new ErrorOpalo(MSG_ADMIN.cantidad);
-        const prev = juntos.get(it.producto_id);
-        juntos.set(it.producto_id, { cantidad: (prev?.cantidad ?? 0) + cant, notas: limpio(it.notas) ?? prev?.notas ?? null });
-      }
-      const filas = [...juntos].map(([producto_id, v]) => ({
-        servicio_id,
-        producto_id,
-        cantidad: Math.round(v.cantidad * 1000) / 1000,
-        notas: v.notas,
-      }));
-      // Primero se guardan las nuevas (si falla, la receta queda como estaba) y luego se quitan las demás.
-      if (filas.length) await ctx.ejecutar(sb.from('recetas_servicio').upsert(filas, { onConflict: 'servicio_id,producto_id' }));
-      let borrar = sb.from('recetas_servicio').delete().eq('servicio_id', servicio_id);
-      if (filas.length) borrar = borrar.not('producto_id', 'in', `(${filas.map((f) => f.producto_id).join(',')})`);
-      await pasoSiguiente(filas.length > 0, () => ctx.ejecutar(borrar));
+      // Reemplazo completo de la receta en una sola transacción (ESPEC §6: guardar_receta). La base
+      // valida, junta los productos repetidos (conserva la primera nota) y responde con los mismos
+      // textos que la demo; aquí no se valida para no dar otro mensaje.
+      await ctx.rpc('guardar_receta', {
+        p_servicio_id: servicio_id,
+        p_items: (items ?? []).map((it) => ({
+          producto_id: it.producto_id || null,
+          cantidad: it.cantidad,
+          notas: limpio(it.notas),
+        })),
+      });
     },
 
     async getCostosServicios() {
-      return (await ctx.filas(sb.from('v_costo_servicio').select('*'))).map(aCostoServicio);
+      return (await ctx.filas(sb.from('v_costo_servicio').select(COLUMNAS_COSTO_SERVICIO))).map(aCostoServicio);
     },
 
     // ------------------------------- gastos y resultados -------------------------------
@@ -585,11 +592,13 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
     },
 
     async getGastosPorVencer() {
-      return (await ctx.filas(sb.from('v_gastos_por_vencer').select('*'))).map(aGastoPorVencer);
+      return (await ctx.filas(sb.from('v_gastos_por_vencer').select(COLUMNAS_GASTO_POR_VENCER))).map(aGastoPorVencer);
     },
 
     async getResultados(meses) {
-      const fs = await ctx.filas(sb.from('v_resultado_mensual').select('*').order('mes', { ascending: false }));
+      const fs = await ctx.filas(
+        sb.from('v_resultado_mensual').select(COLUMNAS_RESULTADO_MENSUAL).order('mes', { ascending: false }),
+      );
       return completarMeses(fs, ctx.ahora(), meses);
     },
 
@@ -623,21 +632,14 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
     },
 
     async guardarPaquete(p) {
-      const nombre = (p.nombre ?? '').trim();
-      const slug = slugLimpio(p.slug || nombre);
-      if (!slug || !nombre) throw new ErrorOpalo(MSG_SUPABASE.datoFaltante);
-      const items = new Map<string, number>();
-      for (const it of (p.items ?? []) as PaqueteItem[]) {
-        const cant = Math.round(Number(it.cantidad));
-        if (!it.servicio_id || !(cant >= 1)) throw new ErrorOpalo(MSG_ADMIN.cantidad);
-        items.set(it.servicio_id, (items.get(it.servicio_id) ?? 0) + cant);
-      }
-      const nuevo = !p.id;
-      const f = await guardarFila(
-        'paquetes',
-        {
-          slug,
-          nombre,
+      // Paquete y paquete_servicios en una sola transacción (ESPEC §6: guardar_paquete; p_id null = nuevo).
+      // La base arma el slug (vacío = del nombre), valida, junta servicios repetidos y responde con los
+      // mismos textos que la demo; aquí no se valida para no dar otro mensaje.
+      await ctx.rpc('guardar_paquete', {
+        p_id: p.id || null,
+        p_datos: {
+          slug: limpio(p.slug),
+          nombre: (p.nombre ?? '').trim(),
           descripcion: limpio(p.descripcion),
           tipo: p.tipo ?? 'combo',
           precio: numeroONulo(p.precio),
@@ -646,31 +648,8 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
           activo: p.activo !== false,
           orden: Number(p.orden) || 0,
         },
-        p.id,
-        'admin',
-      );
-      const paquete_id = texto(f.id);
-      const filas = [...items].map(([servicio_id, cantidad]) => ({ paquete_id, servicio_id, cantidad }));
-      // Reemplazo de paquete_servicios: primero las filas nuevas, después se quitan las que sobran.
-      if (filas.length) {
-        try {
-          await ctx.ejecutar(sb.from('paquete_servicios').upsert(filas, { onConflict: 'paquete_id,servicio_id' }));
-        } catch (e) {
-          if (!nuevo) throw errorAMedias(e);
-          // Paquete recién creado: se quita para no dejarlo sin servicios (el formulario no conoce su id
-          // y volver a guardar chocaría con el slug). Si tampoco se puede quitar, se avisa.
-          const quitado = await ctx.ejecutar(sb.from('paquetes').delete().eq('id', paquete_id)).then(
-            () => true,
-            () => false,
-          );
-          throw quitado ? e : errorAMedias(e, MSG_ADMIN.paqueteSinServicios);
-        }
-      }
-      // Un paquete nuevo no tiene filas anteriores que quitar.
-      if (nuevo) return;
-      let borrar = sb.from('paquete_servicios').delete().eq('paquete_id', paquete_id);
-      if (filas.length) borrar = borrar.not('servicio_id', 'in', `(${filas.map((x) => x.servicio_id).join(',')})`);
-      await pasoSiguiente(true, () => ctx.ejecutar(borrar));
+        p_items: ((p.items ?? []) as PaqueteItem[]).map((it) => ({ servicio_id: it.servicio_id || null, cantidad: it.cantidad ?? null })),
+      });
     },
 
     // ------------------------------- equipo -------------------------------
@@ -733,37 +712,14 @@ export function crearApiAdmin(ctx: Contexto): ApiAdmin {
     },
 
     async guardarHorarios(personal_id, horarios) {
-      const nuevos = (horarios ?? []).map((h) => {
-        const ini = (h.hora_inicio ?? '').slice(0, 5);
-        const fin = (h.hora_fin ?? '').slice(0, 5);
-        const dia = Number(h.dia_semana);
-        if (!(Number.isInteger(dia) && dia >= 0 && dia <= 6) || !/^\d{2}:\d{2}$/.test(ini) || !/^\d{2}:\d{2}$/.test(fin))
-          throw new ErrorOpalo(MSG_SUPABASE.datoFaltante);
-        if (fin <= ini) throw new ErrorOpalo(MSG_ADMIN.rangoHorario);
-        return { personal_id, dia_semana: dia, hora_inicio: ini, hora_fin: fin };
-      });
-      const previos = await ctx.filas(sb.from('horarios').select('id, dia_semana, hora_inicio, hora_fin').eq('personal_id', personal_id));
-      // Sólo se tocan los rangos que cambiaron: los iguales se conservan (y sus copias repetidas se quitan).
-      const clave = (dia: unknown, ini: unknown, fin: unknown) => `${Number(dia)}|${texto(ini).slice(0, 5)}|${texto(fin).slice(0, 5)}`;
-      const previosPorClave = new Map<string, string>();
-      const borrar: string[] = [];
-      for (const f of previos) {
-        const k = clave(f.dia_semana, f.hora_inicio, f.hora_fin);
-        if (previosPorClave.has(k)) borrar.push(texto(f.id));
-        else previosPorClave.set(k, texto(f.id));
-      }
-      const insertar: typeof nuevos = [];
-      const vistos = new Set<string>();
-      for (const h of nuevos) {
-        const k = clave(h.dia_semana, h.hora_inicio, h.hora_fin);
-        if (vistos.has(k)) continue;
-        vistos.add(k);
-        if (!previosPorClave.delete(k)) insertar.push(h);
-      }
-      borrar.push(...previosPorClave.values());
-      // Primero se insertan los nuevos y luego se borran los que sobran (si algo falla, no se pierde el horario).
-      if (insertar.length) await ctx.ejecutar(sb.from('horarios').insert(insertar));
-      if (borrar.length) await pasoSiguiente(insertar.length > 0, () => ctx.ejecutar(sb.from('horarios').delete().in('id', borrar)));
+      // Reemplaza todos los rangos en una sola transacción (ESPEC §6). La base valida día, horas,
+      // salida después de la entrada y que no se encimen, con los mismos textos que la demo.
+      const p_horarios = (horarios ?? []).map((h) => ({
+        dia_semana: h.dia_semana,
+        hora_inicio: typeof h.hora_inicio === 'string' ? h.hora_inicio.slice(0, 5) : null,
+        hora_fin: typeof h.hora_fin === 'string' ? h.hora_fin.slice(0, 5) : null,
+      }));
+      await ctx.rpc('guardar_horarios', { p_personal_id: personal_id, p_horarios });
     },
 
     async guardarCapacitacion(c) {

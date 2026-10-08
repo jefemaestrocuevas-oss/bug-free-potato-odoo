@@ -9,9 +9,9 @@
 begin;
 
 -- Configuración (fila única)
-insert into public.configuracion (id, nombre_negocio, lema, telefono_whatsapp, direccion, zona_horaria, duracion_sesion_min, intervalo_slots_min, anticipacion_min_horas, ventana_reserva_dias, horas_cancelacion, tolerancia_retraso_min, edad_minima, edad_mayoria, vigencia_creditos_dias)
-values (1, 'Ópalo', 'Todo lo que necesitas para consentirte, en un solo lugar', '4421701466', 'Momentum Centro Sur, Torre 2, Int. 207, Querétaro, Qro.', 'America/Mexico_City', 60, 60, 2, 60, 24, 15, 15, 18, 365)
-on conflict (id) do update set nombre_negocio = excluded.nombre_negocio, lema = excluded.lema, telefono_whatsapp = excluded.telefono_whatsapp, direccion = excluded.direccion, zona_horaria = excluded.zona_horaria, duracion_sesion_min = excluded.duracion_sesion_min, intervalo_slots_min = excluded.intervalo_slots_min, anticipacion_min_horas = excluded.anticipacion_min_horas, ventana_reserva_dias = excluded.ventana_reserva_dias, horas_cancelacion = excluded.horas_cancelacion, tolerancia_retraso_min = excluded.tolerancia_retraso_min, edad_minima = excluded.edad_minima, edad_mayoria = excluded.edad_mayoria, vigencia_creditos_dias = excluded.vigencia_creditos_dias;
+insert into public.configuracion (id, nombre_negocio, lema, telefono_whatsapp, direccion, zona_horaria, duracion_sesion_min, intervalo_slots_min, anticipacion_min_horas, ventana_reserva_dias, horas_cancelacion, tolerancia_retraso_min, edad_minima, edad_mayoria, vigencia_creditos_dias, fecha_apertura)
+values (1, 'Ópalo', 'Todo lo que necesitas para consentirte, en un solo lugar', '4421701466', 'Momentum Centro Sur, Torre 2, Int. 207, Querétaro, Qro.', 'America/Mexico_City', 60, 60, 2, 60, 24, 15, 15, 18, 365, '2026-10-31'::date)
+on conflict (id) do update set nombre_negocio = excluded.nombre_negocio, lema = excluded.lema, telefono_whatsapp = excluded.telefono_whatsapp, direccion = excluded.direccion, zona_horaria = excluded.zona_horaria, duracion_sesion_min = excluded.duracion_sesion_min, intervalo_slots_min = excluded.intervalo_slots_min, anticipacion_min_horas = excluded.anticipacion_min_horas, ventana_reserva_dias = excluded.ventana_reserva_dias, horas_cancelacion = excluded.horas_cancelacion, tolerancia_retraso_min = excluded.tolerancia_retraso_min, edad_minima = excluded.edad_minima, edad_mayoria = excluded.edad_mayoria, vigencia_creditos_dias = excluded.vigencia_creditos_dias, fecha_apertura = excluded.fecha_apertura;
 
 -- Categorías de servicio
 insert into public.categorias_servicio (slug, nombre, descripcion, orden)
@@ -98,7 +98,7 @@ insert into public.servicios (categoria_id, slug, nombre, precio, tipo_consentim
 values ((select id from public.categorias_servicio where slug = 'faciales'), 'facial-reafirmante', 'Tratamiento reafirmante', 750, 'consentimiento_facial'::public.tipo_politica, 5)
 on conflict (slug) do update set categoria_id = excluded.categoria_id, nombre = excluded.nombre, precio = excluded.precio, tipo_consentimiento = excluded.tipo_consentimiento, orden = excluded.orden;
 insert into public.servicios (categoria_id, slug, nombre, precio, tipo_consentimiento, orden)
-values ((select id from public.categorias_servicio where slug = 'faciales'), 'facial-anti-acne', 'Tratamiento anti acné', 750, 'consentimiento_facial'::public.tipo_politica, 6)
+values ((select id from public.categorias_servicio where slug = 'faciales'), 'facial-anti-acne', 'Tratamiento antiacné', 750, 'consentimiento_facial'::public.tipo_politica, 6)
 on conflict (slug) do update set categoria_id = excluded.categoria_id, nombre = excluded.nombre, precio = excluded.precio, tipo_consentimiento = excluded.tipo_consentimiento, orden = excluded.orden;
 insert into public.servicios (categoria_id, slug, nombre, precio, tipo_consentimiento, orden)
 values ((select id from public.categorias_servicio where slug = 'corporales'), 'reductivo-zona', 'Reductivo (por zona)', null, 'consentimiento_corporal'::public.tipo_politica, 1)
@@ -136,7 +136,7 @@ delete from public.paquete_servicios ps using public.paquetes p
  where ps.paquete_id = p.id and p.slug = 'express'
    and ps.servicio_id not in (select s.id from public.servicios s where s.slug in ('cejas', 'axilas', 'labio-superior'));
 insert into public.paquetes (slug, nombre, tipo, descripcion, precio, orden)
-values ('media', 'Paquete Media', 'combo'::public.tipo_paquete, 'Media pierna, axila y bigote. Precio en revisión con la especialista.', 520, 2)
+values ('media', 'Paquete Media', 'combo'::public.tipo_paquete, 'Media pierna, axila y bigote.', 520, 2)
 on conflict (slug) do update set nombre = excluded.nombre, tipo = excluded.tipo, descripcion = excluded.descripcion, precio = excluded.precio, orden = excluded.orden;
 insert into public.paquete_servicios (paquete_id, servicio_id, cantidad)
 select p.id, s.id, 1 from public.paquetes p, public.servicios s
@@ -590,8 +590,8 @@ Cada facial se adapta a tu piel. En general incluye:
 
 1. Revisión de tu ficha de salud y de tu piel. Si eres clienta nueva y la especialista lo considera necesario, hacemos una **prueba de parche** con los productos del tratamiento.
 2. Desmaquillado, limpieza, exfoliación suave y, según el caso, vapor.
-3. En la limpieza facial y el tratamiento anti acné, **extracción manual** de puntos negros y comedones, con material desechable.
-4. Aplicación de los activos del tratamiento que elegiste (hidratante, despigmentante, nutritivo, reafirmante o anti acné): mascarillas, sueros o ampolletas, y masaje facial.
+3. En la limpieza facial y el tratamiento antiacné, **extracción manual** de puntos negros y comedones, con material desechable.
+4. Aplicación de los activos del tratamiento que elegiste (hidratante, despigmentante, nutritivo, reafirmante o antiacné): mascarillas, sueros o ampolletas, y masaje facial.
 5. Hidratación y protector solar.
 
 Los complementos se agregan a tu facial: el shot hidratante y la ampolleta despigmentante refuerzan el tratamiento, y el azuleno ayuda a calmar la piel.
@@ -600,7 +600,7 @@ Aparatología: [POR DEFINIR POR LA ESPECIALISTA: qué equipos se usarán, por ej
 
 ## 2. Beneficios
 
-Piel más limpia, hidratada y luminosa, y una mejor apariencia según el objetivo de tu tratamiento. Los tratamientos despigmentante, reafirmante y anti acné suelen necesitar varias sesiones y constancia en casa. Los resultados varían en cada persona y no se garantizan, y no sustituyen la atención de un dermatólogo.
+Piel más limpia, hidratada y luminosa, y una mejor apariencia según el objetivo de tu tratamiento. Los tratamientos despigmentante, reafirmante y antiacné suelen necesitar varias sesiones y constancia en casa. Los resultados varían en cada persona y no se garantizan, y no sustituyen la atención de un dermatólogo.
 
 ## 3. Riesgos y molestias posibles
 

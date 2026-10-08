@@ -19,7 +19,10 @@ cobró y cuánto se gastó**. Con esos registros el sistema responde solo pregun
   pero no se vende en línea.
 - **Complementos** (shot hidratante, ampolletas, azuleno): sólo se reservan junto con un servicio.
 - **Paquetes** (4): *combo* = varios servicios en una visita (Express, Media, Rostro, Total);
-  *bono* = varias sesiones del mismo servicio para usar en distintas visitas.
+  *bono* = varias sesiones del mismo servicio para usar en distintas visitas (por eso un bono lleva
+  un solo servicio). Desde el panel, el paquete y sus servicios se guardan **juntos y de una vez**
+  (función `guardar_paquete`): si algo no es válido no se guarda nada, así nunca queda un paquete a
+  medias. Un paquete no se borra: se desactiva.
 - **Contraindicaciones** (13): las preguntas de la ficha de salud ("¿estás embarazada?",
   "¿tomas isotretinoína?"…). Cada una dice a qué categorías aplica y qué hacer si la respuesta
   es sí (revisar antes de confirmar, o sólo tener precaución).
@@ -46,7 +49,17 @@ La fuente de todo esto es el archivo `datos/catalogo.json`; de ahí se carga la 
 
 ### 3. Agenda
 - **Cabinas**: hoy hay una. Una cita necesita persona **y** cabina libres.
-- **Horarios**: martes a viernes de 10:00 a 19:00 y sábado de 9:00 a 15:00 (se editan en el panel).
+- **Horarios**: martes a viernes de 10:00 a 19:00 y sábado de 9:00 a 15:00. Los socios los editan en
+  el panel; el horario semanal de cada persona se guarda completo de una vez (función
+  `guardar_horarios`), con varios rangos por día si hace falta (p. ej. para comer), pero sin que se
+  encimen y con la salida después de la entrada.
+- **Fecha de apertura**: el sistema sabe que Ópalo abre el **31 de octubre de 2026**. Antes de ese
+  día las clientas no ven horarios ni pueden reservar en el sitio; el equipo sí puede agendar (por
+  ejemplo, el ensayo de apertura). Desde el día de la apertura todo funciona normal. Para moverla,
+  en el editor SQL de Supabase:
+  `update public.configuracion set fecha_apertura = '2026-11-07';` (o `= null` para quitar la
+  restricción), y la misma fecha en `datos/catalogo.json`, para que no regrese la anterior al volver
+  a cargar el catálogo.
 - **Bloqueos**: días u horas cerradas (festivos, capacitación, comida). Pueden ser de una persona
   o de todo el spa.
 - **Citas**: sesiones de **1 hora**, con fecha, hora, quién atiende, cabina, estado
@@ -94,11 +107,14 @@ La fuente de todo esto es el archivo `datos/catalogo.json`; de ahí se carga la 
 - **Productos**: insumos de cabina (cera, talco, aceite, guantes…) y productos de venta. Cada uno
   con su presentación ("Lata 800 g"), su costo y el **stock en gramos, mililitros o piezas**.
 - **Recetas**: cuánto se usa de cada producto en cada servicio (ej. cejas: 10 g de cera, 2 guantes).
+  El equipo guarda la receta completa de un servicio de una vez (función `guardar_receta`).
 - **Compras**: al registrar una compra sube el stock y se actualiza el costo con el último precio.
 - **Movimientos**: cada entrada y salida queda registrada (compra, consumo en cabina, venta,
   ajuste, merma). El stock nunca se "teclea": siempre sale de los movimientos. Al **completar una
   cita**, el sistema descuenta solo los insumos de la receta (una sola vez).
-- **Stock mínimo**: cuando un producto llega a su mínimo aparece en "por reponer".
+- **Stock mínimo**: cuando un producto llega a su mínimo aparece en "por reponer", con cuántas
+  presentaciones comprar: las suficientes para quedar **por encima** del mínimo (si se compra lo
+  sugerido, el producto sale de la lista).
 
 ### 7. Gastos
 - **Categorías**: renta, mantenimiento del edificio, luz, agua, internet, teléfono, sistemas,
@@ -165,14 +181,14 @@ erDiagram
 | Pregunta del negocio | Dónde se ve | Quién la ve |
 |---|---|---|
 | ¿Cuánto ganamos este mes? ¿Y los meses anteriores? | **Resultados del mes** (`v_resultado_mensual`): ingresos, propinas, costo de insumos, compras, gastos, **utilidad** y **flujo** de los últimos 12 meses con actividad, hasta el mes en curso | Socios |
-| ¿Qué hay que reponer? ¿Cuánto nos costará? | **Por reponer** (`v_reposicion`): productos en o bajo su mínimo, cuánto falta, cuántas presentaciones comprar, costo estimado y proveedor | Equipo y socios |
+| ¿Qué hay que reponer? ¿Cuánto nos costará? | **Por reponer** (`v_reposicion`): productos en o bajo su mínimo, cuánto falta, cuántas presentaciones comprar (para quedar por encima del mínimo), costo estimado y proveedor | Equipo y socios |
 | ¿Cuánto nos cuesta cada servicio y cuánto nos deja? | **Costo por servicio** (`v_costo_servicio`): costo de material según la receta, margen en pesos y en % | Equipo y socios |
 | ¿Qué gastos fijos vencen pronto? | **Gastos por vencer** (`v_gastos_por_vencer`): vencido / próximo (7 días o menos) / al corriente | Socios |
 | ¿Qué citas hay hoy, con quién, ya firmó, ya pagó? | **Agenda** (`v_citas_detalle`): clienta, hora, duración, quién atiende, cabina, estado, alertas de la ficha, consentimientos firmados, pagado | Equipo (todas) · cada clienta (las suyas) |
-| ¿Quiénes son nuestras clientas y qué tan seguido vienen? | **Clientas** (`v_clientes_resumen`): visitas completadas, última visita, próxima cita, total pagado | Equipo y socios |
+| ¿Quiénes son nuestras clientas y qué tan seguido vienen? | **Clientas** (`v_clientes_resumen`): visitas completadas, última visita, próxima cita, total pagado y si la cuenta es del equipo (para separarla de las clientas) | Equipo y socios |
 | ¿Qué pedidos faltan por cobrar? | **Pedidos** (`v_pedidos_detalle`): folio, estado, total, lo pagado y lo comprado | Equipo · cada clienta (los suyos) |
 | ¿Qué servicios prepagados tiene cada clienta? | **Créditos** (`v_creditos`): cuántos le quedan, hasta cuándo, códigos de regalo | Equipo · cada clienta (los suyos) |
-| ¿Qué horarios puedo ofrecer? | **Horarios disponibles** (función `horarios_disponibles`): sólo horas con persona y cabina libres, con 2 horas de anticipación y hasta 60 días adelante | Todos (también el sitio público) |
+| ¿Qué horarios puedo ofrecer? | **Horarios disponibles** (función `horarios_disponibles`): sólo horas con persona y cabina libres, con 2 horas de anticipación y hasta 60 días adelante; antes de la apertura, sólo para el equipo | Todos (también el sitio público) |
 
 Cómo se calculan los resultados del mes:
 

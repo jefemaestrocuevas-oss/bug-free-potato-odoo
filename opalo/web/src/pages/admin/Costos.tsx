@@ -219,8 +219,9 @@ export default function Costos() {
                       </th>
                     </tr>
                     {g.filas.map((c) => {
-                      // Sin receta el margen no es real (el material sale en $0): se muestra apagado.
+                      // Sin receta el margen no es real (el material sale en $0): no se muestra.
                       const tono = !c.tiene_receta ? 'cos-sin-receta' : c.margen !== null && c.margen < 0 ? 'cos-negativo' : margenBajo(c) ? 'cos-bajo' : '';
+                      const sinMargen = !c.tiene_receta;
                       return (
                         <tr key={c.servicio_id}>
                           <td className="inv-celda-titulo">
@@ -235,10 +236,10 @@ export default function Costos() {
                             {c.tiene_receta ? pesos(c.costo_material) : <span className="texto-3">$0</span>}
                           </td>
                           <td data-etiqueta="Margen" className={`num ${tono}`}>
-                            {c.margen === null ? <span className="texto-3">—</span> : pesos(c.margen)}
+                            {sinMargen || c.margen === null ? <span className="texto-3">—</span> : pesos(c.margen)}
                           </td>
                           <td data-etiqueta="Margen %" className={`num ${tono}`}>
-                            {c.margen_pct === null ? <span className="texto-3">—</span> : porcentaje(c.margen_pct)}
+                            {sinMargen || c.margen_pct === null ? <span className="texto-3">—</span> : porcentaje(c.margen_pct)}
                           </td>
                           <td className="cos-celda-alertas">
                             <span className="sr-only">Alertas: </span>

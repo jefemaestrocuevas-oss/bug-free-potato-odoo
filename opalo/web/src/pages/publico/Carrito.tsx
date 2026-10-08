@@ -245,6 +245,11 @@ function ContenidoCarrito({
         </div>
 
         <MensajeError error={confirmar.error} />
+        {/pedidos por pagar/.test(confirmar.error ?? '') && (
+          <p className="car-error-enlace">
+            <Link to="/cuenta/pedidos">Ver mis pedidos por pagar</Link>
+          </p>
+        )}
 
         {cargandoSesion ? (
           <Cargando texto="Revisando tu sesión…" />

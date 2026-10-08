@@ -150,3 +150,6 @@
 .car-listo-pasos li { margin: 0 0 8px; }
 .car-listo-pasos strong { color: var(--tinta); }
 .car-listo-acciones { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+
+/* Enlace bajo un error del servidor (p. ej. «Tienes 5 pedidos por pagar…»). */
+.car-error-enlace { margin: -6px 0 14px; font-weight: 700; }

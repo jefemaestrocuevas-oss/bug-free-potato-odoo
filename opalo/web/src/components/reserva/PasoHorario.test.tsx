@@ -1,5 +1,5 @@
-// Paso 2 de la reserva: no se ofrece antes del día de apertura, los días sin lugar se ven tachados
-// y las horas se agrupan por especialista.
+// Paso 2 de la reserva: no se ofrece antes del día de apertura (configuracion.fecha_apertura),
+// los días sin lugar se ven tachados y las horas se agrupan por especialista.
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,6 +25,7 @@ const CONFIG = {
   edad_minima: 15,
   edad_mayoria: 18,
   vigencia_creditos_dias: 365,
+  fecha_apertura: '2026-10-31',
 } satisfies Configuracion;
 
 function slot(fecha: string, hhmm: string, personal: string): Slot {
@@ -102,6 +103,28 @@ describe('PasoHorario', () => {
     await act(async () => boton.click());
     await esperar();
     expect(onFecha).toHaveBeenCalledWith('2026-10-31');
+  });
+
+  it('la fecha de apertura sale de la configuración, no de una constante', async () => {
+    const { onFecha } = await montar({ config: { ...CONFIG, fecha_apertura: '2026-11-05' } });
+    expect(contenedor.textContent).toContain('Abrimos el jueves, 5 de noviembre');
+    // El miércoles 4 tendría lugar, pero todavía no abrimos.
+    expect(dia('2026-11-04')?.getAttribute('aria-disabled')).toBe('true');
+    expect(dia('2026-11-05')?.getAttribute('aria-disabled')).toBeNull();
+    for (const [f] of mocks.getHorariosDisponibles.mock.calls) expect(f >= '2026-11-05').toBe(true);
+    const boton = [...contenedor.querySelectorAll('button')].find((b) => b.textContent === 'Mostrarme el primer día con lugar')!;
+    await act(async () => boton.click());
+    await esperar();
+    expect(onFecha).toHaveBeenCalledWith('2026-11-05');
+  });
+
+  it('sin fecha de apertura (null) se reserva desde hoy', async () => {
+    await montar({ config: { ...CONFIG, fecha_apertura: null } });
+    expect(contenedor.textContent).toContain('Puedes reservar desde hoy');
+    expect(contenedor.textContent).not.toContain('Abrimos');
+    // Jueves 8 de octubre (hoy) sí se puede elegir.
+    expect(dia('2026-10-08')?.getAttribute('aria-disabled')).toBeNull();
+    expect(dia('2026-10-07')?.getAttribute('aria-disabled')).toBe('true');
   });
 
   it('un día guardado antes de la apertura no cuenta', async () => {

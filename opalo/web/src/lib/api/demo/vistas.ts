@@ -268,14 +268,19 @@ export function productosTienda(db: Db): ProductoTienda[] {
     }));
 }
 
-/** R12: necesita reposición si stock_actual <= stock_minimo. */
+/**
+ * R12 / v_reposicion: necesita reposición si stock_actual <= stock_minimo (los más urgentes primero).
+ * presentaciones_sugeridas = floor(faltante / contenido_presentacion) + 1: comprar lo sugerido deja el
+ * stock por encima del mínimo (y el producto sale de la lista).
+ */
 export function reposicion(db: Db): ProductoReposicion[] {
   return db.productos
     .filter((p) => p.activo && p.stock_actual <= p.stock_minimo)
-    .sort((a, b) => a.nombre.localeCompare(b.nombre))
+    .sort((a, b) => a.stock_actual - a.stock_minimo - (b.stock_actual - b.stock_minimo) || a.nombre.localeCompare(b.nombre))
     .map((p) => {
       const faltante = redondear(Math.max(0, p.stock_minimo - p.stock_actual), 3);
-      const presentaciones = Math.max(1, Math.ceil(faltante / (p.contenido_presentacion || 1)));
+      // Redondeo previo: en JS 0.7 / 0.1 = 6.999…; en SQL (numeric exacto) da 7.
+      const presentaciones = Math.floor(redondear(faltante / (p.contenido_presentacion || 1), 9)) + 1;
       return {
         id: p.id,
         nombre: p.nombre,
@@ -508,7 +513,15 @@ export function clienteResumen(db: Db, c: ClienteFila, ahora: Date): ClienteResu
     proxima_cita: proxima,
     total_pagado: redondear(total, 2),
     creado_en: c.creado_en,
+    es_personal: esCuentaDelEquipo(db, c.usuario_id),
   };
+}
+
+/** ¿La cuenta ligada es del equipo (rol personal o admin)? */
+export function esCuentaDelEquipo(db: Db, usuarioId: string | null): boolean {
+  if (!usuarioId) return false;
+  const rol = db.perfiles.find((p) => p.id === usuarioId)?.rol;
+  return rol === 'personal' || rol === 'admin';
 }
 
 // ---------- Gastos y resultados ----------

@@ -160,6 +160,15 @@ begin
   perform pruebas.espera_rechazo('insert into public.servicios (categoria_id, slug, nombre) select id, ''nuevo'', ''Nuevo'' from public.categorias_servicio limit 1');
   perform pruebas.espera_rechazo(format('insert into public.gastos (categoria_id, concepto, monto) values (%L, %L, 1)', v_cat_gasto, 'x'));
   perform pruebas.espera_error('select public.publicar_politica(''terminos'', ''x'', ''y'')', 'No tienes permiso para hacer esto.');
+  perform pruebas.espera_rechazo('update public.paquetes set precio = 1');
+  perform pruebas.espera_rechazo('delete from public.horarios');
+  perform pruebas.espera_rechazo('delete from public.recetas_servicio');
+  perform pruebas.espera_error(format('select public.guardar_paquete(null, %L::jsonb, %L::jsonb)',
+      '{"nombre": "Del personal"}', jsonb_build_array(jsonb_build_object('servicio_id', pruebas.servicio('cejas')))),
+    'No tienes permiso para hacer esto.');
+  perform pruebas.espera_error(format('select public.guardar_horarios(%L, %L::jsonb)',
+      (select id from public.personal where slug = 'especialista'), '[]'),
+    'No tienes permiso para hacer esto.');
   perform pruebas.como_postgres();
   perform pruebas.igual((select precio from public.servicios where slug = 'cejas'), 120.00::numeric(10,2), 'precio intacto');
   perform pruebas.igual((select lema from public.configuracion), 'Todo lo que necesitas para consentirte, en un solo lugar', 'lema intacto');
@@ -174,6 +183,7 @@ do $$
 declare
   v_admin uuid := pruebas.usuario('admin@demo.opalo.mx');
   v_valeria uuid := pruebas.usuario('valeria@demo.opalo.mx');
+  v_esp_id uuid := (select id from public.personal where slug = 'especialista');
 begin
   perform pruebas.como(v_admin);
   perform pruebas.igual(public.es_admin(), true, 'es_admin()');
@@ -187,8 +197,25 @@ begin
   update public.perfiles set rol = 'personal' where id = v_valeria;
   insert into public.gastos (categoria_id, concepto, monto) select id, 'Gasto del admin (prueba)', 99 from public.categorias_gasto limit 1;
   insert into public.capacitaciones (personal_id, nombre, tipo) select id, 'Taller (prueba)', 'taller' from public.personal limit 1;
-  insert into public.horarios (personal_id, dia_semana, hora_inicio, hora_fin) select id, 1, '10:00', '14:00' from public.personal limit 1;
+  -- Horarios: sólo con guardar_horarios (reemplaza el horario completo de la persona)
+  perform public.guardar_horarios(v_esp_id,
+    (select jsonb_agg(jsonb_build_object('dia_semana', h.dia_semana, 'hora_inicio', h.hora_inicio, 'hora_fin', h.hora_fin))
+       from public.horarios h where h.personal_id = v_esp_id)
+    || '[{"dia_semana": 1, "hora_inicio": "10:00", "hora_fin": "14:00"}]'::jsonb);
+  perform pruebas.igual((select count(*)::int from public.horarios where personal_id = v_esp_id), 6, 'el admin agrega el lunes');
+  -- Paquetes, sus servicios, horarios y recetas ya no se escriben directo (sólo con sus RPC)
+  perform pruebas.espera_rechazo(format('insert into public.horarios (personal_id, dia_semana, hora_inicio, hora_fin) values (%L, 0, ''10:00'', ''12:00'')', v_esp_id));
+  perform pruebas.espera_rechazo('delete from public.horarios');
+  perform pruebas.espera_rechazo('update public.paquetes set precio = 1');
+  perform pruebas.espera_rechazo('insert into public.paquetes (slug, nombre) values (''directo'', ''Directo'')');
+  perform pruebas.espera_rechazo('delete from public.paquete_servicios');
+  perform pruebas.espera_rechazo(format('insert into public.paquete_servicios (paquete_id, servicio_id) values (%L, %L)',
+                                        pruebas.paquete('express'), pruebas.servicio('patillas')));
+  perform pruebas.espera_rechazo('delete from public.recetas_servicio');
+  perform pruebas.espera_rechazo('update public.recetas_servicio set cantidad = 1');
   perform pruebas.como_postgres();
+  perform pruebas.igual((select precio from public.paquetes where slug = 'express'), 300.00::numeric(10,2), 'paquete intacto');
+  perform pruebas.igual((select count(*)::int from public.paquete_servicios), 11, 'servicios de paquetes intactos');
   perform pruebas.igual((select precio from public.servicios where slug = 'labio-superior'), 150.00::numeric(10,2), 'el admin pone precios');
   perform pruebas.igual((select anticipacion_min_horas from public.configuracion), 3, 'el admin edita la configuración');
   perform pruebas.igual((select rol::text from public.perfiles where id = v_valeria), 'personal', 'el admin cambia roles');
@@ -284,7 +311,8 @@ declare
     'configuracion_actual', 'crear_pedido', 'duracion_reserva', 'es_admin', 'es_personal', 'firmar_consentimiento_cita',
     'guardar_ficha_salud', 'horarios_disponibles', 'hoy_local', 'mi_cliente_id', 'mi_rol', 'reservar_cita', 'telefono_legible'];
   c_personal constant text[] := array['ajustar_inventario', 'avanzar_vencimiento', 'cambiar_estado_cita', 'completar_cita',
-    'dias_del_mes', 'primer_vencimiento', 'publicar_politica', 'registrar_compra', 'registrar_pago', 'reservar_cita_staff'];
+    'dias_del_mes', 'guardar_horarios', 'guardar_paquete', 'guardar_receta', 'primer_vencimiento', 'publicar_politica',
+    'registrar_compra', 'registrar_pago', 'reservar_cita_staff'];
 begin
   select string_agg(c.relname, ', ') into v_lista
     from pg_class c join pg_namespace n on n.oid = c.relnamespace

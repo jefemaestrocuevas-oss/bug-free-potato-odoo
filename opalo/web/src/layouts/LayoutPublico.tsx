@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
+import { AVISO_DEMO } from '../lib/api/cuentasDemo';
 import { reiniciarDemo } from '../lib/api/demo';
 import { borrarCarritoGuardado, useCarrito } from '../lib/carrito';
 import { enlaceWhatsApp, telefonoBonito } from '../lib/format';
@@ -8,6 +9,7 @@ import { useSesion } from '../lib/sesion';
 import { Marca } from '../components/ui/Gema';
 import { Modal } from '../components/cuenta/Modal';
 import { antesDeApertura, enlaceMapa, useContacto } from '../components/publico/contacto';
+import { fechaEnTexto } from '../components/reserva/utilidades';
 import {
   IconoBolsa,
   IconoCerrar,
@@ -107,7 +109,7 @@ function BannerDemo() {
   return (
     <>
       <div className="banner-demo sp-banner-demo">
-        <span>Modo demostración: los datos se guardan sólo en este navegador</span>
+        <span>{AVISO_DEMO}</span>
         <button type="button" className="sp-banner-demo-boton" onClick={() => setConfirmando(true)}>
           Reiniciar datos
         </button>
@@ -355,7 +357,9 @@ export function LayoutPublico() {
             <p className="sp-pie-cita">
               <IconoReloj tam={18} /> Atención con cita
             </p>
-            {antesDeApertura() && <p className="sp-pie-apertura">Abrimos el 31 de octubre de 2026.</p>}
+            {contacto.fecha_apertura && antesDeApertura(contacto.fecha_apertura) && (
+              <p className="sp-pie-apertura">Abrimos el {fechaEnTexto(contacto.fecha_apertura)}.</p>
+            )}
           </div>
 
           <div>

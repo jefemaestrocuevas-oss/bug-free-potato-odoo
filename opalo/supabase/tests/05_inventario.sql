@@ -7,6 +7,7 @@ declare
   v_ana uuid := pruebas.usuario('clienta@demo.opalo.mx');
   v_p uuid;
   v_q uuid;
+  v_r uuid;
   v_compra uuid;
   v record;
 begin
@@ -72,6 +73,21 @@ begin
   perform public.registrar_compra(jsonb_build_array(jsonb_build_object('producto_id', v_q, 'presentaciones', 1, 'costo_presentacion', 100)));
   perform pruebas.afirma(not exists (select 1 from public.v_reposicion where id = v_q), 'tras comprar ya no aparece');
 
+  -- Comprar lo sugerido deja el stock POR ENCIMA del mínimo: floor(faltante / contenido) + 1.
+  -- Con 0 g y un mínimo de exactamente una lata (1000 g) se sugieren 2: con una sola quedaría justo
+  -- en el mínimo y seguiría en la lista.
+  insert into public.productos (nombre, categoria, unidad_medida, presentacion, contenido_presentacion, costo_presentacion, stock_minimo)
+  values ('Cera exacta (prueba)', 'cera', 'g', 'Lata 1 kg', 1000, 200, 1000) returning id into v_r;
+  perform pruebas.igual((select presentaciones_sugeridas::text || '/' || costo_estimado::text || '/' || faltante::text
+                           from public.v_reposicion where id = v_r), '2/400.00/1000.000', 'faltante exacto de 1 lata → 2 latas');
+  perform pruebas.igual((select presentaciones_sugeridas from public.v_reposicion where id = v_p), 3, 'cera de prueba: 3 latas');
+  perform pruebas.afirma((select count(*) from public.v_reposicion) >= 2, 'hay varios productos por reponer');
+  perform public.registrar_compra((select jsonb_agg(jsonb_build_object('producto_id', id, 'presentaciones', presentaciones_sugeridas))
+                                     from public.v_reposicion));
+  perform pruebas.igual((select stock_actual from public.productos where id = v_r), 2000.000::numeric(12,3), 'quedan 2000 g');
+  perform pruebas.igual((select stock_actual from public.productos where id = v_p), 3050.000::numeric(12,3), '50 + 3 latas');
+  perform pruebas.igual(pruebas.filas('public.v_reposicion'), 0, 'tras comprar lo sugerido, nada queda por reponer');
+
   -- Clientas y visitantes no ven inventario ni pueden comprar
   perform pruebas.como(v_ana);
   perform pruebas.igual(pruebas.filas('public.productos'), 0, 'la clienta no ve productos');
@@ -103,11 +119,11 @@ begin
   insert into public.productos (nombre, unidad_medida, contenido_presentacion, costo_presentacion)
   values ('Insumo B (prueba)', 'pz', 50, 100) returning id into v_q;      -- 2.00 por pieza
 
+  -- La receta se reemplaza completa con guardar_receta (el personal ya no escribe la tabla directo)
   perform pruebas.como(v_esp);
-  delete from public.recetas_servicio where servicio_id = pruebas.servicio('axilas');
-  insert into public.recetas_servicio (servicio_id, producto_id, cantidad) values
-    (pruebas.servicio('axilas'), v_p, 20),     -- 3.00
-    (pruebas.servicio('axilas'), v_q, 3);      -- 6.00
+  perform public.guardar_receta(pruebas.servicio('axilas'), jsonb_build_array(
+    jsonb_build_object('producto_id', v_p, 'cantidad', 20),     -- 3.00
+    jsonb_build_object('producto_id', v_q, 'cantidad', 3)));    -- 6.00
   select * into v from public.v_costo_servicio where slug = 'axilas';
   perform pruebas.igual(v.costo_material, 9.00::numeric, 'costo de material de axilas');
   perform pruebas.igual(v.margen, 111.00::numeric, 'margen = 120 − 9');
@@ -122,13 +138,17 @@ begin
   perform pruebas.igual(v.margen_pct, 100.0::numeric, 'sin receta: margen 100 %');
   perform pruebas.igual((select count(*)::int from public.v_costo_servicio), 29, 'un renglón por servicio activo');
 
-  update public.recetas_servicio set cantidad = 40 where servicio_id = pruebas.servicio('axilas') and producto_id = v_p;
+  perform public.guardar_receta(pruebas.servicio('axilas'), jsonb_build_array(
+    jsonb_build_object('producto_id', v_p, 'cantidad', 40),
+    jsonb_build_object('producto_id', v_q, 'cantidad', 3)));
   perform pruebas.igual((select costo_material from public.v_costo_servicio where slug = 'axilas'), 12.00::numeric, 'la receta se edita');
   perform pruebas.como_postgres();
 
   perform pruebas.como(pruebas.usuario('clienta@demo.opalo.mx'));
   perform pruebas.igual(pruebas.filas('public.v_costo_servicio'), 0, 'la clienta no ve costos');
-  delete from public.recetas_servicio where producto_id = v_p;          -- RLS: no borra nada
+  perform pruebas.espera_rechazo(format('delete from public.recetas_servicio where producto_id = %L', v_p));
+  perform pruebas.espera_error(format('select public.guardar_receta(%L, %L::jsonb)', pruebas.servicio('axilas'), '[]'),
+    'No tienes permiso para hacer esto.');
   perform pruebas.como_postgres();
   perform pruebas.igual((select count(*)::int from public.recetas_servicio where producto_id = v_p), 1,
                         'la clienta no puede borrar recetas (la receta sigue ahí)');

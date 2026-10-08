@@ -484,4 +484,7 @@ opalo/
 El sitio consume la base **sólo** a través de `web/src/lib/api/tipos.ts` (`OpaloApi`).
 Implementaciones: `supabase.ts` (real) y `demo.ts` (navegador). Se elige en
 `web/src/lib/api/index.ts`: si existen `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`
-→ Supabase; si no → demo.
+→ Supabase; si no, demo **sólo** en desarrollo (`npm run dev`), con `--mode demo` o en pruebas.
+Una compilación de producción sin variables usa `sinConfigurar.ts`: cada operación responde que
+el sitio no está conectado (nunca usa datos de ejemplo). `npm run build:medir` compila con
+variables de ejemplo (`.env.medir`) para medir el paquete real.

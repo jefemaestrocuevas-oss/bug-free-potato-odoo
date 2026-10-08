@@ -576,7 +576,7 @@ function CuentasDemo({ onListo }: { onListo: (s: Sesion) => void }) {
         Cuentas de demostración
       </h2>
       <p className="texto-2 cu-sin-margen">
-        Estás en el modo demostración: los datos viven sólo en este navegador. Entra con un clic para conocer cada perfil.
+        Estás en el modo demostración: los datos se guardan sólo en este navegador. Entra con un clic para conocer cada perfil.
       </p>
       <ul className="cu-demo-lista">
         {CUENTAS_DEMO.map((c) => (

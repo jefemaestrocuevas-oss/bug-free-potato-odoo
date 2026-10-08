@@ -17,6 +17,12 @@ import * as V from './vistas';
 
 export const CLAVE_DEMO = 'opalo-demo-v1';
 
+/**
+ * Versión de la forma de las filas guardadas. Entra en la huella: si cambia (p. ej. columnas nuevas en
+ * consentimientos), lo guardado en el navegador se descarta y se vuelve a sembrar.
+ */
+export const ESQUEMA_DEMO = 2;
+
 export type AlmacenDemo = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 export interface OpcionesDemo {
@@ -65,7 +71,7 @@ export function crearApiDemoCon(fuentes: FuentesDemo, opciones: OpcionesDemo = {
   let huella: string | null = null;
 
   const huellaFuentes = () =>
-    (huella ??= sha256(JSON.stringify({ fuentes, ejemplos: opciones.datosEjemplo !== false })));
+    (huella ??= sha256(JSON.stringify({ fuentes, ejemplos: opciones.datosEjemplo !== false, esquema: ESQUEMA_DEMO })));
 
   function persistir(): void {
     if (!almacen || !estado) return;

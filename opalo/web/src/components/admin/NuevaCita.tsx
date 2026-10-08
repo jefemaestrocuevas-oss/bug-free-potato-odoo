@@ -339,7 +339,8 @@ export function NuevaCita({ onCerrar, onListo, inicial }: Props) {
                     >
                       <strong>{nombreCompleto(c)}</strong>
                       <span className="texto-3 pequeno">
-                        {[telefonoBonito(c.telefono), c.email].filter(Boolean).join(' · ') || 'Sin datos de contacto'}
+                        {[telefonoBonito(c.telefono), c.email, c.es_personal ? 'Cuenta del equipo' : null].filter(Boolean).join(' · ') ||
+                          'Sin datos de contacto'}
                       </span>
                     </button>
                   </li>

@@ -283,15 +283,11 @@ export function PedidosDetalleModal({ pedido: p, onCerrar, onCambio, sinEnlaceCl
           total={p.total}
           pagado={p.pagado}
           metodoSugerido={p.metodo_pago_preferido}
+          soloProductos={!conServicios}
           onCerrar={() => setPagando(false)}
           onListo={(mensaje) => {
             setPagando(false);
-            // RegistrarPago siempre menciona servicios al liquidar; si el pedido sólo trae productos, lo decimos tal cual.
-            onCambio(
-              conServicios
-                ? mensaje
-                : mensaje.replace(/ El pedido quedó pagado y sus servicios[^.]*\./, ' El pedido quedó pagado; los productos se descontaron del inventario.'),
-            );
+            onCambio(mensaje);
           }}
         />
       )}

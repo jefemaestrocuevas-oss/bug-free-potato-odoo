@@ -15,7 +15,7 @@ supabase/
     20261007000600_ventas.sql       pedidos (folio), pedido_items, pagos, créditos, códigos de regalo
     20261007000700_inventario.sql   proveedores, productos, recetas, compras, movimientos (stock)
     20261007000800_gastos.sql       categorías de gasto, recurrentes (vencimientos), gastos
-    20261007000900_funciones.sql    RPC de §6 (reservar, cancelar, completar, pedidos, pagos, compras…)
+    20261007000900_funciones.sql    RPC de §6 (reservar, cancelar, completar, pedidos, pagos, compras, paquetes, horarios, recetas…)
     20261007001000_vistas.sql       vistas de §7 (públicas e internas)
     20261007001100_seguridad.sql    políticas RLS, privilegios de tablas y de funciones
   seed.sql                    ← catálogo REAL (generado; idempotente)
@@ -56,10 +56,11 @@ o `supabase db push --include-seed`, que por defecto usa `supabase/seed.sql`).
 
 Es idempotente. Al volver a correrlo:
 
-- **Se sobrescribe con lo de `catalogo.json`**: configuración, categorías, servicios, paquetes (y
-  sus servicios), contraindicaciones y categorías de gasto (upsert por `slug`/`clave`; sólo las
-  columnas que vienen en el JSON). Si un precio se cambió desde el panel, cámbialo también en
-  `catalogo.json` o se perderá al resembrar.
+- **Se sobrescribe con lo de `catalogo.json`**: configuración (incluida `fecha_apertura`), categorías,
+  servicios, paquetes (y sus servicios), contraindicaciones y categorías de gasto (upsert por
+  `slug`/`clave`; sólo las columnas que vienen en el JSON). Si un precio o la fecha de apertura se
+  cambiaron desde el panel o el SQL Editor, cámbialos también en `catalogo.json` o se perderán al
+  resembrar.
 - **No se toca**: personal, horarios, cabinas y gastos recurrentes (sólo se insertan si no existen).
 - **Políticas**: se inserta la versión 1 activa sólo si no existe ninguna de ese tipo. Para cambiar
   una política publicada usa el panel (`publicar_politica`), que crea la versión 2, 3…
@@ -97,11 +98,20 @@ su cuenta: dar de alta a una especialista, hacer admin a una socia o quitarle el
 se hace siempre con estas dos sentencias en el SQL Editor (para quitar el acceso:
 `rol = 'cliente'` y `usuario_id = null`). La base ya lo permite sólo a admin (ESPEC §6.1).
 
-**Antes de abrir (31 oct 2026)**, si el sitio se publica antes, cierra la agenda con un bloqueo global:
+## 3.1 Fecha de apertura
+
+`configuracion.fecha_apertura` (hoy `2026-10-31`, viene de `catalogo.json`) es el día de apertura, en
+hora de Querétaro. **Antes de esa fecha** las clientas y los visitantes no ven horarios en
+`horarios_disponibles` y `reservar_cita` responde `Ese horario no está disponible.`; el **personal sí**
+ve horarios y agenda con `reservar_cita_staff` (p. ej. el ensayo de apertura). El día de la apertura
+ya se reserva en línea. No hace falta un bloqueo global (ese también cerraría la agenda del personal).
+
+Para cambiarla (SQL Editor), y que no se pierda al resembrar, cámbiala también en
+`datos/catalogo.json` (`configuracion.fecha_apertura`):
 
 ```sql
-insert into public.bloqueos_agenda (personal_id, inicio, fin, motivo)
-values (null, now(), '2026-10-31 00:00 America/Mexico_City', 'Antes de la apertura');
+update public.configuracion set fecha_apertura = '2026-11-07';   -- nueva fecha de apertura
+update public.configuracion set fecha_apertura = null;           -- sin restricción
 ```
 
 ## 4. Probar en local (PostgreSQL 16)
@@ -114,6 +124,11 @@ opalo/supabase/scripts/probar_local.sh
 `local/auth_shim.sql` → `migrations/*.sql` → `seed.sql` (dos veces, para probar que es idempotente)
 → `seed_demo.sql` → `local/pruebas.sql` → `tests/*.sql`. Imprime un resumen y sale con código ≠ 0
 si algo falla. Avisa si `seed.sql` no está al día con `datos/`.
+
+Las pruebas y las citas de ejemplo usan fechas relativas a hoy, que pueden caer antes de la apertura:
+`seed_demo.sql` quita `fecha_apertura` mientras crea sus citas y la restablece, y cada archivo de
+`tests/` que reserva la pone en `null` al empezar (dentro de su `begin … rollback`). La regla misma
+se prueba en `tests/02` (horarios) y `tests/03` (reservas).
 
 Variables: `PSQL` (comando psql; por defecto `runuser -u postgres -- psql` si eres root),
 `OPALO_DB` (base a usar; se borra), `SOLO` (filtra pruebas, p. ej. `SOLO=03`).
@@ -169,6 +184,21 @@ Cuentas de `seed_demo.sql` (sólo local): `admin@demo.opalo.mx` (admin),
   `Tienes 5 pedidos por pagar; págalos o cancela alguno antes de hacer otro.` ·
   `Esta cita se marcó como no asistió.` ·
   `Elige qué consentimiento firma la clienta para este servicio.`
+  De `guardar_paquete`: `Escribe el nombre del paquete.` ·
+  `El identificador (slug) del paquete debe tener letras o números.` ·
+  `Ya existe otro paquete con ese identificador (slug).` · `Elige si el paquete es combo o bono.` ·
+  `Revisa el precio.` · `El precio no puede ser negativo.` ·
+  `Revisa la duración: minutos enteros, cero o más.` · `Revisa la vigencia: días enteros, uno o más.` ·
+  `Revisa los datos del paquete.` · `Agrega al menos un servicio al paquete.` ·
+  `Uno de los servicios del paquete no existe.` · `Revisa las cantidades.` ·
+  `Un bono es de un solo servicio: elige sólo uno y cuántas sesiones incluye.` · `No encontramos ese paquete.`
+  De `guardar_horarios`: `No encontramos a esa persona del equipo.` · `Revisa los horarios.` ·
+  `El día de la semana debe ir de 0 (domingo) a 6 (sábado).` · `Escribe la hora de entrada y la de salida.` ·
+  `La salida debe ser después de la entrada.` · `Dos horarios del martes se enciman (10:00–14:00 y 13:00–19:00).`
+  (con el día y los rangos que chocan).
+  De `guardar_receta`: `No encontramos ese servicio.` · `Revisa la receta.` ·
+  `Uno de los productos de la receta no existe.` · `La cantidad de cada producto debe ser mayor a cero.` ·
+  `Las notas son muy largas; escríbelas en máximo 1000 caracteres.`
   En `crear_pedido`, un servicio/paquete/producto que no se puede comprar responde
   `Uno de los productos ya no está disponible para compra en línea.`
 - **Límites** (constantes en las funciones): la clienta reserva en línea a lo más **3 citas
@@ -183,7 +213,8 @@ Cuentas de `seed_demo.sql` (sólo local): `admin@demo.opalo.mx` (admin),
 - **Servicios**: uno activo y en etapa `disponible` debe tener `tipo_consentimiento`
   (trigger `servicios_consentimiento`); una cita sin ningún consentimiento que firmar no se crea.
 - **Agenda del personal**: `reservar_cita_staff` respeta los bloqueos (de la persona o globales)
-  y la autoasignación salta a quien está bloqueada. `horarios_disponibles` todavía no filtra por
+  y la autoasignación salta a quien está bloqueada. No le aplica `fecha_apertura` (§3.1): el personal
+  agenda antes de abrir; la clienta, no. `horarios_disponibles` todavía no filtra por
   `personal_servicios` (no recibe los servicios): con una especialista que hace todo no importa.
 - **Regalos**: un código por regalo; un bono de varios servicios genera varios créditos con el
   mismo código y `canjear_regalo` los pasa todos.
@@ -206,6 +237,20 @@ Cuentas de `seed_demo.sql` (sólo local): `admin@demo.opalo.mx` (admin),
   su `grant` explícito y cada tabla su RLS. `tests/07` falla si una tabla no tiene RLS, si una
   función queda abierta fuera de la lista del contrato o si una vista sin `security_invoker` no es
   de las públicas.
+- **Paquetes, horarios y recetas** (ESPEC §6 y §6.1): se escriben **sólo** con estas RPC, que
+  reemplazan el conjunto completo en una transacción (si algo no es válido no se guarda nada); las
+  tablas `paquetes`, `paquete_servicios`, `horarios` y `recetas_servicio` no aceptan
+  `insert/update/delete` directos.
+  - `guardar_paquete(p_id uuid, p_datos jsonb, p_items jsonb) returns uuid` (admin). `p_id` null = nuevo.
+    `p_datos = {slug, nombre, descripcion, tipo, precio, duracion_min, vigencia_dias, activo, orden}`: al
+    editar, lo que no venga se queda como está; sin `slug` se arma con el nombre ("Paquete Verano" →
+    `paquete-verano`). `p_items = [{servicio_id, cantidad}]` (1–99; repetidos se suman). Un **bono**
+    lleva exactamente un servicio. Para "borrar" un paquete se desactiva (`activo: false`).
+  - `guardar_horarios(p_personal_id uuid, p_horarios jsonb) returns void` (admin).
+    `[{dia_semana (0 = domingo), hora_inicio 'HH:MI', hora_fin 'HH:MI'}]`; varios rangos por día sí
+    (comida), encimados no (pegados, como 10–14 y 14–19, sí). `'[]'` deja a la persona sin horario.
+  - `guardar_receta(p_servicio_id uuid, p_items jsonb) returns void` (personal).
+    `[{producto_id, cantidad (> 0, en la unidad del producto), notas}]`; `'[]'` la deja vacía.
 - **Privilegios** (además de RLS): la clienta sólo puede `update` en `clientes` de
   `nombre, apellidos, telefono, fecha_nacimiento, acepta_promociones` (un trigger lo exige);
   `productos.stock_actual` no se escribe directo (sólo con movimientos: `registrar_compra`,
@@ -216,6 +261,13 @@ Cuentas de `seed_demo.sql` (sólo local): `admin@demo.opalo.mx` (admin),
   (visible en `v_citas_detalle`).
 - **Pagos con método `cortesia`**: no cuentan como ingreso en `v_resultado_mensual` ni en
   `total_pagado` de `v_clientes_resumen`.
+- **`v_clientes_resumen.es_personal`**: `true` si la cuenta ligada a la clienta tiene rol `personal`
+  o `admin` (el trigger de alta le crea ficha de clienta a toda cuenta, también a las del equipo);
+  `false` sin cuenta. El panel lo usa para separar al equipo de las clientas.
+- **Reposición** (`v_reposicion`): `presentaciones_sugeridas = floor((stock_minimo − stock_actual) /
+  contenido_presentacion) + 1`, así que comprar lo sugerido deja el stock **por encima** del mínimo
+  y el producto sale de la lista (con exactamente una lata de faltante se sugieren dos).
+  `costo_estimado = presentaciones_sugeridas × costo_presentacion`.
 - **Funciones internas** (no expuestas por la API): `crear_cita_interna`, `cancelar_cita_interna`,
   `completar_cita_interna`, `liquidar_pedido_interna`, `generar_codigo_regalo`,
   `personal_puede_hacer`, `edad_en`, `ip_solicitud`, `firma_valida`, `validar_firma` y los `tg_*`.

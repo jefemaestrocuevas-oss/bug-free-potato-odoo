@@ -237,6 +237,13 @@ export function errorFechaNacimiento(f: string, hoy: string = fechaLocal()): str
   return null;
 }
 
+/**
+ * '1995-04-12' → "12 de abril de 1995" (o "12 de abril" sin el año). Para fechas sin hora, tal como
+ * las guarda la base (fecha de nacimiento, día de apertura).
+ */
+/** Alias de fechaEnLetra (lib/format) que usan la reserva y el sitio público. */
+export { fechaEnLetra as fechaEnTexto } from '../../lib/format';
+
 export function emailValido(e: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e.trim());
 }

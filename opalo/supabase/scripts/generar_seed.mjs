@@ -5,9 +5,9 @@
 //   node opalo/supabase/scripts/generar_seed.mjs --stdout   → lo imprime (no escribe)
 //
 // Sin dependencias. El SQL que sale es idempotente (se puede correr varias veces):
-//   * configuración (fila 1), categorías, servicios, paquetes, contraindicaciones y
-//     categorías de gasto: upsert por slug/clave; sólo se tocan las columnas que vienen
-//     en el JSON (lo que el JSON no dice se deja como esté en la base).
+//   * configuración (fila 1, incluida fecha_apertura), categorías, servicios, paquetes,
+//     contraindicaciones y categorías de gasto: upsert por slug/clave; sólo se tocan las
+//     columnas que vienen en el JSON (lo que el JSON no dice se deja como esté en la base).
 //   * personal, horarios, cabinas y gastos recurrentes: sólo se insertan si no existen
 //     (son datos que el negocio edita desde el panel; no se sobrescriben).
 //   * políticas: versión 1 activa sólo si todavía no existe ninguna de ese tipo.
@@ -89,10 +89,19 @@ const cfg = catalogo.configuracion ?? {};
 const colsCfg = [
   'nombre_negocio', 'lema', 'telefono_whatsapp', 'direccion', 'zona_horaria', 'duracion_sesion_min',
   'intervalo_slots_min', 'anticipacion_min_horas', 'ventana_reserva_dias', 'horas_cancelacion',
-  'tolerancia_retraso_min', 'edad_minima', 'edad_mayoria', 'vigencia_creditos_dias',
+  'tolerancia_retraso_min', 'edad_minima', 'edad_mayoria', 'vigencia_creditos_dias', 'fecha_apertura',
 ].filter((c) => tiene(cfg, c));
+// fecha_apertura: 'AAAA-MM-DD' (día de apertura; antes, las clientas no reservan en línea) o null.
+if (cfg.fecha_apertura != null) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(cfg.fecha_apertura));
+  const f = m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : null;
+  if (!f || f.getUTCMonth() !== +m[2] - 1 || f.getUTCDate() !== +m[3]) {
+    falla(`configuracion.fecha_apertura inválida "${cfg.fecha_apertura}" (usa AAAA-MM-DD o null)`);
+  }
+}
+const litCfg = (c) => (c === 'fecha_apertura' && cfg[c] != null ? `${lit(cfg[c])}::date` : lit(cfg[c]));
 linea('-- Configuración (fila única)');
-linea(upsert('configuracion', ['id', ...colsCfg], ['1', ...colsCfg.map((c) => lit(cfg[c]))], 'id', colsCfg));
+linea(upsert('configuracion', ['id', ...colsCfg], ['1', ...colsCfg.map(litCfg)], 'id', colsCfg));
 linea();
 
 // ---------- categorías de servicio ----------
