@@ -90,3 +90,31 @@ día de pago de cada uno.
   paquete tipo `bono`; no hay ninguno cargado hasta que lo aprueben (b4).
 - **Pago en línea**: hoy el pedido queda "pendiente de pago" y se paga en el spa o por
   transferencia. Conectar Mercado Pago o Stripe es el siguiente paso cuando lo quieran.
+
+## 10. Firma en cabina (decisión del 8 de octubre)
+
+- Las clientas ya no firman en línea ni ven la firma en el sitio; se firma en la tablet de
+  cabina antes del servicio (**Agenda → Firmar en cabina**). Para volver a pedir la firma en
+  línea basta con cambiar `configuracion.firma_en_linea` a `true`.
+- Los términos y el aviso de privacidad **sí** dicen que el consentimiento se firma en el spa
+  (el aviso de privacidad debe declarar que se recaba la firma). Confirmarlo con el abogado.
+- Tablet de cabina: activar Acceso guiado (iPad) o fijación de pantalla (Android).
+
+## 11. Tienda de jabones y velas
+
+Lo que falta definir para cargar la línea real (desde **Panel → Taller**):
+1. **Productos**: nombre, aroma, contenido neto (g), ingredientes para la etiqueta (nombres
+   INCI), modo de uso, advertencias y foto. Los nombres del modo demostración y de los diseños
+   (avena y miel, lavanda, carbón activado, rosa y arcilla; velas de lavanda y eucalipto,
+   vainilla y coco, naranja y canela) son **propuestas**.
+2. **Materias primas** con su costo (aceites, sosa, cera de soya, mechas, fragancias, frascos,
+   etiquetas) y su proveedor.
+3. **Fórmulas** por lote: cuánto se usa de cada materia prima, cuántas piezas salen y días de
+   curado. Con eso el panel calcula el costo por pieza y sugiere precio según el margen.
+4. **Precios de venta** (hoy ningún producto real tiene precio).
+5. **Existencias**: hoy un pedido en línea no aparta piezas; se validan al cobrar. Si prefieren
+   apartar al hacer el pedido, hay que decidirlo (ver ESPEC §10.5).
+6. **Requisitos sanitarios y de etiquetado** para fabricar y vender jabones y velas: revisarlos
+   con quien les asesore antes de imprimir etiquetas (los diseños dejan espacio para
+   ingredientes, lote, caducidad, responsable y "Hecho en México").
+7. Envío a domicilio: por ahora sólo se recoge en Ópalo.
