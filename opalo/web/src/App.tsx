@@ -10,6 +10,7 @@ import { CarritoProvider } from './lib/carrito';
 import Inicio from './pages/publico/Inicio';
 import Servicios from './pages/publico/Servicios';
 import Tienda from './pages/publico/Tienda';
+import TiendaProducto from './pages/publico/TiendaProducto';
 import Carrito from './pages/publico/Carrito';
 import Equipo from './pages/publico/Equipo';
 import Politicas from './pages/publico/Politicas';
@@ -36,6 +37,8 @@ const AdminResultados = lazy(() => import('./pages/admin/Resultados'));
 const AdminCatalogo = lazy(() => import('./pages/admin/Catalogo'));
 const AdminEquipo = lazy(() => import('./pages/admin/EquipoAdmin'));
 const AdminPoliticas = lazy(() => import('./pages/admin/PoliticasAdmin'));
+const AdminTaller = lazy(() => import('./pages/admin/Taller'));
+const AdminMostrador = lazy(() => import('./pages/admin/Mostrador'));
 
 // `VITE_ROUTER=hash` (sitio estático sin reescrituras) usa rutas con #;
 // `VITE_ROUTER=memory` (vista previa incrustada) no toca la URL.
@@ -51,6 +54,7 @@ export function App() {
               <Route index element={<Inicio />} />
               <Route path="servicios" element={<Servicios />} />
               <Route path="tienda" element={<Tienda />} />
+              <Route path="tienda/:slug" element={<TiendaProducto />} />
               <Route path="carrito" element={<Carrito />} />
               <Route path="equipo" element={<Equipo />} />
               <Route path="politicas" element={<Politicas />} />
@@ -81,6 +85,8 @@ export function App() {
               <Route path="pedidos" element={<AdminPedidos />} />
               <Route path="inventario" element={<AdminInventario />} />
               <Route path="costos" element={<AdminCostos />} />
+              <Route path="taller" element={<AdminTaller />} />
+              <Route path="mostrador" element={<AdminMostrador />} />
               <Route path="gastos" element={<RutaProtegida admin><AdminGastos /></RutaProtegida>} />
               <Route path="resultados" element={<RutaProtegida admin><AdminResultados /></RutaProtegida>} />
               <Route path="catalogo" element={<RutaProtegida admin><AdminCatalogo /></RutaProtegida>} />

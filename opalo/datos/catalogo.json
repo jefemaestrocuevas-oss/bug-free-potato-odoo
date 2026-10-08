@@ -15,7 +15,8 @@
     "edad_minima": 15,
     "edad_mayoria": 18,
     "vigencia_creditos_dias": 365,
-    "fecha_apertura": "2026-10-31"
+    "fecha_apertura": "2026-10-31",
+    "firma_en_linea": false
   },
   "categorias": [
     { "slug": "depilacion", "nombre": "Depilación con cera", "descripcion": "Cera premium, técnica cuidadosa y protocolos de higiene en cada sesión.", "orden": 1 },

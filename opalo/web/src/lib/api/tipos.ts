@@ -19,12 +19,18 @@ export type AccionContraindicacion = 'no_se_realiza' | 'revisar' | 'precaucion';
 export type EstadoPedido = 'pendiente_pago' | 'pagado' | 'cancelado' | 'reembolsado';
 export type MetodoPago = 'efectivo' | 'tarjeta' | 'transferencia' | 'mercado_pago' | 'cortesia';
 export type TipoItemPedido = 'servicio' | 'paquete' | 'producto';
-export type TipoMovimiento = 'compra' | 'consumo' | 'venta' | 'ajuste' | 'merma';
+export type TipoMovimiento = 'compra' | 'consumo' | 'venta' | 'ajuste' | 'merma' | 'produccion' | 'insumo_produccion';
 export type FrecuenciaGasto = 'mensual' | 'bimestral' | 'trimestral' | 'anual';
 export type UnidadMedida = 'g' | 'ml' | 'pz';
 export type CategoriaProducto =
-  | 'cera' | 'preparacion' | 'post' | 'facial' | 'corporal' | 'desechable' | 'limpieza' | 'venta' | 'otro';
-export type UsoProducto = 'cabina' | 'venta' | 'ambos';
+  | 'cera' | 'preparacion' | 'post' | 'facial' | 'corporal' | 'desechable' | 'limpieza' | 'venta' | 'otro'
+  // Taller y tienda de Ópalo (ESPEC §10)
+  | 'materia_prima' | 'envase' | 'jabon' | 'vela' | 'set';
+/** Productos terminados de la tienda propia (se manejan por pieza). */
+export const CATEGORIAS_TIENDA: CategoriaProducto[] = ['jabon', 'vela', 'set'];
+export type UsoProducto = 'cabina' | 'venta' | 'ambos' | 'produccion';
+export type EstadoLote = 'en_curado' | 'disponible' | 'descartado';
+export type OrigenPedido = 'web' | 'mostrador';
 export type TipoCapacitacion = 'curso' | 'taller' | 'diplomado' | 'certificacion' | 'congreso';
 
 /** Políticas que toda clienta acepta antes de su primera reserva (y cuando cambian de versión). */
@@ -49,6 +55,8 @@ export interface Configuracion {
   vigencia_creditos_dias: number;
   /** 'YYYY-MM-DD'. Antes de esta fecha las clientas no ven horarios en línea; el personal sí puede agendar (p. ej. ensayo de apertura). null = sin restricción. */
   fecha_apertura: string | null;
+  /** false (decisión de Ópalo): la firma se hace en el spa, no en la reserva en línea (ESPEC §9). */
+  firma_en_linea: boolean;
 }
 
 export interface Categoria {
@@ -150,11 +158,27 @@ export interface Contraindicacion {
 
 export interface ProductoTienda {
   id: string;
+  slug: string | null;
   nombre: string;
+  categoria: CategoriaProducto;
   marca: string | null;
   presentacion: string | null;
+  descripcion: string | null;
+  aroma: string | null;
+  ingredientes: string | null;
+  modo_uso: string | null;
+  advertencias: string | null;
+  contenido_neto: string | null;
+  foto_url: string | null;
+  /** '#rrggbb' para la ilustración cuando no hay foto */
+  color_hex: string | null;
+  destacado: boolean;
+  hecho_en_opalo: boolean;
   precio_venta: number;
+  stock_disponible: number;
   hay_stock: boolean;
+  /** 'YYYY-MM-DD' del próximo lote en curado, o null */
+  proximo_lote_listo: string | null;
 }
 
 export interface Slot {
@@ -230,7 +254,8 @@ export interface SolicitudReserva {
   inicio: string;
   personal_id?: string | null;
   notas?: string | null;
-  firma: DatosFirma;
+  /** Sólo cuando configuracion.firma_en_linea = true; si no, la firma se hace en cabina. */
+  firma?: DatosFirma | null;
 }
 
 export interface ResultadoReserva {
@@ -297,7 +322,9 @@ export interface ItemPedido {
 export interface PedidoDetalle {
   id: string;
   folio: string;
-  cliente_id: string;
+  /** null en ventas de mostrador sin clienta registrada */
+  cliente_id: string | null;
+  /** 'Venta de mostrador' cuando no hay clienta */
   cliente_nombre: string;
   estado: EstadoPedido;
   total: number;
@@ -306,6 +333,10 @@ export interface PedidoDetalle {
   notas: string | null;
   creado_en: string;
   pagado_en: string | null;
+  origen: OrigenPedido;
+  /** Cuándo se entregaron los productos en el spa (null = por entregar o sin productos) */
+  entregado_en: string | null;
+  tiene_productos: boolean;
   items: ItemPedido[];
 }
 
@@ -423,9 +454,121 @@ export interface Producto {
   vendible_en_linea: boolean;
   activo: boolean;
   notas: string | null;
+  // Ficha pública (tienda) — ESPEC §10.1
+  slug: string | null;
+  descripcion: string | null;
+  aroma: string | null;
+  ingredientes: string | null;
+  modo_uso: string | null;
+  advertencias: string | null;
+  contenido_neto: string | null;
+  foto_url: string | null;
+  color_hex: string | null;
+  destacado: boolean;
+  hecho_en_opalo: boolean;
+  orden: number;
 }
 
 export type ProductoEditable = Omit<Producto, 'id' | 'costo_unitario' | 'stock_actual'> & { id?: string };
+
+// ---------- Taller (producción) — ESPEC §10.2 ----------
+
+export interface FormulaItem {
+  insumo_id: string;
+  cantidad: number;
+}
+
+export interface Formula {
+  id: string;
+  producto_id: string;
+  nombre: string;
+  rendimiento_piezas: number;
+  dias_curado: number;
+  instrucciones: string | null;
+  activa: boolean;
+  items: FormulaItem[];
+}
+
+export type FormulaEditable = Omit<Formula, 'id'> & { id?: string };
+
+export interface CostoFormula {
+  formula_id: string;
+  producto_id: string;
+  producto_nombre: string;
+  nombre: string;
+  rendimiento_piezas: number;
+  dias_curado: number;
+  costo_lote: number;
+  costo_pieza: number;
+  precio_venta: number | null;
+  margen_pieza: number | null;
+  margen_pct: number | null;
+  insumos: { insumo_id: string; nombre: string; unidad_medida: UnidadMedida; cantidad: number; costo: number }[];
+}
+
+export interface Lote {
+  id: string;
+  codigo: string;
+  producto_id: string;
+  producto_nombre: string;
+  categoria: CategoriaProducto;
+  formula_nombre: string | null;
+  elaborado_en: string;
+  listo_desde: string;
+  /** días que faltan para terminar el curado (≤ 0 = ya está listo) */
+  dias_para_listo: number;
+  caduca_en: string | null;
+  piezas_planeadas: number;
+  piezas_obtenidas: number | null;
+  costo_materiales: number;
+  costo_unitario: number | null;
+  estado: EstadoLote;
+  liberado_en: string | null;
+  notas: string | null;
+}
+
+export interface NuevoLote {
+  producto_id: string;
+  formula_id?: string | null;
+  piezas?: number | null;
+  elaborado_en?: string | null;
+  caduca_en?: string | null;
+  notas?: string | null;
+  /** Lo que realmente se usó; si no viene, la fórmula escalada a las piezas. */
+  items?: FormulaItem[] | null;
+}
+
+export interface ResultadoLote {
+  id: string;
+  codigo: string;
+  costo_materiales: number;
+  costo_unitario: number | null;
+  listo_desde: string;
+  estado: EstadoLote;
+}
+
+export interface MargenProducto {
+  id: string;
+  nombre: string;
+  categoria: CategoriaProducto;
+  precio_venta: number | null;
+  costo_unitario: number;
+  margen: number | null;
+  margen_pct: number | null;
+  stock_actual: number;
+  piezas_en_curado: number;
+  vendidas_30d: number;
+}
+
+// ---------- Venta en mostrador — ESPEC §10.3 ----------
+
+export interface VentaMostrador {
+  items: ItemPedidoNuevo[];
+  metodo: MetodoPago;
+  cliente_id?: string | null;
+  propina?: number;
+  notas?: string | null;
+}
 
 export interface ProductoReposicion {
   id: string;
@@ -539,6 +682,10 @@ export interface ResultadoMensual {
   ingresos: number;
   propinas: number;
   costo_insumos: number;
+  /** costo de los productos vendidos (jabones, velas…) */
+  costo_ventas: number;
+  /** mermas de inventario y lotes descartados */
+  mermas: number;
   compras: number;
   gastos: number;
   utilidad: number;
@@ -603,6 +750,10 @@ export interface ResumenHoy {
   /** null si el usuario no es admin */
   mes_actual: ResultadoMensual | null;
   pedidos_pendientes: number;
+  /** pedidos pagados con productos que falta entregar en el spa */
+  pedidos_por_entregar: number;
+  /** lotes en curado que ya cumplieron su fecha (listos para liberar) */
+  lotes_listos: Lote[];
 }
 
 // ---------- La interfaz ----------
@@ -703,6 +854,18 @@ export interface OpaloApi {
     // políticas (admin)
     getPoliticasTodas(): Promise<(Politica & { activa: boolean })[]>;
     publicarPolitica(tipo: TipoPolitica, titulo: string, contenido_md: string): Promise<void>;
+    // taller: producción de jabones y velas (personal) — ESPEC §10.2
+    getFormulas(): Promise<Formula[]>;
+    guardarFormula(f: FormulaEditable): Promise<string>;
+    getCostosFormulas(): Promise<CostoFormula[]>;
+    getLotes(estado?: EstadoLote | null): Promise<Lote[]>;
+    registrarLote(l: NuevoLote): Promise<ResultadoLote>;
+    liberarLote(lote_id: string, piezas_obtenidas?: number | null, forzar?: boolean): Promise<void>;
+    descartarLote(lote_id: string, motivo: string): Promise<void>;
+    getMargenesProductos(): Promise<MargenProducto[]>;
+    // mostrador y entregas (personal) — ESPEC §10.3
+    ventaMostrador(v: VentaMostrador): Promise<ResultadoPedido>;
+    marcarEntregado(pedido_id: string): Promise<void>;
   };
 }
 

@@ -167,3 +167,8 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.45; }
 /* Panel de firma */
 .panel-firma-lienzo { display: block; width: 100%; aspect-ratio: 3 / 1; background: var(--superficie); border: 1.5px dashed var(--oro); border-radius: var(--radio-sm); touch-action: none; cursor: crosshair; color: var(--tinta); }
 .ver-firma { background: #fff; border: 1px solid var(--linea-2); border-radius: var(--radio-sm); padding: 4px; }
+
+/* Ilustración de producto (jabón, vela, set) */
+.ilustracion-producto { display: block; width: 100%; height: auto; color: var(--tinta); }
+.ilustracion-flama { transform-origin: 100px 46px; animation: flama 2.4s ease-in-out infinite; }
+@keyframes flama { 0%, 100% { transform: scale(1, 1); } 35% { transform: scale(0.94, 1.06); } 70% { transform: scale(1.04, 0.96); } }

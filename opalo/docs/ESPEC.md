@@ -488,3 +488,123 @@ Implementaciones: `supabase.ts` (real) y `demo.ts` (navegador). Se elige en
 Una compilación de producción sin variables usa `sinConfigurar.ts`: cada operación responde que
 el sitio no está conectado (nunca usa datos de ejemplo). `npm run build:medir` compila con
 variables de ejemplo (`.env.medir`) para medir el paquete real.
+
+## 9. La firma es parte del flujo interno (cambio del 8 oct 2026)
+
+Decisión de Ópalo: la firma del consentimiento **no se anuncia ni se pide a las clientas en
+línea**; se hace en el spa, en la tablet de cabina, antes del servicio. La regla R6 ("sin
+consentimiento no hay servicio") no cambia.
+
+- `configuracion.firma_en_linea boolean not null default false`. Con `false`:
+  - `reservar_cita`: `p_nombre_firmante` y `p_firma_svg` pasan a ser **opcionales**
+    (`default null`). Si no vienen, la cita se crea sin consentimientos (queda "falta firma").
+    Si vienen (sólo cuando `firma_en_linea = true`), se validan y se crean como hoy.
+    Nueva firma: `reservar_cita(p_items jsonb, p_inicio timestamptz, p_nombre_firmante text
+    default null, p_firma_svg text default null, p_personal_id uuid default null, p_notas text
+    default null, p_tutor_nombre text default null, p_user_agent text default null)`.
+    Si llega firma con `firma_en_linea = false` se ignora (no se guarda).
+  - `firmar_consentimiento_cita` llamada por la propia clienta → 'La firma se hace en el spa,
+    el día de tu cita.' El personal (cabina) firma siempre.
+  - El sitio no muestra los documentos `consentimiento_*` en el índice público de políticas ni
+    en la reserva, no ofrece "Firmar" en Mi cuenta y no menciona la firma en el texto público.
+  - La clienta sí ve en Mi cuenta → Documentos lo que firmó en el spa (copia de su documento).
+- Con `true` vuelve el comportamiento anterior (firma en el paso final de la reserva).
+- Interno: la agenda y el resumen del día marcan "Falta firma" y "Firmar en cabina".
+
+## 10. Tienda de jabones y velas hechos en Ópalo (cambio del 8 oct 2026)
+
+Ópalo fabrica y vende sus propios jabones y velas (y sets de regalo), en el spa y en línea
+(se recoge en Ópalo; envío a domicilio queda para después).
+
+### 10.1 Productos
+`productos` se amplía (no se crea otra tabla):
+- `categoria` agrega `'materia_prima' | 'envase' | 'jabon' | 'vela' | 'set'` (se conservan las
+  anteriores). `uso` agrega `'produccion'` (materia prima del taller).
+- Columnas nuevas (todas opcionales salvo indicación): `slug text unique`, `descripcion text`,
+  `aroma text`, `ingredientes text` (lista para etiqueta, INCI cuando aplique),
+  `modo_uso text`, `advertencias text`, `contenido_neto text` (p. ej. "100 g", "180 g"),
+  `foto_url text`, `color_hex text check (~ '^#[0-9a-fA-F]{6}$')` (color de la ilustración
+  cuando no hay foto), `destacado boolean not null default false`, `hecho_en_opalo boolean not
+  null default false`, `orden int not null default 0`.
+- `productos_tienda` (pública) pasa a: `id, slug, nombre, categoria, marca, presentacion,
+  descripcion, aroma, ingredientes, modo_uso, advertencias, contenido_neto, foto_url,
+  color_hex, destacado, hecho_en_opalo, precio_venta, stock_disponible int`
+  (`greatest(floor(stock_actual), 0)`), `hay_stock boolean, proximo_lote_listo date`
+  (mínimo `listo_desde` de lotes `en_curado` de ese producto, o null). Orden: destacado desc,
+  categoria, orden, nombre. Sólo `activo and vendible_en_linea and precio_venta is not null`.
+
+### 10.2 Producción (taller)
+- **formulas**: `id, producto_id not null` (producto terminado), `nombre text not null,
+  rendimiento_piezas numeric(10,2) not null check (> 0)` (piezas por lote),
+  `dias_curado int not null default 0 check (>= 0)` (jabón en frío ≈ 28–42; vela ≈ 0–14),
+  `instrucciones text, activa boolean default true, creado_en, actualizado_en`.
+- **formula_items**: `formula_id on delete cascade, insumo_id references productos,
+  cantidad numeric(12,3) check (> 0)` (en la unidad del insumo, para un lote completo),
+  `pk (formula_id, insumo_id)`.
+- **lotes_produccion**: `id, codigo text unique` (trigger: `JAB|VEL|SET|PRD-AAMMDD-NN` según
+  la categoría del producto), `producto_id not null, formula_id null,
+  elaborado_en date not null default hoy_local(), piezas_planeadas numeric(10,2) check (> 0),
+  piezas_obtenidas numeric(10,2) null, dias_curado int not null default 0,
+  listo_desde date not null` (= elaborado_en + dias_curado), `caduca_en date null,
+  costo_materiales numeric(12,2) not null default 0, costo_unitario numeric(12,4) null,
+  estado estado_lote not null default 'en_curado'` (`en_curado | disponible | descartado`),
+  `liberado_en timestamptz, motivo_descarte text, notas text, creado_por uuid, creado_en`.
+- `tipo_movimiento` agrega `'produccion'` (+ piezas terminadas) e `'insumo_produccion'`
+  (− materia prima). `movimientos_inventario.lote_id uuid null references lotes_produccion`.
+- RPC (personal):
+  - `guardar_formula(p_id uuid, p_datos jsonb, p_items jsonb) returns uuid` — upsert + reemplazo
+    de items en una transacción; `p_items = [{insumo_id, cantidad}]`; al menos un insumo.
+  - `registrar_lote(p_producto_id uuid, p_formula_id uuid default null, p_piezas numeric default
+    null, p_elaborado_en date default null, p_caduca_en date default null, p_notas text default
+    null, p_items jsonb default null) returns jsonb {id, codigo, costo_materiales,
+    costo_unitario, listo_desde, estado}`. Materiales: `p_items` si viene (lo que realmente se
+    usó), si no los de la fórmula escalados a `p_piezas / rendimiento_piezas`. Valida existencia
+    suficiente de cada insumo ('No alcanza el inventario de {nombre}: hay {stock} {unidad} y se
+    necesitan {cantidad} {unidad}.'). Inserta movimientos `insumo_produccion` (−, con costo).
+    `costo_materiales = Σ cantidad × costo_unitario`; `costo_unitario = costo_materiales /
+    piezas_planeadas` (provisional). Si `dias_curado = 0` se libera en el acto.
+  - `liberar_lote(p_lote_id uuid, p_piezas_obtenidas numeric default null, p_forzar boolean
+    default false) returns void` — sólo `en_curado`; si `hoy_local() < listo_desde` y no
+    `p_forzar` → 'Este lote sigue en curado hasta el {fecha}.'. Fija `piezas_obtenidas`
+    (default planeadas), recalcula `costo_unitario = costo_materiales / piezas_obtenidas`,
+    movimiento `produccion` (+piezas, costo_unitario) y actualiza el costo del producto
+    terminado (`costo_presentacion = costo_unitario × contenido_presentacion`). Estado
+    `disponible`, `liberado_en = now()`.
+  - `descartar_lote(p_lote_id uuid, p_motivo text) returns void` — sólo `en_curado`; estado
+    `descartado` (su costo cuenta como merma del mes).
+- Vistas (personal, `security_invoker`):
+  - **v_lotes**: `id, codigo, producto_id, producto_nombre, categoria, formula_nombre,
+    elaborado_en, listo_desde, dias_para_listo int, caduca_en, piezas_planeadas,
+    piezas_obtenidas, costo_materiales, costo_unitario, estado, liberado_en, notas`.
+  - **v_costo_formulas**: `formula_id, producto_id, producto_nombre, nombre,
+    rendimiento_piezas, dias_curado, costo_lote` (con costos actuales de insumos),
+    `costo_pieza, precio_venta, margen_pieza, margen_pct, insumos jsonb`
+    (`[{insumo_id, nombre, unidad_medida, cantidad, costo}]`).
+  - **v_margen_productos**: productos con `uso in ('venta','ambos')`: `id, nombre, categoria,
+    precio_venta, costo_unitario` (por pieza), `margen, margen_pct, stock_actual,
+    piezas_en_curado, vendidas_30d`.
+- Los productos terminados (`jabon`, `vela`, `set`) se manejan **por pieza**
+  (`unidad_medida = 'pz'`, `contenido_presentacion = 1`), así `costo_unitario` es el costo de
+  una pieza. Un trigger lo exige para esas categorías.
+
+### 10.3 Venta en mostrador y entregas
+- `pedidos.cliente_id` pasa a **null permitido** (venta sin clienta registrada);
+  `pedidos.origen text not null default 'web' check in ('web','mostrador')`;
+  `pedidos.entregado_en timestamptz null`.
+- `venta_mostrador(p_items jsonb, p_metodo metodo_pago, p_cliente_id uuid default null,
+  p_propina numeric default 0, p_notas text default null) returns jsonb {id, folio, total}`
+  (personal): mismos ítems que `crear_pedido` (productos, servicios y paquetes); servicios o
+  paquetes exigen clienta ('Para vender servicios prepagados elige a la clienta.'); valida
+  existencias; crea el pedido `origen = 'mostrador'`, registra el pago completo
+  (`cortesia` permitido), liquida (créditos, movimientos `venta`) y marca `entregado_en`.
+- `marcar_entregado(p_pedido_id uuid) returns void` (personal): pedido `pagado` con productos.
+- `crear_pedido` valida existencias de productos ('Por ahora sólo quedan {n} piezas de
+  {nombre}.' / 'Por ahora no tenemos {nombre}.').
+- `v_pedidos_detalle` agrega `origen, entregado_en, tiene_productos boolean`;
+  `cliente_nombre` = 'Venta de mostrador' cuando no hay clienta.
+
+### 10.4 Resultados
+`v_resultado_mensual` agrega `costo_ventas` (−Σ movimientos `venta` × costo_unitario) y
+`mermas` (−Σ movimientos `merma` × costo + Σ `costo_materiales` de lotes descartados en el
+mes). `utilidad = ingresos − costo_insumos − costo_ventas − mermas − gastos`.
+`flujo` no cambia (las compras de materia prima ya están en `compras`).
