@@ -47,6 +47,8 @@ export interface Configuracion {
   edad_minima: number;
   edad_mayoria: number;
   vigencia_creditos_dias: number;
+  /** 'YYYY-MM-DD'. Antes de esta fecha las clientas no ven horarios en línea; el personal sí puede agendar (p. ej. ensayo de apertura). null = sin restricción. */
+  fecha_apertura: string | null;
 }
 
 export interface Categoria {
@@ -351,6 +353,8 @@ export interface ClienteResumen {
   proxima_cita: string | null;
   total_pagado: number;
   creado_en: string;
+  /** La cuenta ligada es del equipo (rol personal o admin). */
+  es_personal: boolean;
 }
 
 export interface NuevoCliente {

@@ -4,12 +4,14 @@
 export const ZONA = 'America/Mexico_City';
 export const OFFSET_MX = '-06:00';
 
-const fmtDinero = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2, minimumFractionDigits: 0 });
+const fmtDineroEntero = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0, minimumFractionDigits: 0 });
+const fmtDineroCentavos = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2, minimumFractionDigits: 2 });
 
-/** "$1,250" · null → "Precio por confirmar" */
+/** "$1,250" o "$1,250.50" (nunca "$1,250.5") · null → "Precio por confirmar" */
 export function dinero(n: number | null | undefined, siNulo = 'Precio por confirmar'): string {
   if (n === null || n === undefined || Number.isNaN(n)) return siNulo;
-  return fmtDinero.format(n);
+  const redondo = Math.round(n * 100) / 100;
+  return Number.isInteger(redondo) ? fmtDineroEntero.format(redondo) : fmtDineroCentavos.format(redondo);
 }
 
 export function numero(n: number | null | undefined, decimales = 0): string {

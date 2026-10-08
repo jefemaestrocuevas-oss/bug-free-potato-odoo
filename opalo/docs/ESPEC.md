@@ -89,7 +89,9 @@ zona_horaria text default 'America/Mexico_City', duracion_sesion_min int default
 intervalo_slots_min int default 60, anticipacion_min_horas int default 2,
 ventana_reserva_dias int default 60, horas_cancelacion int default 24,
 tolerancia_retraso_min int default 15, edad_minima int default 15,
-edad_mayoria int default 18, vigencia_creditos_dias int default 365, actualizado_en`.
+edad_mayoria int default 18, vigencia_creditos_dias int default 365, fecha_apertura date null`
+(día de apertura; antes de esa fecha las clientas no ven horarios ni reservan en línea, el
+personal sí puede agendar, p. ej. el ensayo de apertura), `actualizado_en`.
 Lectura pública; escritura admin.
 
 **perfiles**: `id uuid pk references auth.users(id) on delete cascade, rol rol_usuario
@@ -283,9 +285,13 @@ Sólo admin lee/escribe gastos.
   `[inicio, inicio + duracion)` debe caber completo en el rango, no traslapar citas
   activas (`estado not in ('cancelada','no_asistio')`) de esa persona, ni bloqueos
   (suyos o globales), debe existir **alguna cabina activa libre**, `inicio >= now() +
-  anticipacion_min_horas`, y `p_fecha <= hoy_local + ventana_reserva_dias`. Ordenado por
+  anticipacion_min_horas`, y `p_fecha <= hoy_local + ventana_reserva_dias`; si quien consulta
+  **no** es personal y `p_fecha < fecha_apertura`, no hay horarios. Ordenado por
   inicio y orden del personal. Si `p_duracion_min` es null usa `duracion_sesion_min`.
-- **R4 Reservar** (`reservar_cita`): requiere sesión con fila en `clientes`; las
+- **R4 Reservar** (`reservar_cita`): requiere sesión con fila en `clientes`; la fecha local de la
+  cita debe ser ≥ `fecha_apertura` (si no: 'Ese horario no está disponible.'); `fecha_nacimiento`
+  obligatoria ('Para reservar necesitamos tu fecha de nacimiento.'); máximo 3 citas próximas
+  (pendiente/confirmada) por clienta; las
   políticas **activas** de tipo `terminos`, `privacidad` y `cancelacion` aceptadas por la
   clienta; una ficha de salud registrada (la UI la pide/confirma en cada reserva);
   si hay `fecha_nacimiento`: edad ≥ `edad_minima` (si no, error) y si edad <
@@ -333,6 +339,34 @@ Sólo admin lee/escribe gastos.
   desactiva la anterior. Las clientas deben aceptar la versión nueva en su siguiente
   reserva.
 
+### 5.1 Endurecimiento (agregado tras la revisión de seguridad)
+
+- `anon` no lee las tablas `personal`, `capacitaciones`, `horarios`, `cabinas` ni
+  `personal_servicios`: el sitio público usa `personal_publico` y `capacitaciones_publicas`.
+- `authenticated` no tiene SELECT sobre `clientes.notas_internas`, `citas.notas_internas`,
+  `citas.creada_por`, `pagos.recibido_por` ni `pagos.notas` (GRANT por columnas).
+- Los objetos nuevos de `public` no reciben permisos por defecto: cada migración otorga lo suyo.
+- Vinculación de expediente: el trigger de alta liga una cuenta nueva a una clienta existente
+  (mismo correo, sin cuenta) **sólo cuando el correo está confirmado** (`email_confirmed_at`).
+  Hay que activar "Confirm email" en Supabase Auth.
+- La clienta no puede cambiar su `fecha_nacimiento` una vez registrada (la corrige el personal).
+- Límites: 3 citas próximas por clienta (el personal no tiene límite), 5 pedidos por pagar,
+  cantidades enteras 1–99, `crear_pedido` sólo acepta efectivo, tarjeta o transferencia.
+- Firma: `firma_valida(text)` exige un `<svg>` sólo con trazos (sin scripts, eventos ni
+  enlaces), ≤ 200 000 caracteres; nombres ≤ 200; notas ≤ 1000; campos de ficha ≤ 2000.
+- `consentimientos` guarda además `capturado_por uuid` y `canal` (`reserva_web | portal | cabina`);
+  `documento_hash` = sha256 de política, clienta, cita, ficha, firmante, tutor, menor,
+  sha256 de la firma y fecha.
+- Mensajes nuevos: 'Para reservar necesitamos tu fecha de nacimiento.', 'Para firmar
+  necesitamos tu fecha de nacimiento.', 'Ya tienes 3 citas próximas; para agendar otra
+  escríbenos por WhatsApp al 442 170 1466.', 'Tienes 5 pedidos por pagar; págalos o cancela
+  alguno antes de hacer otro.', 'Elige efectivo, tarjeta o transferencia.', 'No pudimos leer
+  tu firma; bórrala y vuelve a firmar.', 'El nombre es muy largo; escríbelo en máximo 200
+  caracteres.', 'Las notas son muy largas; escríbelas en máximo 1000 caracteres.', 'Tu fecha
+  de nacimiento ya está registrada; si hay un error, escríbenos por WhatsApp al 442 170
+  1466.', 'Elige qué consentimiento firma la clienta para este servicio.', 'Esta cita se
+  marcó como no asistió.'
+
 ## 6. Funciones RPC (firmas exactas)
 
 Todas en `public`. `p_items` de reserva: `[{"servicio_id": uuid} | {"paquete_id": uuid}, + opcional "credito_id": uuid]`.
@@ -356,6 +390,9 @@ Todas en `public`. `p_items` de reserva: `[{"servicio_id": uuid} | {"paquete_id"
 | `registrar_compra(p_items jsonb, p_proveedor_id uuid default null, p_fecha date default current_date, p_folio text default null, p_notas text default null)` | `uuid` | personal |
 | `ajustar_inventario(p_producto_id uuid, p_cantidad numeric, p_tipo tipo_movimiento, p_nota text default null)` | `void` | personal (`ajuste` o `merma`) |
 | `publicar_politica(p_tipo tipo_politica, p_titulo text, p_contenido_md text)` | `uuid` | admin |
+| `guardar_paquete(p_id uuid, p_datos jsonb, p_items jsonb)` | `uuid` | admin (upsert del paquete + reemplazo de `paquete_servicios` en una transacción; `p_id` null = nuevo; `p_items = [{servicio_id, cantidad}]`) |
+| `guardar_horarios(p_personal_id uuid, p_horarios jsonb)` | `void` | admin (reemplaza los rangos; `[{dia_semana, hora_inicio, hora_fin}]`; valida fin > inicio y sin traslapes el mismo día) |
+| `guardar_receta(p_servicio_id uuid, p_items jsonb)` | `void` | personal (reemplaza la receta; `[{producto_id, cantidad, notas}]`) |
 
 `p_items` de pedido: `[{"tipo": "servicio"|"paquete"|"producto", "id": uuid, "cantidad": int, "regalo_para": text|null}]`.
 `p_items` de compra: `[{"producto_id": uuid, "presentaciones": numeric, "costo_presentacion": numeric}]`.
@@ -373,9 +410,11 @@ Además de las RPC, el sitio escribe directo en estas tablas (supabase-js `inser
 | `clientes` | insert, update (incl. `notas_internas`) | personal |
 | `bloqueos_agenda` | insert, update, delete | personal |
 | `proveedores`, `productos` (excepto `stock_actual`, que sólo cambia con movimientos) | insert, update | personal |
-| `recetas_servicio` | insert, update, delete | personal |
-| `categorias_servicio`, `servicios`, `paquetes`, `paquete_servicios` | insert, update, delete | admin |
-| `personal`, `horarios`, `personal_servicios`, `capacitaciones` | insert, update, delete | admin |
+| `recetas_servicio` | sólo vía `guardar_receta` | personal |
+| `categorias_servicio`, `servicios` | insert, update, delete | admin |
+| `paquetes`, `paquete_servicios` | sólo vía `guardar_paquete` | admin |
+| `personal`, `personal_servicios`, `capacitaciones` | insert, update, delete | admin |
+| `horarios` | sólo vía `guardar_horarios` | admin |
 | `gastos`, `gastos_recurrentes` | insert, update, delete | admin |
 | `configuracion` | update | admin |
 | `perfiles` | update de `rol` | admin |
@@ -404,13 +443,17 @@ Internas (`security_invoker = true`):
   restantes, vence_en, vigente boolean, codigo_regalo, regalo_para, creado_en`.
 - **v_clientes_resumen** (personal): `id, nombre, apellidos, telefono, email,
   fecha_nacimiento, tiene_cuenta boolean, citas_completadas int, ultima_visita
-  timestamptz, proxima_cita timestamptz, total_pagado numeric, creado_en`.
+  timestamptz, proxima_cita timestamptz, total_pagado numeric, creado_en,
+  es_personal boolean` (la cuenta ligada tiene rol personal o admin; el panel las separa).
+- **v_clientes_notas** (personal; vista del dueño con filtro `es_personal()`): `id, notas_internas`.
+  Es la única forma de leer `clientes.notas_internas` (la columna no tiene SELECT para authenticated).
 - **v_costo_servicio** (personal): `servicio_id, slug, nombre, categoria, precio,
   costo_material numeric, margen numeric, margen_pct numeric, tiene_receta boolean`.
 - **v_reposicion** (personal): `id, nombre, marca, unidad_medida, stock_actual,
   stock_minimo, faltante, presentacion, contenido_presentacion,
   presentaciones_sugeridas int, costo_estimado, proveedor_nombre` (sólo los que
-  necesitan reposición).
+  necesitan reposición). `presentaciones_sugeridas = floor((stock_minimo − stock_actual) /
+  contenido_presentacion) + 1`: comprar lo sugerido deja el stock **por encima** del mínimo.
 - **v_gastos_por_vencer** (admin): `id, concepto, categoria, monto_estimado, frecuencia,
   proximo_vencimiento, dias_restantes int, estado text` (`vencido | proximo` (≤ 7 días) `| al_corriente`).
 - **v_resultado_mensual** (admin): `mes date, ingresos numeric` (pagos sin propina),

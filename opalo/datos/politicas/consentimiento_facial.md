@@ -10,8 +10,8 @@ Cada facial se adapta a tu piel. En general incluye:
 
 1. Revisión de tu ficha de salud y de tu piel. Si eres clienta nueva y la especialista lo considera necesario, hacemos una **prueba de parche** con los productos del tratamiento.
 2. Desmaquillado, limpieza, exfoliación suave y, según el caso, vapor.
-3. En la limpieza facial y el tratamiento anti acné, **extracción manual** de puntos negros y comedones, con material desechable.
-4. Aplicación de los activos del tratamiento que elegiste (hidratante, despigmentante, nutritivo, reafirmante o anti acné): mascarillas, sueros o ampolletas, y masaje facial.
+3. En la limpieza facial y el tratamiento antiacné, **extracción manual** de puntos negros y comedones, con material desechable.
+4. Aplicación de los activos del tratamiento que elegiste (hidratante, despigmentante, nutritivo, reafirmante o antiacné): mascarillas, sueros o ampolletas, y masaje facial.
 5. Hidratación y protector solar.
 
 Los complementos se agregan a tu facial: el shot hidratante y la ampolleta despigmentante refuerzan el tratamiento, y el azuleno ayuda a calmar la piel.
@@ -20,7 +20,7 @@ Aparatología: [POR DEFINIR POR LA ESPECIALISTA: qué equipos se usarán, por ej
 
 ## 2. Beneficios
 
-Piel más limpia, hidratada y luminosa, y una mejor apariencia según el objetivo de tu tratamiento. Los tratamientos despigmentante, reafirmante y anti acné suelen necesitar varias sesiones y constancia en casa. Los resultados varían en cada persona y no se garantizan, y no sustituyen la atención de un dermatólogo.
+Piel más limpia, hidratada y luminosa, y una mejor apariencia según el objetivo de tu tratamiento. Los tratamientos despigmentante, reafirmante y antiacné suelen necesitar varias sesiones y constancia en casa. Los resultados varían en cada persona y no se garantizan, y no sustituyen la atención de un dermatólogo.
 
 ## 3. Riesgos y molestias posibles
 

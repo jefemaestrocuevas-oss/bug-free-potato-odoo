@@ -14,7 +14,8 @@
     "tolerancia_retraso_min": 15,
     "edad_minima": 15,
     "edad_mayoria": 18,
-    "vigencia_creditos_dias": 365
+    "vigencia_creditos_dias": 365,
+    "fecha_apertura": "2026-10-31"
   },
   "categorias": [
     { "slug": "depilacion", "nombre": "Depilación con cera", "descripcion": "Cera premium, técnica cuidadosa y protocolos de higiene en cada sesión.", "orden": 1 },
@@ -47,7 +48,7 @@
     { "slug": "facial-despigmentante", "categoria": "faciales", "nombre": "Tratamiento despigmentante", "precio": 750, "tipo_consentimiento": "consentimiento_facial", "orden": 3 },
     { "slug": "facial-nutritivo", "categoria": "faciales", "nombre": "Tratamiento nutritivo", "precio": 750, "tipo_consentimiento": "consentimiento_facial", "orden": 4 },
     { "slug": "facial-reafirmante", "categoria": "faciales", "nombre": "Tratamiento reafirmante", "precio": 750, "tipo_consentimiento": "consentimiento_facial", "orden": 5 },
-    { "slug": "facial-anti-acne", "categoria": "faciales", "nombre": "Tratamiento anti acné", "precio": 750, "tipo_consentimiento": "consentimiento_facial", "orden": 6 },
+    { "slug": "facial-anti-acne", "categoria": "faciales", "nombre": "Tratamiento antiacné", "precio": 750, "tipo_consentimiento": "consentimiento_facial", "orden": 6 },
 
     { "slug": "reductivo-zona", "categoria": "corporales", "nombre": "Reductivo (por zona)", "precio": null, "tipo_consentimiento": "consentimiento_corporal", "orden": 1 },
 
@@ -58,7 +59,7 @@
   ],
   "paquetes": [
     { "slug": "express", "nombre": "Paquete Express", "tipo": "combo", "precio": 300, "descripcion": "Ceja, axila y bigote en una sola visita.", "items": [ { "servicio": "cejas", "cantidad": 1 }, { "servicio": "axilas", "cantidad": 1 }, { "servicio": "labio-superior", "cantidad": 1 } ], "orden": 1 },
-    { "slug": "media", "nombre": "Paquete Media", "tipo": "combo", "precio": 520, "descripcion": "Media pierna, axila y bigote. Precio en revisión con la especialista.", "items": [ { "servicio": "media-pierna", "cantidad": 1 }, { "servicio": "axilas", "cantidad": 1 }, { "servicio": "labio-superior", "cantidad": 1 } ], "orden": 2 },
+    { "slug": "media", "nombre": "Paquete Media", "tipo": "combo", "precio": 520, "descripcion": "Media pierna, axila y bigote.", "items": [ { "servicio": "media-pierna", "cantidad": 1 }, { "servicio": "axilas", "cantidad": 1 }, { "servicio": "labio-superior", "cantidad": 1 } ], "orden": 2 },
     { "slug": "rostro", "nombre": "Paquete Rostro", "tipo": "combo", "precio": 420, "descripcion": "Cara con ceja y axila.", "items": [ { "servicio": "cara-con-ceja", "cantidad": 1 }, { "servicio": "axilas", "cantidad": 1 } ], "orden": 3 },
     { "slug": "total", "nombre": "Paquete Total", "tipo": "combo", "precio": 800, "descripcion": "Pierna completa, bikini brasileño y axila.", "items": [ { "servicio": "pierna-completa", "cantidad": 1 }, { "servicio": "bikini-brasileno", "cantidad": 1 }, { "servicio": "axilas", "cantidad": 1 } ], "orden": 4 }
   ],

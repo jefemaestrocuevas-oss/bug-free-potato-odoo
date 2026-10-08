@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, type Sesion } from './api';
+import { borrarEstado } from '../components/reserva/estado';
 
 interface ValorSesion {
   sesion: Sesion | null;
@@ -15,18 +16,28 @@ const Ctx = createContext<ValorSesion | null>(null);
 export function SesionProvider({ children }: { children: ReactNode }) {
   const [sesion, setSesion] = useState<Sesion | null>(null);
   const [cargando, setCargando] = useState(true);
+  const usuarioPrevio = useRef<string | null>(null);
+
+  // Al cerrar sesión o cambiar de usuaria se borra el borrador de reserva de este navegador
+  // (de null a alguien no: iniciar sesión a mitad de la reserva debe conservarlo).
+  const aplicar = (s: Sesion | null) => {
+    const nuevo = s?.user_id ?? null;
+    if (usuarioPrevio.current && usuarioPrevio.current !== nuevo) borrarEstado();
+    usuarioPrevio.current = nuevo;
+    setSesion(s);
+  };
 
   const refrescar = async () => {
-    setSesion(await api.getSesion());
+    aplicar(await api.getSesion());
   };
 
   useEffect(() => {
     let vivo = true;
     api
       .getSesion()
-      .then((s) => vivo && setSesion(s))
+      .then((s) => vivo && aplicar(s))
       .finally(() => vivo && setCargando(false));
-    const quitar = api.onCambioSesion((s) => vivo && setSesion(s));
+    const quitar = api.onCambioSesion((s) => vivo && aplicar(s));
     return () => {
       vivo = false;
       quitar();

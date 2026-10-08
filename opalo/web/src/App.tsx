@@ -1,8 +1,10 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, HashRouter, MemoryRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { Cargando } from './components/ui/Estado';
+import { LimiteError } from './components/ui/LimiteError';
 import { SesionProvider } from './lib/sesion';
 import { RutaProtegida } from './components/ui/RutaProtegida';
 import { LayoutPublico } from './layouts/LayoutPublico';
-import { LayoutAdmin } from './layouts/LayoutAdmin';
 import { CarritoProvider } from './lib/carrito';
 
 import Inicio from './pages/publico/Inicio';
@@ -19,18 +21,21 @@ import Entrar from './pages/cuenta/Entrar';
 import MiCuenta from './pages/cuenta/MiCuenta';
 import FirmarPendiente from './pages/cuenta/FirmarPendiente';
 
-import AdminResumen from './pages/admin/Resumen';
-import AdminAgenda from './pages/admin/Agenda';
-import AdminClientes from './pages/admin/Clientes';
-import AdminExpediente from './pages/admin/Expediente';
-import AdminPedidos from './pages/admin/Pedidos';
-import AdminInventario from './pages/admin/Inventario';
-import AdminCostos from './pages/admin/Costos';
-import AdminGastos from './pages/admin/Gastos';
-import AdminResultados from './pages/admin/Resultados';
-import AdminCatalogo from './pages/admin/Catalogo';
-import AdminEquipo from './pages/admin/EquipoAdmin';
-import AdminPoliticas from './pages/admin/PoliticasAdmin';
+// El panel interno se carga aparte: el sitio público pesa menos y un error del panel
+// no tumba el sitio (lo contiene su propio ErrorBoundary).
+const LayoutAdmin = lazy(() => import('./layouts/LayoutAdmin').then((m) => ({ default: m.LayoutAdmin })));
+const AdminResumen = lazy(() => import('./pages/admin/Resumen'));
+const AdminAgenda = lazy(() => import('./pages/admin/Agenda'));
+const AdminClientes = lazy(() => import('./pages/admin/Clientes'));
+const AdminExpediente = lazy(() => import('./pages/admin/Expediente'));
+const AdminPedidos = lazy(() => import('./pages/admin/Pedidos'));
+const AdminInventario = lazy(() => import('./pages/admin/Inventario'));
+const AdminCostos = lazy(() => import('./pages/admin/Costos'));
+const AdminGastos = lazy(() => import('./pages/admin/Gastos'));
+const AdminResultados = lazy(() => import('./pages/admin/Resultados'));
+const AdminCatalogo = lazy(() => import('./pages/admin/Catalogo'));
+const AdminEquipo = lazy(() => import('./pages/admin/EquipoAdmin'));
+const AdminPoliticas = lazy(() => import('./pages/admin/PoliticasAdmin'));
 
 // `VITE_ROUTER=hash` (sitio estático sin reescrituras) usa rutas con #;
 // `VITE_ROUTER=memory` (vista previa incrustada) no toca la URL.
@@ -57,7 +62,18 @@ export function App() {
               <Route path="cuenta/firmar/:citaId" element={<RutaProtegida><FirmarPendiente /></RutaProtegida>} />
               <Route path="*" element={<NoEncontrada />} />
             </Route>
-            <Route path="admin" element={<RutaProtegida personal><LayoutAdmin /></RutaProtegida>}>
+            <Route
+              path="admin"
+              element={
+                <RutaProtegida personal>
+                  <LimiteError lugar="el panel interno">
+                    <Suspense fallback={<Cargando texto="Abriendo el panel…" />}>
+                      <LayoutAdmin />
+                    </Suspense>
+                  </LimiteError>
+                </RutaProtegida>
+              }
+            >
               <Route index element={<AdminResumen />} />
               <Route path="agenda" element={<AdminAgenda />} />
               <Route path="clientes" element={<AdminClientes />} />

@@ -28,7 +28,7 @@ body {
 img, svg { max-width: 100%; }
 a { color: var(--verde); text-underline-offset: 3px; }
 a:hover { color: var(--verde-osc); }
-h1, h2, h3, h4 { font-family: var(--display); font-weight: 600; line-height: 1.12; margin: 0 0 0.5em; color: var(--tinta); text-wrap: balance; }
+h1, h2, h3, h4 { font-variant-numeric: lining-nums; font-family: var(--display); font-weight: 600; line-height: 1.12; margin: 0 0 0.5em; color: var(--tinta); text-wrap: balance; }
 h1 { font-size: clamp(2.2rem, 5vw, 3.6rem); }
 h2 { font-size: clamp(1.7rem, 3.4vw, 2.5rem); }
 h3 { font-size: 1.45rem; }
@@ -52,13 +52,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .entre { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 
 /* Texto */
-.eyebrow { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--oro); margin: 0 0 8px; }
+.eyebrow { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--oro-osc); margin: 0 0 8px; }
 .titulo { font-family: var(--display); color: var(--verde); }
 .subtitulo { font-size: 1.1rem; color: var(--tinta-2); max-width: 60ch; }
 .texto-2 { color: var(--tinta-2); }
 .texto-3 { color: var(--tinta-3); }
 .pequeno { font-size: 0.875rem; }
-.num { font-variant-numeric: tabular-nums; }
+.num { font-variant-numeric: lining-nums tabular-nums; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 /* Botones */
@@ -74,8 +74,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn-primario:hover:not(:disabled) { background: var(--verde-osc); color: #fff; }
 .btn-secundario { border-color: var(--verde); color: var(--verde); background: var(--superficie); }
 .btn-secundario:hover:not(:disabled) { background: var(--verde-suave); }
-.btn-oro { background: var(--oro); color: #fff; }
-.btn-oro:hover:not(:disabled) { background: var(--oro-osc); color: #fff; }
+.btn-oro { background: var(--oro-osc); color: #fff; }
+.btn-oro:hover:not(:disabled) { background: var(--tinta); color: #fff; }
 .btn-texto { color: var(--verde); padding: 0 8px; min-height: 36px; }
 .btn-texto:hover:not(:disabled) { background: var(--verde-suave); }
 .btn-peligro { border-color: var(--error); color: var(--error); background: var(--superficie); }
@@ -127,7 +127,7 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.45; }
 .tabla th { text-align: left; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--tinta-3); padding: 10px 12px; border-bottom: 1px solid var(--linea); white-space: nowrap; background: var(--fondo-alt); }
 .tabla td { padding: 10px 12px; border-bottom: 1px solid var(--linea-2); vertical-align: middle; }
 .tabla tr:last-child td { border-bottom: 0; }
-.tabla td.num, .tabla th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.tabla td.num, .tabla th.num { text-align: right; font-variant-numeric: lining-nums tabular-nums; }
 
 /* Pestañas */
 .pestanas { display: flex; gap: 4px; border-bottom: 1px solid var(--linea); margin-bottom: 20px; overflow-x: auto; }
